@@ -7,7 +7,6 @@ import "./MapView.css";
 
 const MAP_CENTER = { lat: 1.35, lng: 103.82 };
 const MAP_ZOOM = 9;
-let googleLoaded = false;
 let loaderPromise = null;
 
 function smoothMove(marker, newLat, newLng, ms = 1600) {
@@ -37,7 +36,6 @@ export default function MapView({ vessels, selectedVessel, onVesselClick, trailD
   const pulseTimer  = useRef(null);
   const [coords,    setCoords]   = useState(null);
   const [mapStyle,  setMapStyle] = useState("nautical");
-  const [tooltip,   setTooltip]  = useState(null); // { name, speed, x, y }
 
   // ── INIT ──────────────────────────────────────────────────
   useEffect(() => {
@@ -50,7 +48,6 @@ export default function MapView({ vessels, selectedVessel, onVesselClick, trailD
     }
     loaderPromise.then(() => {
       if (mapObj.current) return;
-      googleLoaded = true;
       const map = new window.google.maps.Map(mapRef.current, {
         center: MAP_CENTER, zoom: MAP_ZOOM,
         mapTypeId: "roadmap", zoomControl: true,
