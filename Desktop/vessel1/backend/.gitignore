@@ -1,0 +1,18 @@
+# Node
+node_modules/
+**/node_modules/
+
+# Environment
+.env
+**/.env
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+
+# Secrets
+service-account.json
+backend/service-account.json
