@@ -1,5 +1,5 @@
 // src/services/api.js
-const BASE = process.env.REACT_APP_API_URL || "https://vessel-backendsl.onrender.com/api";
+const BASE = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.com/api";
 
 async function call(path) {
   const url = `${BASE}${path}`;
