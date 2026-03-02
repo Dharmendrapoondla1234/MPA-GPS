@@ -3,37 +3,43 @@ require("dotenv").config();
 const { BigQuery } = require("@google-cloud/bigquery");
 const logger = require("../utils/logger");
 
-const PROJECT    = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
-const DATASET    = process.env.BIGQUERY_DATASET    || "MPA";
-const TABLE      = process.env.BIGQUERY_TABLE      || "MPA_VesselPositionsSnapshot";
-const USERS_TABLE = `\`${PROJECT}.${DATASET}.MPA_Users\``;
+const PROJECT     = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
+const DATASET     = process.env.BIGQUERY_DATASET    || "MPA";
+const TABLE       = process.env.BIGQUERY_TABLE      || "MPA_VesselPositionsSnapshot";
 const FULL_TABLE  = `\`${PROJECT}.${DATASET}.${TABLE}\``;
+const USERS_TABLE = `\`${PROJECT}.${DATASET}.MPA_Users\``;
+
+// BigQuery location — MUST match where your dataset is created
+const BQ_LOCATION = process.env.BIGQUERY_LOCATION || "US";
 
 let bigquery;
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
   try {
     const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-    bigquery = new BigQuery({ credentials, projectId: credentials.project_id });
+    bigquery = new BigQuery({
+      credentials,
+      projectId: credentials.project_id,
+      location:  BQ_LOCATION,
+    });
     logger.info("✅ BigQuery using JSON credentials");
   } catch (e) {
     logger.error("❌ Invalid GOOGLE_APPLICATION_CREDENTIALS_JSON:", e.message);
     process.exit(1);
   }
 } else {
-  bigquery = new BigQuery({ projectId: PROJECT });
+  bigquery = new BigQuery({ projectId: PROJECT, location: BQ_LOCATION });
   logger.info("✅ BigQuery using Application Default Credentials");
 }
 
 function sanitize(str) {
   if (!str) return "";
-  return String(str).replace(/['\"\\;`]/g, "").substring(0, 200);
+  return String(str).replace(/['"\\;`]/g, "").substring(0, 200);
 }
 
 // ════════════════════════════════════════════
 //  USER AUTH — BigQuery MPA_Users table
 // ════════════════════════════════════════════
 
-// Check if email already exists
 async function getUserByEmail(email) {
   const em = sanitize(email.toLowerCase().trim());
   const query = `
@@ -43,11 +49,10 @@ async function getUserByEmail(email) {
       AND is_active = TRUE
     LIMIT 1
   `;
-  const [rows] = await bigquery.query({ query });
+  const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
   return rows[0] || null;
 }
 
-// Register new user
 async function createUser({ id, name, email, passwordHash, role, avatar }) {
   const query = `
     INSERT INTO ${USERS_TABLE}
@@ -64,11 +69,10 @@ async function createUser({ id, name, email, passwordHash, role, avatar }) {
       TRUE
     )
   `;
-  await bigquery.query({ query });
+  await bigquery.query({ query, location: BQ_LOCATION });
   logger.info(`[BQ] User created: ${email}`);
 }
 
-// Update last login timestamp
 async function updateLastLogin(email) {
   const em = sanitize(email.toLowerCase().trim());
   const query = `
@@ -76,7 +80,9 @@ async function updateLastLogin(email) {
     SET last_login = CURRENT_TIMESTAMP()
     WHERE LOWER(email) = '${em}'
   `;
-  try { await bigquery.query({ query }); } catch (e) {
+  try {
+    await bigquery.query({ query, location: BQ_LOCATION });
+  } catch (e) {
     logger.warn(`[BQ] updateLastLogin failed: ${e.message}`);
   }
 }
@@ -85,11 +91,17 @@ async function updateLastLogin(email) {
 //  VESSEL QUERIES
 // ════════════════════════════════════════════
 
-async function getLatestVessels({ search="", vesselType="", speedMin=null, speedMax=null, limit=5000 } = {}) {
+async function getLatestVessels({
+  search="", vesselType="", speedMin=null, speedMax=null, limit=5000
+} = {}) {
   const conditions = [];
   if (search) {
     const s = sanitize(search);
-    conditions.push(`(LOWER(vessel_name) LIKE '%${s.toLowerCase()}%' OR CAST(imo_number AS STRING) LIKE '%${s}%' OR CAST(mmsi_number AS STRING) LIKE '%${s}%')`);
+    conditions.push(
+      `(LOWER(vessel_name) LIKE '%${s.toLowerCase()}%'` +
+      ` OR CAST(imo_number AS STRING) LIKE '%${s}%'` +
+      ` OR CAST(mmsi_number AS STRING) LIKE '%${s}%')`
+    );
   }
   if (vesselType) conditions.push(`vessel_type = '${sanitize(vesselType)}'`);
   if (speedMin !== null && !isNaN(speedMin)) conditions.push(`speed >= ${parseFloat(speedMin)}`);
@@ -120,8 +132,9 @@ async function getLatestVessels({ search="", vesselType="", speedMin=null, speed
     ORDER BY effective_timestamp DESC
     LIMIT ${Math.min(parseInt(limit) || 5000, 10000)}
   `;
+
   const start = Date.now();
-  const [rows] = await bigquery.query({ query });
+  const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
   logger.info(`[BQ] getLatestVessels → ${rows.length} distinct vessels in ${Date.now()-start}ms`);
   return rows;
 }
@@ -142,7 +155,7 @@ async function getVesselHistory(imoNumber, hours = 24) {
     ORDER BY effective_timestamp ASC
     LIMIT 2000
   `;
-  const [rows] = await bigquery.query({ query });
+  const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
   return rows;
 }
 
@@ -151,7 +164,7 @@ async function getVesselTypes() {
     SELECT DISTINCT vessel_type FROM ${FULL_TABLE}
     WHERE vessel_type IS NOT NULL ORDER BY vessel_type LIMIT 100
   `;
-  const [rows] = await bigquery.query({ query });
+  const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
   return rows.map(r => r.vessel_type).filter(Boolean);
 }
 
@@ -175,13 +188,13 @@ async function getFleetStats() {
       COUNT(DISTINCT flag)                               AS flag_count
     FROM latest
   `;
-  const [rows] = await bigquery.query({ query });
+  const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
   return rows[0] || {};
 }
 
 async function healthCheck() {
   try {
-    const [rows] = await bigquery.query({ query: "SELECT 1 AS ok" });
+    const [rows] = await bigquery.query({ query: "SELECT 1 AS ok", location: BQ_LOCATION });
     return rows[0]?.ok === 1;
   } catch (e) {
     logger.error("❌ BigQuery health check failed:", e.message);
@@ -190,8 +203,7 @@ async function healthCheck() {
 }
 
 module.exports = {
-  // Auth
   getUserByEmail, createUser, updateLastLogin,
-  // Vessels
-  getLatestVessels, getVesselHistory, getVesselTypes, getFleetStats, healthCheck,
+  getLatestVessels, getVesselHistory,
+  getVesselTypes, getFleetStats, healthCheck,
 };
