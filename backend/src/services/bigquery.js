@@ -3,23 +3,25 @@ require("dotenv").config();
 const { BigQuery } = require("@google-cloud/bigquery");
 const logger = require("../utils/logger");
 
-const PROJECT     = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
-const DATASET     = process.env.BIGQUERY_DATASET    || "MPA";
-const TABLE       = process.env.BIGQUERY_TABLE      || "MPA_VesselPositionsSnapshot";
-const FULL_TABLE  = `\`${PROJECT}.${DATASET}.${TABLE}\``;
+const PROJECT = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
+const DATASET = process.env.BIGQUERY_DATASET || "MPA";
+const TABLE = process.env.BIGQUERY_TABLE || "MPA_VesselPositionsSnapshot";
+const FULL_TABLE = `\`${PROJECT}.${DATASET}.${TABLE}\``;
 const USERS_TABLE = `\`${PROJECT}.${DATASET}.MPA_Users\``;
 
 // BigQuery location — MUST match where your dataset is created
-const BQ_LOCATION = process.env.BIGQUERY_LOCATION || "US";
+const BQ_LOCATION = process.env.BIGQUERY_LOCATION || "asia-southeast1";
 
 let bigquery;
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
   try {
-    const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+    const credentials = JSON.parse(
+      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON,
+    );
     bigquery = new BigQuery({
       credentials,
       projectId: credentials.project_id,
-      location:  BQ_LOCATION,
+      location: BQ_LOCATION,
     });
     logger.info("✅ BigQuery using JSON credentials");
   } catch (e) {
@@ -33,7 +35,9 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
 
 function sanitize(str) {
   if (!str) return "";
-  return String(str).replace(/['"\\;`]/g, "").substring(0, 200);
+  return String(str)
+    .replace(/['"\\;`]/g, "")
+    .substring(0, 200);
 }
 
 // ════════════════════════════════════════════
@@ -92,20 +96,26 @@ async function updateLastLogin(email) {
 // ════════════════════════════════════════════
 
 async function getLatestVessels({
-  search="", vesselType="", speedMin=null, speedMax=null, limit=5000
+  search = "",
+  vesselType = "",
+  speedMin = null,
+  speedMax = null,
+  limit = 5000,
 } = {}) {
   const conditions = [];
   if (search) {
     const s = sanitize(search);
     conditions.push(
       `(LOWER(vessel_name) LIKE '%${s.toLowerCase()}%'` +
-      ` OR CAST(imo_number AS STRING) LIKE '%${s}%'` +
-      ` OR CAST(mmsi_number AS STRING) LIKE '%${s}%')`
+        ` OR CAST(imo_number AS STRING) LIKE '%${s}%'` +
+        ` OR CAST(mmsi_number AS STRING) LIKE '%${s}%')`,
     );
   }
   if (vesselType) conditions.push(`vessel_type = '${sanitize(vesselType)}'`);
-  if (speedMin !== null && !isNaN(speedMin)) conditions.push(`speed >= ${parseFloat(speedMin)}`);
-  if (speedMax !== null && !isNaN(speedMax)) conditions.push(`speed <= ${parseFloat(speedMax)}`);
+  if (speedMin !== null && !isNaN(speedMin))
+    conditions.push(`speed >= ${parseFloat(speedMin)}`);
+  if (speedMax !== null && !isNaN(speedMax))
+    conditions.push(`speed <= ${parseFloat(speedMax)}`);
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const query = `
@@ -135,7 +145,9 @@ async function getLatestVessels({
 
   const start = Date.now();
   const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
-  logger.info(`[BQ] getLatestVessels → ${rows.length} distinct vessels in ${Date.now()-start}ms`);
+  logger.info(
+    `[BQ] getLatestVessels → ${rows.length} distinct vessels in ${Date.now() - start}ms`,
+  );
   return rows;
 }
 
@@ -165,7 +177,7 @@ async function getVesselTypes() {
     WHERE vessel_type IS NOT NULL ORDER BY vessel_type LIMIT 100
   `;
   const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
-  return rows.map(r => r.vessel_type).filter(Boolean);
+  return rows.map((r) => r.vessel_type).filter(Boolean);
 }
 
 async function getFleetStats() {
@@ -194,7 +206,10 @@ async function getFleetStats() {
 
 async function healthCheck() {
   try {
-    const [rows] = await bigquery.query({ query: "SELECT 1 AS ok", location: BQ_LOCATION });
+    const [rows] = await bigquery.query({
+      query: "SELECT 1 AS ok",
+      location: BQ_LOCATION,
+    });
     return rows[0]?.ok === 1;
   } catch (e) {
     logger.error("❌ BigQuery health check failed:", e.message);
@@ -203,7 +218,12 @@ async function healthCheck() {
 }
 
 module.exports = {
-  getUserByEmail, createUser, updateLastLogin,
-  getLatestVessels, getVesselHistory,
-  getVesselTypes, getFleetStats, healthCheck,
+  getUserByEmail,
+  createUser,
+  updateLastLogin,
+  getLatestVessels,
+  getVesselHistory,
+  getVesselTypes,
+  getFleetStats,
+  healthCheck,
 };
