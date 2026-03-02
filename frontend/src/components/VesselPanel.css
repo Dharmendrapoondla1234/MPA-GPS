@@ -63,3 +63,31 @@
 .vp-compact-type { font-family:var(--font-mono); font-size:9px; color:var(--text-3); flex-shrink:0; }
 .vp-compact-spd { font-family:var(--font-mono); font-size:11px; font-weight:700; flex-shrink:0; }
 .vp-compact-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+/* Distinct count row */
+.vp-distinct-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+.vp-dist-chip {
+  font-family:var(--font-mono); font-size:9px; color:var(--text-3);
+  background:rgba(0,229,255,0.05); border:1px solid rgba(0,229,255,0.12);
+  border-radius:4px; padding:2px 7px; letter-spacing:0.04em;
+}
+.vp-dist-chip b { color:var(--cyan); font-weight:700; }
+
+/* Panel search */
+.vp-panel-search {
+  display:flex; align-items:center; gap:6px;
+  background:rgba(255,255,255,0.02); border:1px solid var(--border);
+  border-radius:7px; padding:0 8px; margin-bottom:8px;
+  transition:border-color var(--t1),background var(--t1);
+}
+.vp-panel-search:focus-within { border-color:var(--border-hi); background:rgba(0,229,255,0.04); }
+.vp-panel-search svg { color:var(--text-3); flex-shrink:0; }
+.vp-panel-input {
+  background:none; border:none; outline:none; color:var(--text-1);
+  font-family:var(--font-ui); font-size:12px; width:100%; padding:8px 0;
+}
+.vp-panel-input::placeholder { color:var(--text-3); font-size:11px; }
+.vp-panel-clear { background:none; border:none; color:var(--text-3); cursor:pointer; font-size:10px; }
+.vp-panel-clear:hover { color:var(--red); }
+
+/* Compact IMO */
+.vp-compact-imo { flex-shrink:0; }
