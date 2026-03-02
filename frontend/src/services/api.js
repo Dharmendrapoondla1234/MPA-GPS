@@ -17,13 +17,14 @@ async function call(path) {
     return json?.data !== undefined ? json.data : json;
   } catch (err) {
     if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))
-      throw new Error("Backend sleeping — wait 30s and retry");
+      throw new Error("Backend sleeping — wait 30 seconds and retry");
     throw err;
   }
 }
 
-// ── Vessel API ───────────────────────────────────────────────
-export async function fetchVessels({ search="", vesselType="", speedMin=null, speedMax=null, limit=5000 } = {}) {
+export async function fetchVessels({
+  search="", vesselType="", speedMin=null, speedMax=null, limit=5000
+} = {}) {
   const p = new URLSearchParams();
   if (search)           p.set("search", search);
   if (vesselType)       p.set("vesselType", vesselType);
@@ -36,20 +37,29 @@ export async function fetchVessels({ search="", vesselType="", speedMin=null, sp
 export async function fetchVesselHistory(imo, hours = 24) {
   return call(`/vessels/${encodeURIComponent(imo)}/history?hours=${hours}`);
 }
-
 export async function fetchVesselTypes() { return call("/vessel-types"); }
 export async function fetchFleetStats()  { return call("/stats"); }
 
-// ── Auth — stored in BigQuery MPA_Users table ────────────────
+// ── Auth ─────────────────────────────────────────────────────
 async function authPost(endpoint, body) {
-  const res = await fetch(`${BASE}/auth/${endpoint}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE}/auth/${endpoint}`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(body),
+    });
+  } catch (networkErr) {
+    throw new Error("Cannot reach server — backend may be sleeping, wait 30s and retry");
+  }
+
   const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("application/json"))
-    throw new Error("Server error — please try again");
+  if (!ct.includes("application/json")) {
+    const raw = await res.text().catch(() => "");
+    console.error("Non-JSON response:", raw.slice(0, 300));
+    throw new Error(`Server error (HTTP ${res.status}) — check Render logs`);
+  }
+
   return res.json();
 }
 
