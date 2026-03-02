@@ -1,102 +1,120 @@
 // backend/src/routes/auth.js
-// Real user registration + login stored in backend memory (or file for persistence)
+// All user data stored in BigQuery: photons-377606.MPA.MPA_Users
 const express = require("express");
 const router  = express.Router();
 const crypto  = require("crypto");
-const path    = require("path");
-const fs      = require("fs");
-
-// ── Simple persistent JSON store (file-based, no DB needed) ──
-const USERS_FILE = path.join(__dirname, "../../users.json");
-
-function readUsers() {
-  try {
-    if (!fs.existsSync(USERS_FILE)) return [];
-    return JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
-  } catch { return []; }
-}
-
-function writeUsers(users) {
-  try { fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2)); }
-  catch (e) { console.error("Failed to write users:", e.message); }
-}
+const { getUserByEmail, createUser, updateLastLogin } = require("../services/bigquery");
+const logger  = require("../utils/logger");
 
 function hashPassword(pw) {
-  return crypto.createHash("sha256").update(pw + "mt_salt_2024").digest("hex");
+  return crypto.createHash("sha256").update(pw + "mt_mpa_salt_2024").digest("hex");
 }
 
 function generateToken(user) {
-  const payload = Buffer.from(JSON.stringify({
+  return Buffer.from(JSON.stringify({
     id: user.id, email: user.email, name: user.name, iat: Date.now()
   })).toString("base64");
-  return payload;
 }
 
 // ── POST /api/auth/register ──────────────────────────────────
-router.post("/register", (req, res) => {
-  const { name, email, password } = req.body || {};
-  if (!name || !email || !password) {
-    return res.status(400).json({ success: false, error: "All fields required" });
+router.post("/register", async (req, res) => {
+  try {
+    const { name, email, password } = req.body || {};
+
+    // Validate inputs
+    if (!name || !email || !password)
+      return res.status(400).json({ success:false, error:"All fields required" });
+    if (password.length < 6)
+      return res.status(400).json({ success:false, error:"Password must be at least 6 characters" });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res.status(400).json({ success:false, error:"Invalid email address" });
+
+    // Check if email already registered in BigQuery
+    const existing = await getUserByEmail(email);
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        error: "already_registered",
+        message: "Email already registered. Please sign in."
+      });
+    }
+
+    // Create new user in BigQuery
+    const user = {
+      id:           crypto.randomUUID(),
+      name:         name.trim(),
+      email:        email.toLowerCase().trim(),
+      passwordHash: hashPassword(password),
+      role:         "Operator",
+      avatar:       name.trim()[0].toUpperCase(),
+    };
+
+    await createUser(user);
+    logger.info(`✅ New user registered: ${email}`);
+
+    const safeUser = { id:user.id, name:user.name, email:user.email, role:user.role, avatar:user.avatar };
+    return res.status(201).json({
+      success: true,
+      data: { ...safeUser, token: generateToken(user) }
+    });
+
+  } catch (err) {
+    logger.error("Register error:", err.message);
+    return res.status(500).json({ success:false, error:"Registration failed. Please try again." });
   }
-  if (password.length < 6) {
-    return res.status(400).json({ success: false, error: "Password must be 6+ characters" });
-  }
-  const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRx.test(email)) {
-    return res.status(400).json({ success: false, error: "Invalid email address" });
-  }
-
-  const users = readUsers();
-  if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
-    return res.status(409).json({ success: false, error: "already_registered", message: "Email already registered. Please sign in." });
-  }
-
-  const user = {
-    id:        crypto.randomUUID(),
-    name:      name.trim(),
-    email:     email.toLowerCase().trim(),
-    password:  hashPassword(password),
-    role:      "Operator",
-    avatar:    name.trim()[0].toUpperCase(),
-    createdAt: new Date().toISOString(),
-  };
-
-  users.push(user);
-  writeUsers(users);
-
-  const { password: _, ...safeUser } = user;
-  const token = generateToken(user);
-
-  return res.status(201).json({ success: true, data: { ...safeUser, token } });
 });
 
 // ── POST /api/auth/login ─────────────────────────────────────
-router.post("/login", (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ success: false, error: "Email and password required" });
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password)
+      return res.status(400).json({ success:false, error:"Email and password required" });
+
+    // Lookup user in BigQuery
+    const user = await getUserByEmail(email);
+    if (!user) {
+      return res.status(401).json({ success:false, error:"No account found with this email. Please register." });
+    }
+
+    // Verify password
+    if (user.password_hash !== hashPassword(password)) {
+      return res.status(401).json({ success:false, error:"Incorrect password. Please try again." });
+    }
+
+    // Update last login timestamp
+    await updateLastLogin(email);
+    logger.info(`✅ User logged in: ${email}`);
+
+    const safeUser = {
+      id:     user.id,
+      name:   user.name,
+      email:  user.email,
+      role:   user.role    || "Operator",
+      avatar: user.avatar  || user.name[0].toUpperCase(),
+    };
+    return res.json({
+      success: true,
+      data: { ...safeUser, token: generateToken(safeUser) }
+    });
+
+  } catch (err) {
+    logger.error("Login error:", err.message);
+    return res.status(500).json({ success:false, error:"Login failed. Please try again." });
   }
-
-  const users = readUsers();
-  const user  = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-
-  if (!user || user.password !== hashPassword(password)) {
-    return res.status(401).json({ success: false, error: "Invalid email or password" });
-  }
-
-  const { password: _, ...safeUser } = user;
-  const token = generateToken(user);
-
-  return res.json({ success: true, data: { ...safeUser, token } });
 });
 
 // ── GET /api/auth/check-email?email=x ───────────────────────
-router.get("/check-email", (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.json({ exists: false });
-  const users = readUsers();
-  const exists = !!users.find(u => u.email.toLowerCase() === email.toLowerCase());
-  return res.json({ exists });
+router.get("/check-email", async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) return res.json({ exists:false });
+    const user = await getUserByEmail(email);
+    return res.json({ exists: !!user });
+  } catch (err) {
+    logger.error("Check-email error:", err.message);
+    return res.json({ exists:false });
+  }
 });
 
 module.exports = router;

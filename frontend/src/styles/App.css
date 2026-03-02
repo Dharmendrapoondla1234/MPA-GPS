@@ -22,89 +22,103 @@
   flex-shrink: 0;
   height: 100%;
   overflow: hidden;
-  transition: width var(--t-med, 240ms), opacity var(--t-med, 240ms);
+  transition: width var(--t-med), opacity var(--t-med);
   z-index: 10;
   position: relative;
 }
-.app-left-panel.closed { width: 0; opacity: 0; pointer-events: none; }
+
+.app-left-panel.closed {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 
 /* ── MAP AREA ────────────────────────────────────────── */
-.app-map-area { flex: 1; position: relative; overflow: hidden; }
+.app-map-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
 
 .map-legend-overlay {
-  position: absolute; bottom: 28px; left: 20px;
-  z-index: 10; pointer-events: none;
+  position: absolute;
+  bottom: 28px;
+  left: 20px;
+  z-index: 10;
+  pointer-events: none;
 }
 
 .map-loading-overlay {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 16px; background: rgba(4, 8, 15, 0.7); backdrop-filter: blur(4px);
-  z-index: 20; font-family: var(--font-label, var(--font-mono));
-  font-size: 12px; color: var(--cyan); letter-spacing: 0.12em; text-transform: uppercase;
-}
-.map-loading-spinner {
-  width: 48px; height: 48px;
-  border: 2px solid var(--border); border-top-color: var(--cyan);
-  border-radius: 50%; animation: spin 0.8s linear infinite;
-  box-shadow: 0 0 20px var(--cyan-glow);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(4, 8, 15, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 20;
+  font-family: var(--font-label);
+  font-size: 12px;
+  color: var(--cyan);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
-/* Subtle syncing badge — doesn't block map */
-.map-sync-badge {
-  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 6px;
-  background: rgba(4,8,15,0.85); border: 1px solid rgba(0,229,255,0.2);
-  border-radius: 20px; padding: 4px 12px;
-  font-family: var(--font-mono); font-size: 9px; color: var(--cyan);
-  letter-spacing: 0.15em; z-index: 15; backdrop-filter: blur(8px);
-  animation: fadeUp 0.2s ease both;
-}
-.map-sync-dot {
-  width: 6px; height: 6px; border-radius: 50%; background: var(--cyan);
-  animation: blink 0.8s infinite;
+.map-loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 2px solid var(--border);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  box-shadow: 0 0 20px var(--cyan-glow);
 }
 
 /* ── RIGHT DETAIL PANEL ──────────────────────────────── */
 .app-right-panel {
-  width: 0; flex-shrink: 0; height: 100%;
-  overflow: hidden; transition: width 240ms ease, opacity 240ms ease;
-  z-index: 10; opacity: 0;
-}
-.app-right-panel.open { width: var(--detail-w); opacity: 1; }
-
-/* ── MOBILE ──────────────────────────────────────────── */
-.app-mobile-body {
-  flex: 1; overflow: hidden; position: relative;
-  display: none;
-}
-.app-mobile-pane {
-  position: absolute; inset: 0;
-  display: none; overflow: hidden;
-}
-.app-mobile-pane.active { display: block; }
-
-.app-no-sel {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  height: 100%; gap: 14px; padding: 24px; text-align: center;
-}
-.app-no-sel span { font-size: 48px; opacity: 0.3; }
-.app-no-sel p { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); letter-spacing: 0.06em; line-height: 1.6; }
-
-/* ── RESPONSIVE BREAKPOINTS ─────────────────────────── */
-@media (max-width: 767px) {
-  .app-body { display: none; }
-  .app-mobile-body { display: block; }
+  width: 0;
+  flex-shrink: 0;
+  height: 100%;
+  overflow: hidden;
+  transition: width var(--t-med), opacity var(--t-med);
+  z-index: 10;
+  opacity: 0;
 }
 
-@media (min-width: 768px) and (max-width: 1099px) {
-  :root { --panel-w: 260px; --detail-w: 300px; }
+.app-right-panel.open {
+  width: var(--detail-w);
+  opacity: 1;
 }
 
-/* Coordinate HUD */
+/* ── COORDINATE HUD ──────────────────────────────────── */
 .map-coord-hud {
-  position: absolute; bottom: 28px; right: 20px; z-index: 10;
-  font-family: var(--font-mono); font-size: 10px; color: var(--text-muted, var(--text-3));
-  background: rgba(4,8,15,0.7); border: 1px solid var(--border);
-  padding: 6px 12px; border-radius: 4px; letter-spacing: 0.08em; backdrop-filter: blur(8px);
+  position: absolute;
+  bottom: 28px;
+  right: 20px;
+  z-index: 10;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(4, 8, 15, 0.7);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 4px;
+  letter-spacing: 0.08em;
+  backdrop-filter: blur(8px);
+}
+
+/* ── RADAR COMPASS WIDGET ────────────────────────────── */
+.map-compass {
+  position: absolute;
+  top: 80px;
+  right: 20px;
+  z-index: 10;
+  width: 64px;
+  height: 64px;
+}
+
+.map-compass svg {
+  filter: drop-shadow(0 0 8px var(--cyan-glow));
 }

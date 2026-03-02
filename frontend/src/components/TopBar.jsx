@@ -1,6 +1,7 @@
-// src/components/TopBar.jsx — Responsive: mobile tabs + desktop panel toggle
+// src/components/TopBar.jsx
 import React, { useState } from "react";
 import { useCountdown } from "../hooks/useCountdown";
+import { logoutUser } from "../services/api";
 import "./TopBar.css";
 
 export default function TopBar({
@@ -10,251 +11,23 @@ export default function TopBar({
   stats,
   nextRefresh,
   loading,
-  syncing,
   onRefresh,
   panelOpen,
   onTogglePanel,
   user,
   onLogout,
-  isMobile,
-  mobileView,
-  onMobileViewChange,
 }) {
   const countdown = useCountdown(nextRefresh);
-  const [userMenu, setUserMenu] = useState(false);
-  const [showFilter, setShowFilter] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   function handleLogout() {
-    if (onLogout) onLogout();
+    logoutUser();
+    onLogout();
   }
 
-  const SpeedFilter = () => (
-    <div className="tb-filter-group">
-      <label className="tb-filter-label">SPEED</label>
-      <select
-        className="tb-select"
-        value={filters.speedRange}
-        onChange={(e) => {
-          const v = e.target.value;
-          const m = {
-            "": { speedMin: null, speedMax: null },
-            stopped: { speedMin: null, speedMax: 0.5 },
-            slow: { speedMin: 0.5, speedMax: 5 },
-            medium: { speedMin: 5, speedMax: 12 },
-            fast: { speedMin: 12, speedMax: null },
-          };
-          onFiltersChange({ ...filters, speedRange: v, ...m[v] });
-        }}
-      >
-        <option value="">All Speeds</option>
-        <option value="stopped">⚓ Stopped</option>
-        <option value="slow">🐢 Slow 0.5–5 kn</option>
-        <option value="medium">⚡ Medium 5–12 kn</option>
-        <option value="fast">🚀 Fast ≥12 kn</option>
-      </select>
-    </div>
-  );
-  const TypeFilter = () => (
-    <div className="tb-filter-group">
-      <label className="tb-filter-label">TYPE</label>
-      <select
-        className="tb-select"
-        value={filters.vesselType}
-        onChange={(e) =>
-          onFiltersChange({ ...filters, vesselType: e.target.value })
-        }
-      >
-        <option value="">All Types</option>
-        {vesselTypes.map((t) => (
-          <option key={t} value={t}>
-            {t}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-  const UserDropdown = () => (
-    <div className="tb-user-wrap">
-      <button className="tb-avatar" onClick={() => setUserMenu((o) => !o)}>
-        {user?.avatar || "?"}
-      </button>
-      {userMenu && (
-        <div className="tb-user-menu">
-          <div className="tb-user-name">{user?.name}</div>
-          <div className="tb-user-email">{user?.email}</div>
-          <div className="tb-user-role">{user?.role?.toUpperCase()}</div>
-          <hr className="tb-user-hr" />
-          <button className="tb-user-logout" onClick={handleLogout}>
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            Sign Out
-          </button>
-        </div>
-      )}
-    </div>
-  );
-
-  // ── MOBILE ──────────────────────────────────────────────
-  if (isMobile) {
-    const total = stats ? Number(stats.total_vessels || 0) : 0;
-    return (
-      <header className="topbar topbar-mobile">
-        {/* Row 1 */}
-        <div className="tb-mobile-row1">
-          <div
-            className="tb-logo"
-            style={{ borderRight: "none", paddingRight: 0 }}
-          >
-            <div className="tb-sonar">
-              <div className="tb-sonar-ring" />
-              <div
-                className="tb-sonar-ring"
-                style={{ animationDelay: "0.6s" }}
-              />
-              <span className="tb-sonar-dot" />
-            </div>
-            <div>
-              <div className="tb-logo-text" style={{ fontSize: 13 }}>
-                MARINE<span>TRACK</span>
-              </div>
-              <div className="tb-logo-sub">LIVE AIS</div>
-            </div>
-          </div>
-          <div className="tb-right">
-            <div
-              className={`tb-live ${loading ? "loading" : ""}`}
-              style={{ padding: "4px 8px", fontSize: 8 }}
-            >
-              <span className="tb-live-dot" />
-              {loading ? "SYNC" : "LIVE"}
-            </div>
-            <button
-              className={`tb-btn ${showFilter ? "active" : ""}`}
-              onClick={() => setShowFilter((f) => !f)}
-              title="Filters"
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
-            </button>
-            <button
-              className={`tb-btn ${loading ? "spin" : ""}`}
-              onClick={onRefresh}
-              disabled={loading}
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-              >
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
-            </button>
-            <UserDropdown />
-          </div>
-        </div>
-
-        {/* Row 2: Search (always visible, centered) */}
-        <div className="tb-mobile-search">
-          <div className="tb-search-wrap tb-search-full">
-            <svg
-              className="tb-search-icon"
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.35-4.35" />
-            </svg>
-            <input
-              className="tb-search"
-              type="text"
-              placeholder="Search vessel, IMO, MMSI…"
-              value={filters.search}
-              onChange={(e) =>
-                onFiltersChange({ ...filters, search: e.target.value })
-              }
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {filters.search && (
-              <button
-                className="tb-clear"
-                onClick={() => onFiltersChange({ ...filters, search: "" })}
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Row 3: Collapsible filters */}
-        {showFilter && (
-          <div className="tb-mobile-filters">
-            <TypeFilter />
-            <SpeedFilter />
-          </div>
-        )}
-
-        {/* Row 4: View tabs */}
-        <div className="tb-mobile-nav">
-          {[
-            { id: "map", icon: "🗺️", label: "MAP" },
-            {
-              id: "list",
-              icon: "📋",
-              label: "FLEET",
-              badge:
-                total > 0
-                  ? total > 999
-                    ? Math.floor(total / 1000) + "k"
-                    : total
-                  : null,
-            },
-            { id: "detail", icon: "🚢", label: "DETAIL" },
-          ].map((t) => (
-            <button
-              key={t.id}
-              className={`tb-nav-tab ${mobileView === t.id ? "active" : ""}`}
-              onClick={() => onMobileViewChange(t.id)}
-            >
-              <span className="nt-icon">{t.icon}</span>
-              <span>{t.label}</span>
-              {t.badge && <span className="tb-nav-badge">{t.badge}</span>}
-            </button>
-          ))}
-        </div>
-      </header>
-    );
-  }
-
-  // ── DESKTOP / TABLET ─────────────────────────────────────
   return (
     <header className="topbar">
+      {/* Logo */}
       <div className="tb-logo">
         <div className="tb-sonar">
           <div className="tb-sonar-ring" />
@@ -304,9 +77,52 @@ export default function TopBar({
         )}
       </div>
 
-      <TypeFilter />
-      <SpeedFilter />
+      {/* Type filter */}
+      <div className="tb-filter-group">
+        <label className="tb-filter-label">TYPE</label>
+        <select
+          className="tb-select"
+          value={filters.vesselType}
+          onChange={(e) =>
+            onFiltersChange({ ...filters, vesselType: e.target.value })
+          }
+        >
+          <option value="">All Types</option>
+          {vesselTypes.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </div>
 
+      {/* Speed filter */}
+      <div className="tb-filter-group">
+        <label className="tb-filter-label">SPEED</label>
+        <select
+          className="tb-select"
+          value={filters.speedRange}
+          onChange={(e) => {
+            const v = e.target.value;
+            const m = {
+              "": { speedMin: null, speedMax: null },
+              stopped: { speedMin: null, speedMax: 0.5 },
+              slow: { speedMin: 0.5, speedMax: 5 },
+              medium: { speedMin: 5, speedMax: 12 },
+              fast: { speedMin: 12, speedMax: null },
+            };
+            onFiltersChange({ ...filters, speedRange: v, ...m[v] });
+          }}
+        >
+          <option value="">All Speeds</option>
+          <option value="stopped">⚓ Stopped</option>
+          <option value="slow">🐢 Slow 0.5–5 kn</option>
+          <option value="medium">⚡ Medium 5–12 kn</option>
+          <option value="fast">🚀 Fast ≥12 kn</option>
+        </select>
+      </div>
+
+      {/* Stats */}
       <div className="tb-stats">
         <StatPill
           v={stats ? Number(stats.total_vessels || 0).toLocaleString() : "—"}
@@ -321,18 +137,19 @@ export default function TopBar({
         />
         <div className="tb-divider" />
         <StatPill
-          v={stats ? parseFloat(stats.avg_speed || 0).toFixed(1) : "—"}
+          v={stats ? `${parseFloat(stats.avg_speed || 0).toFixed(1)}` : "—"}
           l="AVG KN"
           c="amber"
         />
         <div className="tb-divider" />
         <StatPill
-          v={stats ? parseFloat(stats.max_speed || 0).toFixed(1) : "—"}
+          v={stats ? `${parseFloat(stats.max_speed || 0).toFixed(1)}` : "—"}
           l="MAX KN"
           c="red"
         />
       </div>
 
+      {/* Right controls */}
       <div className="tb-right">
         <div className={`tb-live ${loading ? "loading" : ""}`}>
           <span className="tb-live-dot" />
@@ -370,11 +187,10 @@ export default function TopBar({
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
           </svg>
         </button>
-        {/* Panel toggle — stays top-right on desktop */}
         <button
           className={`tb-btn ${panelOpen ? "active" : ""}`}
           onClick={onTogglePanel}
-          title="Toggle fleet panel"
+          title="Toggle panel"
         >
           <svg
             width="14"
@@ -388,7 +204,40 @@ export default function TopBar({
             <line x1="9" y1="3" x2="9" y2="21" />
           </svg>
         </button>
-        <UserDropdown />
+
+        {/* User avatar */}
+        <div className="tb-user-wrap">
+          <button
+            className="tb-avatar"
+            onClick={() => setUserMenuOpen((o) => !o)}
+            title={user?.email}
+          >
+            {user?.avatar || "?"}
+          </button>
+          {userMenuOpen && (
+            <div className="tb-user-menu">
+              <div className="tb-user-name">{user?.name}</div>
+              <div className="tb-user-email">{user?.email}</div>
+              <div className="tb-user-role">{user?.role?.toUpperCase()}</div>
+              <hr className="tb-user-hr" />
+              <button className="tb-user-logout" onClick={handleLogout}>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

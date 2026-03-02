@@ -106,4 +106,4 @@ a[title="Report a map error"] { display:none !important; }
 @keyframes mvFadeUp {
   from { opacity:0; transform:translateY(8px); }
   to   { opacity:1; transform:translateY(0); }
-}
+}.mv-region { color: var(--cyan, #00e5ff); font-size: 9px; }
