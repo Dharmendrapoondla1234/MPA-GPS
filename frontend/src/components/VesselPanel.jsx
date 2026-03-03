@@ -13,11 +13,12 @@ export default function VesselPanel({
   onSelect,
   loading,
   stats,
+  onMinimize,
+  panelOpen = true,
 }) {
   const [sort, setSort] = useState("speed_desc");
   const [compact, setCompact] = useState(false);
   const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
 
   const filtered = useMemo(() => {
     if (!search) return vessels;
@@ -91,7 +92,7 @@ export default function VesselPanel({
   );
 
   return (
-    <div className={`vp-root ${collapsed ? "vp-collapsed" : ""}`}>
+    <div className="vp-root">
       <div className="vp-header">
         <div className="vp-title-row">
           <span className="vp-label">FLEET</span>
@@ -140,8 +141,8 @@ export default function VesselPanel({
             </button>
             <button
               className="vp-view-btn vp-minimize-btn"
-              onClick={() => setCollapsed((c) => !c)}
-              title={collapsed ? "Expand list" : "Minimize"}
+              onClick={() => onMinimize?.()}
+              title={!panelOpen ? "Expand list" : "Minimize"}
             >
               <svg
                 width="11"
@@ -151,7 +152,7 @@ export default function VesselPanel({
                 stroke="currentColor"
                 strokeWidth="2.5"
               >
-                {collapsed ? (
+                {!panelOpen ? (
                   <polyline points="18 15 12 9 6 15" />
                 ) : (
                   <polyline points="6 9 12 15 18 9" />
@@ -266,7 +267,7 @@ export default function VesselPanel({
       </div>
 
       {/* Body */}
-      {!collapsed &&
+      {panelOpen &&
         (loading && vessels.length === 0 ? (
           <div className="vp-loading">
             <div className="vp-spinner" />

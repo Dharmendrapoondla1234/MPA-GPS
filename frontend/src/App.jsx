@@ -1,25 +1,40 @@
 // src/App.jsx
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import AuthPage         from "./components/Authpage";
-import TopBar           from "./components/TopBar";
-import VesselPanel      from "./components/VesselPanel";
+import AuthPage from "./components/Authpage";
+import TopBar from "./components/TopBar";
+import VesselPanel from "./components/VesselPanel";
 import VesselDetailPanel from "./components/VesselDetailPanel";
-import MapView          from "./components/MapView";
-import SpeedLegend      from "./components/SpeedLegend";
-import ErrorBanner      from "./components/ErrorBanner";
-import { useVessels }   from "./hooks/useVessels";
+import MapView from "./components/MapView";
+import SpeedLegend from "./components/SpeedLegend";
+import ErrorBanner from "./components/ErrorBanner";
+import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import "./styles/App.css";
 
 export default function App() {
-  const [user,           setUser]           = useState(() => getCurrentUser());
-  const [filters,        setFilters]        = useState({ search:"", vesselType:"", speedRange:"", speedMin:null, speedMax:null });
+  const [user, setUser] = useState(() => getCurrentUser());
+  const [filters, setFilters] = useState({
+    search: "",
+    vesselType: "",
+    speedRange: "",
+    speedMin: null,
+    speedMax: null,
+  });
   const [selectedVessel, setSelectedVessel] = useState(null);
-  const [trailData,      setTrailData]      = useState(null);
-  const [panelOpen,      setPanelOpen]      = useState(true);
+  const [trailData, setTrailData] = useState(null);
+  const [panelOpen, setPanelOpen] = useState(true);
   const mapRef = useRef(null); // ref to MapView so we can call panTo from outside
 
-  const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
+  const {
+    vessels,
+    stats,
+    vesselTypes,
+    loading,
+    error,
+    nextRefresh,
+    lastUpdated,
+    refresh,
+  } = useVessels(filters);
 
   // ── Auto-locate vessel when search matches exactly 1 result ─────────
   useEffect(() => {
@@ -45,7 +60,10 @@ export default function App() {
     setTrailData(null);
   }, []);
 
-  const handleLogout = useCallback(() => { logoutUser(); setUser(null); }, []);
+  const handleLogout = useCallback(() => {
+    logoutUser();
+    setUser(null);
+  }, []);
 
   // On Enter key in search — pan to first matching vessel
   const handleSearchEnter = useCallback(() => {
@@ -70,7 +88,7 @@ export default function App() {
         loading={loading}
         onRefresh={refresh}
         panelOpen={panelOpen}
-        onTogglePanel={() => setPanelOpen(p => !p)}
+        onTogglePanel={() => setPanelOpen((p) => !p)}
         lastUpdated={lastUpdated}
         user={user}
         onLogout={handleLogout}
@@ -86,6 +104,8 @@ export default function App() {
             onSelect={handleSelectVessel}
             loading={loading}
             stats={stats}
+            panelOpen={panelOpen}
+            onMinimize={() => setPanelOpen(false)}
           />
         </div>
 
@@ -97,7 +117,9 @@ export default function App() {
             onVesselClick={handleSelectVessel}
             trailData={trailData}
           />
-          <div className="map-legend-overlay"><SpeedLegend /></div>
+          <div className="map-legend-overlay">
+            <SpeedLegend />
+          </div>
           {loading && (
             <div className="map-loading-overlay">
               <div className="map-loading-spinner" />
@@ -106,7 +128,9 @@ export default function App() {
           )}
         </div>
 
-        <div className={`app-right-panel ${selectedVessel ? "open" : "closed"}`}>
+        <div
+          className={`app-right-panel ${selectedVessel ? "open" : "closed"}`}
+        >
           <VesselDetailPanel
             vessel={selectedVessel}
             onClose={handleCloseDetail}
