@@ -91,3 +91,43 @@
 
 /* Compact IMO */
 .vp-compact-imo { flex-shrink:0; }
+
+/* ── COLLAPSED STATE (mobile minimize) ─────────────────── */
+.vp-collapsed .vp-dist,
+.vp-collapsed .vp-distinct-row,
+.vp-collapsed .vp-panel-search,
+.vp-collapsed .vp-sort-row {
+  display: none;
+}
+
+.vp-collapsed .vp-header {
+  border-bottom: none;
+  padding-bottom: 8px;
+}
+
+/* Minimize btn — visible on mobile, subtle on desktop */
+.vp-minimize-btn {
+  display: none;
+}
+
+/* ── MOBILE: show minimize btn, panel collapses to header only ── */
+@media (max-width: 1024px) {
+  .vp-minimize-btn {
+    display: flex !important;
+    background: rgba(0,229,255,0.06) !important;
+    border-color: rgba(0,229,255,0.2) !important;
+    color: var(--cyan) !important;
+  }
+
+  /* Collapsed panel on mobile — only header visible, no body */
+  .vp-collapsed {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  /* Floating vessel count pill shown at bottom of map when panel hidden */
+  .vp-collapsed .vp-title-row {
+    padding-bottom: 0;
+    margin-bottom: 0;
+  }
+}
