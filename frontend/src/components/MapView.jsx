@@ -1,5 +1,12 @@
 // src/components/MapView.jsx
-import React, { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { Loader } from "@googlemaps/js-api-loader";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import {
@@ -63,12 +70,10 @@ function getVesselIcon(vessel, isSelected = false) {
   }
 }
 
-const MapView = forwardRef(function MapView({
-  vessels,
-  selectedVessel,
-  onVesselClick,
-  trailData,
-}, ref) {
+const MapView = forwardRef(function MapView(
+  { vessels, selectedVessel, onVesselClick, trailData },
+  ref,
+) {
   const mapRef = useRef(null);
   const mapObj = useRef(null);
   const markersRef = useRef({});
@@ -78,7 +83,6 @@ const MapView = forwardRef(function MapView({
   const trailObjs = useRef([]);
   const pulseCirc = useRef(null);
   const pulseTimer = useRef(null);
-  const seaOverlay = useRef(null);
   const [coords, setCoords] = useState(null);
   // Default: satellite hybrid (like Image 2)
   const [mapStyle, setMapStyle] = useState("satellite");
@@ -92,7 +96,7 @@ const MapView = forwardRef(function MapView({
         mapObj.current.panTo({ lat, lng });
         mapObj.current.setZoom(13);
       }
-    }
+    },
   }));
 
   // ── INIT MAP ────────────────────────────────────────────────
@@ -128,17 +132,7 @@ const MapView = forwardRef(function MapView({
         disableAutoPan: true,
       });
 
-      // OpenSeaMap nautical overlay (shipping lanes, depth marks)
-      const seaLayer = new window.google.maps.ImageMapType({
-        getTileUrl: (coord, zoom) =>
-          `https://tiles.openseamap.org/seamark/${zoom}/${coord.x}/${coord.y}.png`,
-        tileSize: new window.google.maps.Size(256, 256),
-        opacity: 0.35,
-        maxZoom: 18,
-        name: "OpenSeaMap",
-      });
-      map.overlayMapTypes.insertAt(0, seaLayer);
-      seaOverlay.current = seaLayer;
+      // OpenSeaMap removed — clean Google map only
 
       map.addListener("mousemove", (e) =>
         setCoords({
@@ -465,13 +459,6 @@ const MapView = forwardRef(function MapView({
       // Google satellite + labels (hybrid)
       mapObj.current.setMapTypeId("hybrid");
       mapObj.current.setOptions({ styles: [] });
-      // Keep OpenSeaMap overlay
-      if (
-        mapObj.current.overlayMapTypes.getLength() === 0 &&
-        seaOverlay.current
-      ) {
-        mapObj.current.overlayMapTypes.insertAt(0, seaOverlay.current);
-      }
     } else if (next === "map") {
       // Clean grey map (like Image 3) — no roads highlighted, sea lanes visible
       mapObj.current.setMapTypeId("roadmap");
@@ -633,4 +620,3 @@ function CoordsHUD({ lat, lng }) {
     </div>
   );
 }
-
