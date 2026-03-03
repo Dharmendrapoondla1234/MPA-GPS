@@ -3,21 +3,22 @@ require("dotenv").config();
 const { BigQuery } = require("@google-cloud/bigquery");
 const logger = require("../utils/logger");
 
-const PROJECT = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
-const DATASET = process.env.BIGQUERY_DATASET || "MPA";
-const TABLE = process.env.BIGQUERY_TABLE || "MPA_VesselPositionsSnapshot";
-const FULL_TABLE = `\`${PROJECT}.${DATASET}.${TABLE}\``;
-const USERS_TABLE = `\`${PROJECT}.${DATASET}.MPA_Users\``;
+const PROJECT      = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
+const DATASET      = process.env.BIGQUERY_DATASET    || "MPA";
+const TABLE        = process.env.BIGQUERY_TABLE      || "MPA_Master_Vessels";
+const FULL_TABLE   = `\`${PROJECT}.${DATASET}.${TABLE}\``;
+const USERS_TABLE  = `\`${PROJECT}.${DATASET}.MPA_Users\``;
 
-// BigQuery location — MUST match where your dataset is created
+// Vessel trail history uses raw snapshot (has all historical timestamps)
+const SNAPSHOT_TABLE = `\`${PROJECT}.${DATASET}.View_MPA_VesselPositionsSnapshot\``;
+
+// BigQuery location — dataset is in Singapore
 const BQ_LOCATION = process.env.BIGQUERY_LOCATION || "asia-southeast1";
 
 let bigquery;
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
   try {
-    const credentials = JSON.parse(
-      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON,
-    );
+    const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
     bigquery = new BigQuery({
       credentials,
       projectId: credentials.project_id,
@@ -35,13 +36,11 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
 
 function sanitize(str) {
   if (!str) return "";
-  return String(str)
-    .replace(/['"\\;`]/g, "")
-    .substring(0, 200);
+  return String(str).replace(/['\"\\;`]/g, "").substring(0, 200);
 }
 
 // ════════════════════════════════════════════
-//  USER AUTH — BigQuery MPA_Users table
+//  USER AUTH — MPA_Users table
 // ════════════════════════════════════════════
 
 async function getUserByEmail(email) {
@@ -92,77 +91,100 @@ async function updateLastLogin(email) {
 }
 
 // ════════════════════════════════════════════
-//  VESSEL QUERIES
+//  VESSEL QUERIES — MPA_Master_Vessels
+//  Already deduplicated: 1 row per vessel
+//  Includes enriched port data from all source tables
 // ════════════════════════════════════════════
 
 async function getLatestVessels({
-  search = "",
+  search     = "",
   vesselType = "",
-  speedMin = null,
-  speedMax = null,
-  limit = 5000,
+  speedMin   = null,
+  speedMax   = null,
+  limit      = 5000,
 } = {}) {
   const conditions = [];
   if (search) {
     const s = sanitize(search);
     conditions.push(
       `(LOWER(vessel_name) LIKE '%${s.toLowerCase()}%'` +
-        ` OR CAST(imo_number AS STRING) LIKE '%${s}%'` +
-        ` OR CAST(mmsi_number AS STRING) LIKE '%${s}%')`,
+      ` OR CAST(imo_number AS STRING) LIKE '%${s}%'` +
+      ` OR CAST(mmsi_number AS STRING) LIKE '%${s}%')`
     );
   }
   if (vesselType) conditions.push(`vessel_type = '${sanitize(vesselType)}'`);
-  if (speedMin !== null && !isNaN(speedMin))
-    conditions.push(`speed >= ${parseFloat(speedMin)}`);
-  if (speedMax !== null && !isNaN(speedMax))
-    conditions.push(`speed <= ${parseFloat(speedMax)}`);
+  if (speedMin !== null && !isNaN(speedMin)) conditions.push(`speed >= ${parseFloat(speedMin)}`);
+  if (speedMax !== null && !isNaN(speedMax)) conditions.push(`speed <= ${parseFloat(speedMax)}`);
+
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
+  // MPA_Master_Vessels is already deduplicated — no ROW_NUMBER needed
+  // Also includes enriched columns: port, agent, berth, crew from all 4 tables
   const query = `
-    WITH ranked AS (
-      SELECT
-        vessel_name, imo_number, mmsi_number, flag, vessel_type, call_sign,
-        latitude_degrees, longitude_degrees, speed, heading, course,
-        vessel_length, vessel_breadth, gross_tonnage, deadweight,
-        year_built, effective_timestamp,
-        ROW_NUMBER() OVER (PARTITION BY imo_number ORDER BY effective_timestamp DESC) AS rn
-      FROM ${FULL_TABLE}
-      ${where}
-    )
     SELECT
-      vessel_name, imo_number, mmsi_number, flag, vessel_type, call_sign,
-      latitude_degrees, longitude_degrees, speed, heading, course,
-      vessel_length, vessel_breadth, gross_tonnage, deadweight,
-      year_built, effective_timestamp
-    FROM ranked
-    WHERE rn = 1
-      AND imo_number IS NOT NULL
-      AND latitude_degrees IS NOT NULL
-      AND longitude_degrees IS NOT NULL
-    ORDER BY effective_timestamp DESC
+      vessel_name,
+      imo_number,
+      mmsi_number,
+      flag,
+      vessel_type,
+      call_sign,
+      latitude_degrees,
+      longitude_degrees,
+      speed,
+      heading,
+      course,
+      vessel_length,
+      vessel_breadth,
+      vessel_depth,
+      gross_tonnage,
+      net_tonnage,
+      deadweight,
+      year_built,
+      last_position_time        AS effective_timestamp,
+      last_port_departed,
+      next_port_destination,
+      last_departed_time,
+      berth_location,
+      berth_grid,
+      voyage_purpose,
+      shipping_agent,
+      declared_arrival_time,
+      crew_count,
+      passenger_count,
+      has_arrival_data,
+      has_departure_data,
+      has_declaration_data
+    FROM ${FULL_TABLE}
+    ${where}
+    ORDER BY last_position_time DESC
     LIMIT ${Math.min(parseInt(limit) || 5000, 10000)}
   `;
 
   const start = Date.now();
   const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
-  logger.info(
-    `[BQ] getLatestVessels → ${rows.length} distinct vessels in ${Date.now() - start}ms`,
-  );
+  logger.info(`[BQ] getLatestVessels → ${rows.length} vessels in ${Date.now() - start}ms`);
   return rows;
 }
 
+// Trail history — raw snapshot has all historical timestamps per vessel
 async function getVesselHistory(imoNumber, hours = 24) {
   if (!imoNumber || isNaN(imoNumber)) throw new Error("Invalid IMO number");
   const h = Math.min(parseInt(hours) || 24, 168);
   const query = `
     SELECT
-      vessel_name, imo_number, mmsi_number,
-      latitude_degrees, longitude_degrees,
-      speed, heading, course, effective_timestamp
-    FROM ${FULL_TABLE}
+      vessel_name,
+      imo_number,
+      mmsi_number,
+      latitude_degrees,
+      longitude_degrees,
+      speed,
+      heading,
+      course,
+      effective_timestamp
+    FROM ${SNAPSHOT_TABLE}
     WHERE imo_number = ${parseInt(imoNumber)}
       AND effective_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${h} HOUR)
-      AND latitude_degrees IS NOT NULL
+      AND latitude_degrees  IS NOT NULL
       AND longitude_degrees IS NOT NULL
     ORDER BY effective_timestamp ASC
     LIMIT 2000
@@ -173,32 +195,34 @@ async function getVesselHistory(imoNumber, hours = 24) {
 
 async function getVesselTypes() {
   const query = `
-    SELECT DISTINCT vessel_type FROM ${FULL_TABLE}
-    WHERE vessel_type IS NOT NULL ORDER BY vessel_type LIMIT 100
+    SELECT DISTINCT vessel_type
+    FROM ${FULL_TABLE}
+    WHERE vessel_type IS NOT NULL
+    ORDER BY vessel_type
+    LIMIT 100
   `;
   const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
   return rows.map((r) => r.vessel_type).filter(Boolean);
 }
 
+// Stats — table already deduplicated, no CTE/ROW_NUMBER needed
 async function getFleetStats() {
   const query = `
-    WITH latest AS (
-      SELECT imo_number, mmsi_number, vessel_name, flag, call_sign, speed, vessel_type,
-        ROW_NUMBER() OVER (PARTITION BY imo_number ORDER BY effective_timestamp DESC) AS rn
-      FROM ${FULL_TABLE}
-      WHERE imo_number IS NOT NULL
-    )
     SELECT
-      COUNT(DISTINCT imo_number)                         AS total_vessels,
-      COUNT(DISTINCT mmsi_number)                        AS total_mmsi,
-      COUNT(DISTINCT vessel_name)                        AS total_names,
-      COUNTIF(rn=1 AND speed > 0.5)                     AS moving_vessels,
-      COUNTIF(rn=1 AND (speed <= 0.5 OR speed IS NULL)) AS stationary_vessels,
-      ROUND(AVG(IF(rn=1, speed, NULL)), 2)              AS avg_speed,
-      ROUND(MAX(IF(rn=1, speed, NULL)), 2)              AS max_speed,
-      COUNT(DISTINCT vessel_type)                        AS vessel_type_count,
-      COUNT(DISTINCT flag)                               AS flag_count
-    FROM latest
+      COUNT(*)                                AS total_vessels,
+      COUNT(DISTINCT mmsi_number)             AS total_mmsi,
+      COUNT(DISTINCT vessel_name)             AS total_names,
+      COUNTIF(speed > 0.5)                   AS moving_vessels,
+      COUNTIF(speed <= 0.5 OR speed IS NULL) AS stationary_vessels,
+      ROUND(AVG(speed), 2)                   AS avg_speed,
+      ROUND(MAX(speed), 2)                   AS max_speed,
+      COUNT(DISTINCT vessel_type)             AS vessel_type_count,
+      COUNT(DISTINCT flag)                    AS flag_count,
+      COUNTIF(has_arrival_data    = TRUE)     AS with_arrival_data,
+      COUNTIF(has_departure_data  = TRUE)     AS with_departure_data,
+      COUNTIF(has_declaration_data = TRUE)    AS with_declaration_data
+    FROM ${FULL_TABLE}
+    WHERE imo_number IS NOT NULL
   `;
   const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
   return rows[0] || {};
@@ -206,10 +230,7 @@ async function getFleetStats() {
 
 async function healthCheck() {
   try {
-    const [rows] = await bigquery.query({
-      query: "SELECT 1 AS ok",
-      location: BQ_LOCATION,
-    });
+    const [rows] = await bigquery.query({ query: "SELECT 1 AS ok", location: BQ_LOCATION });
     return rows[0]?.ok === 1;
   } catch (e) {
     logger.error("❌ BigQuery health check failed:", e.message);

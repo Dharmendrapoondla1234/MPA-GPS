@@ -60,7 +60,7 @@ app.listen(PORT, "0.0.0.0", () => {
     `🔐  Auth endpoints ready → /api/auth/register | /api/auth/login`,
   );
   logger.info(
-    `📊  BigQuery table       → ${process.env.BIGQUERY_PROJECT_ID || "photons-377606"}.${process.env.BIGQUERY_DATASET || "MPA"}.${process.env.BIGQUERY_TABLE || "MPA_VesselPositionsSnapshot"}`,
+    `📊  BigQuery table       → ${process.env.BIGQUERY_PROJECT_ID || "photons-377606"}.${process.env.BIGQUERY_DATASET || "MPA"}.${process.env.BIGQUERY_TABLE || "MPA_Master_Vessels"}`,
   );
   logger.info(`🌍  CORS                 → ALL ORIGINS`);
 });
