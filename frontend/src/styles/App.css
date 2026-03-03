@@ -122,17 +122,173 @@
 .map-compass svg {
   filter: drop-shadow(0 0 8px var(--cyan-glow));
 }
-/* ── WHEN VESSEL PANEL IS COLLAPSED on mobile ── */
+
+/* ═══════════════════════════════════════════════════════
+   TABLET  ≤ 1024px
+   Left panel overlays map — slides OUT to the LEFT when collapsed
+   Detail panel slides in from the RIGHT
+═══════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════
+   TABLET + MOBILE  ≤ 1024px
+   Map fills 100% screen, panel overlays from left
+═══════════════════════════════════════════════════════ */
 @media (max-width: 1024px) {
-  /* Collapsed: shrink to just header bar */
-  .app-left-panel:has(.vp-collapsed) {
-    height: auto !important;
-    min-height: 0 !important;
-    border-radius: 14px 14px 0 0;
+
+  /* Topbar — fixed, full width, thinner on mobile */
+  .topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 200;
+    height: 52px !important;
   }
 
-  /* Float a "show list" FAB button when panel is collapsed */
-  .vp-collapsed + .vp-fab-hint {
-    display: flex;
+  /* Root fills full viewport */
+  .app-root {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* Body fills ALL available space below topbar */
+  .app-body {
+    position: fixed;
+    top: 52px;
+    left: 0; right: 0; bottom: 0;
+    height: calc(100dvh - 52px) !important;
+    overflow: hidden;
+  }
+
+  /* Map fills 100% of app-body */
+  .app-map-area {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 1;
+  }
+
+  /* Left vessel panel — overlays map, slides in/out from LEFT */
+  .app-left-panel {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    width: min(88vw, 300px) !important;
+    height: 100% !important;
+    z-index: 50;
+    background: rgba(4, 10, 22, 0.97) !important;
+    border-right: 1px solid rgba(0,229,255,0.15) !important;
+    box-shadow: 4px 0 32px rgba(0,0,0,0.7) !important;
+    transform: translateX(0);
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    /* Remove any border-radius from previous bottom-sheet style */
+    border-radius: 0 !important;
+  }
+
+  /* Closed = slid fully off screen to left */
+  .app-left-panel.closed {
+    transform: translateX(-100%) !important;
+    box-shadow: none !important;
+    pointer-events: none !important;
+    opacity: 1 !important;
+    width: min(88vw, 300px) !important;
+  }
+
+  /* Right detail panel — full screen overlay from right */
+  .app-right-panel {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 60;
+    background: rgba(3, 7, 15, 0.99) !important;
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    overflow-y: auto !important;
+    opacity: 1 !important;
+  }
+
+  .app-right-panel.open {
+    transform: translateX(0) !important;
+    width: 100% !important;
+  }
+
+  /* Legend + coords — always above map */
+  .map-legend-overlay {
+    bottom: 20px;
+    left: 16px;
+    z-index: 10;
+  }
+
+  .map-coord-hud {
+    bottom: 20px;
+    right: 16px;
+    z-index: 10;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   MOBILE  ≤ 640px — compact topbar
+═══════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+
+  /* Slimmer topbar */
+  .topbar {
+    height: 50px !important;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .app-body {
+    top: 50px !important;
+    height: calc(100dvh - 50px) !important;
+  }
+
+  /* Hide type + speed filter dropdowns */
+  .tb-filter-group { display: none !important; }
+
+  /* Compact search bar */
+  .tb-search-wrap { width: 150px; flex: 1; min-width: 0; }
+
+  /* Show VESSELS count only — hide MOVING / AVG / MAX */
+  .tb-divider,
+  .tb-stat.green,
+  .tb-stat.amber,
+  .tb-stat.red { display: none !important; }
+  .tb-stats { border: none; background: none; }
+  .tb-stat.cyan .tb-stat-val { font-size: 17px; }
+
+  /* Hide countdown timer */
+  .tb-timer { display: none !important; }
+
+  /* Smaller icon buttons */
+  .tb-btn { width: 30px; height: 30px; }
+
+  /* Hide logo subtitle */
+  .tb-logo-sub { display: none !important; }
+  .tb-logo-text { font-size: 13px; letter-spacing: 0.1em; }
+
+  /* Panel slightly narrower */
+  .app-left-panel {
+    width: min(90vw, 290px) !important;
+  }
+  .app-left-panel.closed {
+    width: min(90vw, 290px) !important;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   SMALL MOBILE  ≤ 390px
+═══════════════════════════════════════════════════════ */
+@media (max-width: 390px) {
+  .tb-search-wrap { width: 120px; }
+  .tb-logo-text { font-size: 12px; letter-spacing: 0.06em; }
+  .app-left-panel,
+  .app-left-panel.closed {
+    width: 92vw !important;
   }
 }
