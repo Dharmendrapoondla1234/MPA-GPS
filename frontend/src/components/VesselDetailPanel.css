@@ -242,3 +242,84 @@
 }
 .dp-route-arrow { font-size:18px; color:#3d6a8a; }
 .dp-route-dist { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:#00e5ff; }
+
+/* ── PORT QUICK STRIP ─────────────────────────────────────── */
+.dp-port-strip {
+  display: flex;
+  gap: 0;
+  border-top: 1px solid rgba(0,229,255,0.1);
+  border-bottom: 1px solid rgba(0,229,255,0.1);
+  background: rgba(0,229,255,0.04);
+}
+.dp-ps-item {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  border-right: 1px solid rgba(0,229,255,0.08);
+}
+.dp-ps-item:last-child { border-right: none; }
+.dp-ps-icon { font-size: 16px; margin-top: 2px; }
+.dp-ps-label {
+  font-size: 8px; font-weight: 700; letter-spacing: 1px;
+  color: #3d6a8a; margin-bottom: 2px;
+}
+.dp-ps-val {
+  font-size: 11px; font-weight: 700; color: #00e5ff;
+  font-family: 'JetBrains Mono', monospace;
+}
+.dp-ps-time { font-size: 9px; color: #4a7a9a; margin-top: 2px; }
+
+/* ── VOYAGE ROUTE CARD ────────────────────────────────────── */
+.dp-voyage-route {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0,100,150,0.12);
+  border: 1px solid rgba(0,229,255,0.15);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 8px 0 12px;
+}
+.dp-vr-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dp-vr-icon  { font-size: 18px; margin-bottom: 3px; }
+.dp-vr-label { font-size: 8px; font-weight: 700; letter-spacing: 1px; color: #3d6a8a; }
+.dp-vr-val   { font-size: 12px; font-weight: 700; color: #e0f0ff; }
+.dp-vr-val.hi { color: #00e5ff; }
+.dp-vr-time  { font-size: 9px; color: #4a7a9a; margin-top: 1px; }
+.dp-vr-arrow {
+  font-size: 20px; color: #00e5ff; opacity: 0.6;
+  flex-shrink: 0; padding: 0 4px;
+}
+
+/* ── DATA SOURCE BADGES ───────────────────────────────────── */
+.dp-source-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 0 12px;
+}
+.dp-src {
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border: 1px solid;
+}
+.dp-src.active {
+  background: rgba(0,229,255,0.12);
+  border-color: rgba(0,229,255,0.4);
+  color: #00e5ff;
+}
+.dp-src.off {
+  background: rgba(255,255,255,0.03);
+  border-color: rgba(255,255,255,0.08);
+  color: #3d5a6a;
+}
