@@ -16,6 +16,7 @@ export default function TopBar({
   onTogglePanel,
   user,
   onLogout,
+  onSearchEnter,
 }) {
   const countdown = useCountdown(nextRefresh);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -64,6 +65,7 @@ export default function TopBar({
           onChange={(e) =>
             onFiltersChange({ ...filters, search: e.target.value })
           }
+          onKeyDown={(e) => e.key === "Enter" && onSearchEnter?.()}
           autoComplete="off"
           spellCheck={false}
         />

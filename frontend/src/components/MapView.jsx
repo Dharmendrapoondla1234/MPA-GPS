@@ -1,5 +1,5 @@
 // src/components/MapView.jsx
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import { Loader } from "@googlemaps/js-api-loader";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import {
@@ -63,12 +63,12 @@ function getVesselIcon(vessel, isSelected = false) {
   }
 }
 
-export default function MapView({
+const MapView = forwardRef(function MapView({
   vessels,
   selectedVessel,
   onVesselClick,
   trailData,
-}) {
+}, ref) {
   const mapRef = useRef(null);
   const mapObj = useRef(null);
   const markersRef = useRef({});
@@ -82,6 +82,18 @@ export default function MapView({
   const [coords, setCoords] = useState(null);
   // Default: satellite hybrid (like Image 2)
   const [mapStyle, setMapStyle] = useState("satellite");
+
+  // Expose panToVessel so App.jsx can pan map from search
+  useImperativeHandle(ref, () => ({
+    panToVessel(vessel) {
+      const lat = Number(vessel?.latitude_degrees);
+      const lng = Number(vessel?.longitude_degrees);
+      if (mapObj.current && lat && lng) {
+        mapObj.current.panTo({ lat, lng });
+        mapObj.current.setZoom(13);
+      }
+    }
+  }));
 
   // ── INIT MAP ────────────────────────────────────────────────
   useEffect(() => {
@@ -121,7 +133,7 @@ export default function MapView({
         getTileUrl: (coord, zoom) =>
           `https://tiles.openseamap.org/seamark/${zoom}/${coord.x}/${coord.y}.png`,
         tileSize: new window.google.maps.Size(256, 256),
-        opacity: 0.7,
+        opacity: 0.35,
         maxZoom: 18,
         name: "OpenSeaMap",
       });
@@ -500,11 +512,14 @@ export default function MapView({
       {coords && <CoordsHUD lat={coords.lat} lng={coords.lng} />}
     </div>
   );
-}
+});
+
+export default MapView;
 
 // ── MAP STYLES ───────────────────────────────────────────────
 
 // Clean grey map — like Image 3 (minimal, sea lanes visible, no road colors)
+
 const CLEAN_MAP_STYLE = [
   { elementType: "geometry", stylers: [{ color: "#e8e8e8" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#666666" }] },
@@ -618,3 +633,4 @@ function CoordsHUD({ lat, lng }) {
     </div>
   );
 }
+
