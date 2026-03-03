@@ -8,6 +8,15 @@ import {
 import { fetchVesselHistory } from "../services/api";
 import "./VesselDetailPanel.css";
 
+// Unwrap BigQuery value wrapper {value:"..."} or plain string
+function bq(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'object' && val.value !== undefined) return val.value || null;
+  const s = String(val).trim();
+  return (s === '' || s === 'null' || s === 'undefined') ? null : s;
+}
+
+
 const TABS         = ["VESSEL", "VOYAGE", "MISSION", "TRAIL"];
 const HOUR_OPTIONS = [12, 24, 48, 72];
 
@@ -79,17 +88,17 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
   const built    = vessel.year_built && Number(vessel.year_built) > 0 ? String(vessel.year_built) : null;
 
   // ── Enriched port data from MPA_Master_Vessels ────────────────────
-  const lastPortDeparted    = vessel.last_port_departed      || null;
-  const nextPortDest        = vessel.next_port_destination   || null;
-  const lastArrivedTime     = vessel.last_arrived_time       || null;
-  const lastDepartedTime    = vessel.last_departed_time      || null;
-  const berthLocation       = vessel.berth_location          || null;
-  const berthGrid           = vessel.berth_grid              || null;
-  const voyagePurpose       = vessel.voyage_purpose          || null;
-  const shippingAgent       = vessel.shipping_agent          || null;
-  const declaredArrivalTime = vessel.declared_arrival_time   || null;
-  const crewCount           = vessel.crew_count              || null;
-  const passengerCount      = vessel.passenger_count         || null;
+  const lastPortDeparted    = bq(vessel.last_port_departed);
+  const nextPortDest        = bq(vessel.next_port_destination);
+  const lastArrivedTime     = bq(vessel.last_arrived_time);
+  const lastDepartedTime    = bq(vessel.last_departed_time);
+  const berthLocation       = bq(vessel.berth_location);
+  const berthGrid           = bq(vessel.berth_grid);
+  const voyagePurpose       = bq(vessel.voyage_purpose);
+  const shippingAgent       = bq(vessel.shipping_agent);
+  const declaredArrivalTime = bq(vessel.declared_arrival_time);
+  const crewCount           = bq(vessel.crew_count);
+  const passengerCount      = bq(vessel.passenger_count);
   const hasArrival          = vessel.has_arrival_data;
   const hasDeparture        = vessel.has_departure_data;
   const hasDeclaration      = vessel.has_declaration_data;
