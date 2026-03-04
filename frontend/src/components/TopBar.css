@@ -107,3 +107,66 @@
   font-size:13px; font-weight:600; cursor:pointer; transition:all var(--t1);
 }
 .tb-user-logout:hover { background:rgba(255,51,85,0.15); }
+
+/* ═══════════════════════════════
+   MOBILE TOPBAR ≤ 768px
+   Single slim row, 46px tall
+═══════════════════════════════ */
+@media (max-width: 768px) {
+  .topbar {
+    height: 46px !important;
+    padding: 0 8px !important;
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
+    overflow: hidden;
+  }
+
+  /* Tiny logo — icon only, no text */
+  .tb-logo {
+    padding-right: 6px;
+    border-right: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .tb-logo-text { display: none !important; }
+  .tb-logo-sub  { display: none !important; }
+  .tb-sonar { width: 26px; height: 26px; }
+  .tb-sonar-dot { width: 7px; height: 7px; }
+
+  /* Search — flex fills remaining space */
+  .tb-search-wrap {
+    flex: 1 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 0 8px !important;
+  }
+  .tb-search { font-size: 12px !important; padding: 8px 0 !important; }
+
+  /* Hide type + speed dropdowns */
+  .tb-filter-group { display: none !important; }
+
+  /* Stats — vessel count only */
+  .tb-stats {
+    border: none !important;
+    background: none !important;
+    flex-shrink: 0;
+  }
+  .tb-divider,
+  .tb-stat.green,
+  .tb-stat.amber,
+  .tb-stat.red { display: none !important; }
+  .tb-stat.cyan .tb-stat-val { font-size: 16px !important; }
+  .tb-stat.cyan .tb-stat-lbl { display: none; }
+
+  /* Right controls — minimal */
+  .tb-right { gap: 5px !important; }
+  .tb-timer { display: none !important; }
+  .tb-live  {
+    padding: 4px 6px !important;
+    font-size: 0 !important; /* hide text, keep dot */
+  }
+  .tb-live-dot { width: 7px !important; height: 7px !important; }
+  .tb-btn { width: 28px !important; height: 28px !important; }
+
+  /* User avatar smaller */
+  .tb-avatar { width: 28px !important; height: 28px !important; font-size: 11px !important; }
+}
