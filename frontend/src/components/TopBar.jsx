@@ -1,5 +1,5 @@
 // src/components/TopBar.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useCountdown } from "../hooks/useCountdown";
 import { logoutUser } from "../services/api";
 import "./TopBar.css";
@@ -19,11 +19,35 @@ export default function TopBar({
   onSearchEnter,
 }) {
   const countdown = useCountdown(nextRefresh);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  // Close menu when tapping/clicking anywhere outside the wrap div
+  useEffect(() => {
+    if (!menuOpen) return;
+    function outside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("touchstart", outside, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", outside);
+      document.removeEventListener("touchstart", outside);
+    };
+  }, [menuOpen]);
 
   function handleLogout() {
     logoutUser();
     onLogout();
+    setMenuOpen(false);
+  }
+
+  // stopPropagation prevents the Google Maps click listener from swallowing the event
+  function handleAvatarClick(e) {
+    e.stopPropagation();
+    setMenuOpen((o) => !o);
   }
 
   return (
@@ -207,17 +231,22 @@ export default function TopBar({
           </svg>
         </button>
 
-        {/* User avatar */}
-        <div className="tb-user-wrap">
+        {/* ── User avatar + dropdown ── */}
+        <div className="tb-user-wrap" ref={wrapRef}>
           <button
-            className="tb-avatar"
-            onClick={() => setUserMenuOpen((o) => !o)}
+            className={`tb-avatar ${menuOpen ? "active" : ""}`}
+            onClick={handleAvatarClick}
             title={user?.email}
           >
             {user?.avatar || "?"}
           </button>
-          {userMenuOpen && (
-            <div className="tb-user-menu">
+
+          {menuOpen && (
+            <div
+              className="tb-user-menu"
+              onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+            >
               <div className="tb-user-name">{user?.name}</div>
               <div className="tb-user-email">{user?.email}</div>
               <div className="tb-user-role">{user?.role?.toUpperCase()}</div>
