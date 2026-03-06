@@ -127,11 +127,15 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   }));
 
   // ── FETCH GIS DATA ────────────────────────────────────────
+  // GIS is optional — vessels render immediately regardless.
+  // If /api/gis/all returns 404 (route not yet added), gisData stays null
+  // and only nautical layers are skipped. Vessels still show.
   useEffect(() => {
     fetch(`${BASE_URL}/gis/all`)
-      .then(r => r.json())
-      .then(j => { setGisData(j.data); setLoadingGIS(false); })
-      .catch(() => setLoadingGIS(false));
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(j => { if (j?.data) setGisData(j.data); })
+      .catch(err => console.warn("[GIS] layers unavailable:", err.message))
+      .finally(() => setLoadingGIS(false));
   }, []);
 
   // ── INIT MAP ──────────────────────────────────────────────
@@ -172,6 +176,8 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   }, []);
 
   // ── RENDER GIS LAYERS ─────────────────────────────────────
+  // Only runs when both map is ready AND gisData has loaded.
+  // If gisData is null (route not deployed yet), this effect simply skips.
   useEffect(() => {
     if (!mapReady || !mapObj.current || !gisData) return;
 
@@ -407,12 +413,13 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     alertCircles.current = {};
     vesselCircles.current = {};
 
-    if (!mapObj.current || !gisData || !layers.vesselProximity) return;
+    // Skip proximity checks if GIS not loaded yet — vessels still render normally
+    if (!mapObj.current || !layers.vesselProximity) return;
     const freshVessels = vessels.filter(v => !isStale(v) && v.latitude_degrees && v.longitude_degrees);
     const newAlerts = [];
 
-    // 1. Vessel ↔ Danger proximity
-    if (layers.dangers && gisData.dangers) {
+    // 1. Vessel ↔ Danger proximity (only if GIS data available)
+    if (gisData && layers.dangers && gisData.dangers) {
       const dangerPts = gisData.dangers
         .filter(d => d.type === "danger_point" && Array.isArray(d.coords) && typeof d.coords[0] === "number")
         .map(d => ({ lat: d.coords[1], lng: d.coords[0], name: d.name, depth: d.depth }));
