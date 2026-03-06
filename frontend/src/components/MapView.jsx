@@ -159,7 +159,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
       map.addListener("mousemove", e => setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) }));
       map.addListener("click", () => { infoWin.current.close(); hoverWin.current.close(); });
-      setMapReady(true); // ← triggers GIS render effect
+      // ⚠️ clusterer MUST be created before setMapReady — marker effect checks clusterer.current
       clusterer.current = new MarkerClusterer({
         map, markers: [],
         renderer: { render({ count, position }) {
@@ -172,6 +172,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
           });
         }},
       });
+      setMapReady(true); // ← set AFTER clusterer is ready
     });
   }, []);
 
@@ -579,7 +580,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
         if (toRemove.length || toAdd.length) clusterer.current.render();
       });
     }
-  }, [vessels, selectedVessel, onVesselClick, alerts]);
+  }, [vessels, selectedVessel, onVesselClick, alerts, mapReady]);
 
   // ── SELECTED VESSEL PULSE ─────────────────────────────────
   useEffect(() => {
