@@ -1,27 +1,158 @@
-/* MapView.css — additions for nautical overlay UI */
+/* ═══════════════════════════════════════════════════════
+   MapView.css — Complete styles for MapView component
+   Includes: base map, HUD panels, nautical layer UI,
+   alert panel, radius legend, Google Maps overrides
+═══════════════════════════════════════════════════════ */
 
-/* ── LAYER PANEL BUTTON ── */
+/* ── BASE MAP CONTAINER ── */
+.mv-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.mv-map {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ── GOOGLE MAPS OVERRIDES ── */
+/* Remove watermarks / development text */
+.gm-style-cc,
+.gm-style a[href*="maps.google"],
+.gmnoscreen,
+img[src*="watermark"],
+a[title="Report a map error"] { display: none !important; }
+
+/* InfoWindow — transparent background */
+.gm-style .gm-style-iw-c {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.gm-style .gm-style-iw-d  { overflow: visible !important; padding: 0 !important; }
+.gm-style .gm-style-iw-ch,
+.gm-style .gm-style-iw-chr { display: none !important; padding: 0 !important; }
+.gm-style .gm-ui-hover-effect { display: none !important; }
+.gm-style .gm-style-iw-tc::after { background: rgba(0,229,255,0.2) !important; }
+
+/* ── SHARED BUTTON BASE ── */
+.mv-btn {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  background: rgba(4, 8, 16, 0.88);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+  border-radius: 8px;
+  color: #8ab4d0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+  user-select: none;
+}
+.mv-btn:hover {
+  border-color: rgba(0, 229, 255, 0.55);
+  color: #00e5ff;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 14px rgba(0,229,255,0.18);
+}
+
+/* Map style toggle — top right */
+.mv-style-btn {
+  top: 14px;
+  right: 14px;
+}
+
+/* Layers panel toggle — below style button */
 .mv-layers-btn {
-  top: 96px !important;
-  right: 10px !important;
-  font-size: 10px !important;
-  padding: 6px 10px !important;
+  top: 52px;
+  right: 14px;
+  font-size: 10px;
+  padding: 6px 10px;
   letter-spacing: 0.05em;
+}
+
+/* ── HUD PANELS ── */
+.mv-hud {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  background: rgba(4, 8, 16, 0.84);
+  border: 1px solid rgba(0, 229, 255, 0.12);
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.mv-count-hud { top: 14px; left: 14px; color: #8ab4d0; }
+.mv-trail-hud { top: 50px; left: 14px; color: #00e5ff; animation: mvFadeUp 0.3s ease both; }
+
+/* Live dot pulse */
+.mv-dot-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #00ff9d;
+  box-shadow: 0 0 8px #00ff9d;
+  animation: mvPulse 2s infinite;
+  flex-shrink: 0;
+}
+
+/* ── COORDINATES HUD ── */
+.mv-coords {
+  position: absolute;
+  bottom: 30px;
+  right: 14px;
+  z-index: 10;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #3d6a8a;
+  background: rgba(4, 8, 16, 0.78);
+  border: 1px solid rgba(0, 229, 255, 0.08);
+  padding: 5px 12px;
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  letter-spacing: 0.05em;
+}
+
+.mv-region {
+  color: #00e5ff;
+  font-size: 9px;
 }
 
 /* ── LAYER CONTROL PANEL ── */
 .mv-layer-panel {
   position: absolute;
-  top: 130px;
-  right: 10px;
+  top: 92px;
+  right: 14px;
   background: rgba(6, 14, 28, 0.96);
   border: 1px solid rgba(0, 180, 255, 0.3);
   border-radius: 10px;
   padding: 10px;
-  min-width: 200px;
+  min-width: 210px;
   z-index: 100;
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+  animation: mvFadeUp 0.18s ease both;
 }
 
 .mv-layer-title {
@@ -45,10 +176,7 @@
   transition: background 0.15s;
   font-family: 'JetBrains Mono', monospace;
 }
-
-.mv-layer-row:hover {
-  background: rgba(0, 180, 255, 0.08);
-}
+.mv-layer-row:hover { background: rgba(0, 180, 255, 0.08); }
 
 .mv-layer-dot {
   width: 8px;
@@ -61,8 +189,8 @@
 /* ── ALERT PANEL ── */
 .mv-alert-panel {
   position: absolute;
-  top: 56px;
-  left: 10px;
+  top: 50px;
+  left: 14px;
   background: rgba(6, 8, 20, 0.95);
   border: 1px solid #ff2244;
   border-radius: 10px;
@@ -74,11 +202,6 @@
   box-shadow: 0 4px 20px rgba(255, 34, 68, 0.3);
   font-family: 'JetBrains Mono', monospace;
   animation: alertPulse 2s ease-in-out infinite;
-}
-
-@keyframes alertPulse {
-  0%, 100% { box-shadow: 0 4px 20px rgba(255, 34, 68, 0.3); }
-  50%       { box-shadow: 0 4px 28px rgba(255, 34, 68, 0.6); }
 }
 
 .mv-alert-header {
@@ -95,7 +218,6 @@
   border-radius: 4px;
   letter-spacing: 0.05em;
 }
-
 .mv-alert-badge.danger  { background: #ff224433; color: #ff4466; border: 1px solid #ff2244; }
 .mv-alert-badge.warning { background: #ffaa0022; color: #ffcc00; border: 1px solid #ffaa00; }
 
@@ -110,8 +232,7 @@
   border-radius: 5px;
   border-left: 2px solid transparent;
 }
-
-.mv-alert-item.danger  { background: rgba(255, 34, 68, 0.08); border-left-color: #ff2244; }
+.mv-alert-item.danger  { background: rgba(255, 34, 68, 0.08);  border-left-color: #ff2244; }
 .mv-alert-item.warning { background: rgba(255, 170, 0, 0.08);  border-left-color: #ffaa00; }
 
 .mv-alert-vessel {
@@ -137,8 +258,8 @@
 /* ── RADIUS LEGEND ── */
 .mv-radius-legend {
   position: absolute;
-  bottom: 36px;
-  right: 10px;
+  bottom: 56px;
+  right: 14px;
   background: rgba(6, 14, 28, 0.9);
   border: 1px solid rgba(0, 180, 255, 0.2);
   border-radius: 8px;
@@ -146,6 +267,7 @@
   z-index: 90;
   backdrop-filter: blur(8px);
   font-family: 'JetBrains Mono', monospace;
+  pointer-events: none;
 }
 
 .mv-radius-row {
@@ -162,4 +284,27 @@
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+/* ── ANIMATIONS ── */
+@keyframes mvPulse {
+  0%, 100% { box-shadow: 0 0 4px #00ff9d; }
+  50%       { box-shadow: 0 0 14px #00ff9d; }
+}
+
+@keyframes mvFadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes alertPulse {
+  0%, 100% { box-shadow: 0 4px 20px rgba(255, 34, 68, 0.3); }
+  50%       { box-shadow: 0 4px 28px rgba(255, 34, 68, 0.6); }
+}
+
+/* ── MOBILE ADJUSTMENTS ── */
+@media (max-width: 768px) {
+  .mv-alert-panel { max-width: calc(100vw - 28px); min-width: unset; }
+  .mv-layer-panel { min-width: 180px; }
+  .mv-coords { display: none; }
 }
