@@ -252,6 +252,10 @@ async function healthCheck() {
 }
 
 module.exports = {
+  bigquery,
+  BQ_LOCATION,
+  SNAPSHOT_TABLE,
+  FULL_TABLE,
   getUserByEmail,
   createUser,
   updateLastLogin,
