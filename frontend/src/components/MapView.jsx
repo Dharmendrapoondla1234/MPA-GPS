@@ -216,45 +216,13 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       if(Math.abs(+a.longitude_degrees-+b.longitude_degrees)>NEAR)continue;
       const d=distanceM(+a.latitude_degrees,+a.longitude_degrees,+b.latitude_degrees,+b.longitude_degrees);
       if(d<RADIUS.DANGER){
-  newAlerts.push({
-    level:"danger",
-    vessel:a.vessel_name,
-    detail:`${Math.round(d)}m from ${b.vessel_name} — COLLISION RISK`
-  });
-
-  const ml = (+a.latitude_degrees + +b.latitude_degrees) / 2;
-  const mg = (+a.longitude_degrees + +b.longitude_degrees) / 2;
-
-  vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`] =
-    new window.google.maps.Circle({
-      center:{lat:ml,lng:mg},
-      radius:d/2,
-      map:mapObj.current,
-      fillColor:"#ff0000",
-      fillOpacity:0.12,
-      strokeColor:"#ff0000",
-      strokeWeight:2,
-      strokeOpacity:1,
-      zIndex:25
-    });
-}
-else if(d<RADIUS.WARNING){
-  vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`] =
-    new window.google.maps.Circle({
-      center:{
-        lat:(+a.latitude_degrees + +b.latitude_degrees)/2,
-        lng:(+a.longitude_degrees + +b.longitude_degrees)/2
-      },
-      radius:d/2,
-      map:mapObj.current,
-      fillColor:"#ffaa00",
-      fillOpacity:0.06,
-      strokeColor:"#ffaa00",
-      strokeWeight:1,
-      strokeOpacity:0.6,
-      zIndex:18
-    });
-}}
+        newAlerts.push({level:"danger",vessel:a.vessel_name,detail:`${Math.round(d)}m from ${b.vessel_name} — COLLISION RISK`});
+        const ml=(+a.latitude_degrees + +b.latitude_degrees)/2,mg=(+a.longitude_degrees + +b.longitude_degrees)/2;
+        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:ml,lng:mg},radius:d/2,map:mapObj.current,fillColor:"#ff0000",fillOpacity:0.12,strokeColor:"#ff0000",strokeWeight:2,strokeOpacity:1,zIndex:25});
+      } else if(d<RADIUS.WARNING){
+        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:(+a.latitude_degrees + +b.latitude_degrees)/2,lng:(+a.longitude_degrees + +b.longitude_degrees)/2},radius:d/2,map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.06,strokeColor:"#ffaa00",strokeWeight:1,strokeOpacity:0.6,zIndex:18});
+      }
+    }
     setAlerts(newAlerts.slice(0,20));
   }, [vessels, gisData, layers.dangers, layers.vesselProximity]);
 
@@ -351,12 +319,13 @@ else if(d<RADIUS.WARNING){
     mapObj.current.fitBounds(bounds,{padding:90});
   }, [trailData, layers.aiTrajectory]);
 
+  // STYLE CYCLE
   const cycleStyle = useCallback(() => {
     if (!mapObj.current) return;
-    const next={satellite:"map",map:"dark",dark:"satellite"}[mapStyle];
-    if(next==="satellite"){mapObj.current.setMapTypeId("hybrid");mapObj.current.setOptions({styles:[]});}
-    else if(next==="map"){mapObj.current.setMapTypeId("roadmap");mapObj.current.setOptions({styles:CLEAN_MAP_STYLE});}
-    else{mapObj.current.setMapTypeId("roadmap");mapObj.current.setOptions({styles:DARK_NAUTICAL_STYLE});}
+    const next = {satellite:"map", map:"dark", dark:"satellite"}[mapStyle];
+    if (next === "satellite") { mapObj.current.setMapTypeId("hybrid"); mapObj.current.setOptions({styles:[]}); }
+    else if (next === "map")  { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({styles:CLEAN_MAP_STYLE}); }
+    else                      { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({styles:DARK_NAUTICAL_STYLE}); }
     setMapStyle(next);
   }, [mapStyle]);
 
@@ -401,7 +370,7 @@ else if(d<RADIUS.WARNING){
             {key:"aids",     label:"Aids to Navigation",  icon:"💡",col:"#ffee44"},
             {key:"ports",    label:"Ports & Services",    icon:"⚓",col:"#44aaff"},
             {key:"tides",    label:"Tides & Currents",    icon:"🌊",col:"#00eeff"},
-            {key:"cultural", label:"Bridges & Cables",   icon:"🌉",col:"#aaaaaa"},
+            {key:"cultural", label:"Bridges & Cables",    icon:"🌉",col:"#aaaaaa"},
             {key:"seabed",   label:"Seabed Hazards",      icon:"🪨",col:"#aa6600"},
             {key:"vesselProximity",label:"Proximity Alerts",icon:"📡",col:"#ff8800"},
             {key:"aiTrajectory",label:"AI Trajectory Fill",icon:"🤖",col:"#7cdcff"},

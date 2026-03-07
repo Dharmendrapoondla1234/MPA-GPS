@@ -28,7 +28,7 @@
 //     if (!filters.search || filters.search.length < 2) return;
 //     if (vessels.length === 1) {
 //       setSelectedVessel(vessels[0]);
-//       setTrailData(null);
+//       setTrailData(null); setPredictRoute(null);
 //       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(vessels[0]);
 //       if (IS_MOBILE()) setPanelOpen(false);
 //     }
@@ -45,14 +45,14 @@
 
 //   const handleSelectVessel = useCallback((vessel) => {
 //     setSelectedVessel(vessel);
-//     setTrailData(null);
+//     setTrailData(null); setPredictRoute(null);
 //     // On mobile, auto-close left panel when selecting vessel
 //     if (IS_MOBILE()) setPanelOpen(false);
 //   }, []);
 
 //   const handleCloseDetail = useCallback(() => {
 //     setSelectedVessel(null);
-//     setTrailData(null);
+//     setTrailData(null); setPredictRoute(null);
 //   }, []);
 
 //   const handleLogout = useCallback(() => {
@@ -64,7 +64,7 @@
 //     if (vessels.length > 0) {
 //       const v = vessels[0];
 //       setSelectedVessel(v);
-//       setTrailData(null);
+//       setTrailData(null); setPredictRoute(null);
 //       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(v);
 //       if (IS_MOBILE()) setPanelOpen(false);
 //     }
@@ -185,6 +185,7 @@ export default function App() {
 
   const [selectedVessel, setSelectedVessel] = useState(null);
   const [trailData, setTrailData] = useState(null);
+  const [predictRoute, setPredictRoute] = useState(null);
   const [panelOpen, setPanelOpen] = useState(!IS_MOBILE());
 
   const mapRef = useRef(null);
@@ -208,7 +209,7 @@ export default function App() {
     if (vessels.length === 1) {
 
       setSelectedVessel(vessels[0]);
-      setTrailData(null);
+      setTrailData(null); setPredictRoute(null);
 
       if (mapRef.current?.panToVessel) {
         mapRef.current.panToVessel(vessels[0]);
@@ -244,7 +245,7 @@ export default function App() {
   const handleSelectVessel = useCallback((vessel) => {
 
     setSelectedVessel(vessel);
-    setTrailData(null);
+    setTrailData(null); setPredictRoute(null);
 
     if (IS_MOBILE()) {
       setPanelOpen(false);
@@ -255,7 +256,7 @@ export default function App() {
   const handleCloseDetail = useCallback(() => {
 
     setSelectedVessel(null);
-    setTrailData(null);
+    setTrailData(null); setPredictRoute(null);
 
   }, []);
 
@@ -273,7 +274,7 @@ export default function App() {
       const v = vessels[0];
 
       setSelectedVessel(v);
-      setTrailData(null);
+      setTrailData(null); setPredictRoute(null);
 
       if (mapRef.current?.panToVessel) {
         mapRef.current.panToVessel(v);
@@ -361,6 +362,7 @@ export default function App() {
             selectedVessel={selectedVessel}
             onVesselClick={handleSelectVessel}
             trailData={trailData}
+            predictRoute={predictRoute}
           />
 
           <div className="map-legend-overlay">
@@ -392,6 +394,7 @@ export default function App() {
             vessel={selectedVessel}
             onClose={handleCloseDetail}
             onShowTrail={setTrailData}
+            onShowPredictRoute={setPredictRoute}
           />
 
         </div>

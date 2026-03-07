@@ -55,6 +55,11 @@ export async function fetchVessels({
 export async function fetchVesselHistory(imo, hours = 24) {
   return call(`/vessels/${encodeURIComponent(imo)}/history?hours=${hours}`);
 }
+
+// ── AI ROUTE PREDICTION ──────────────────────────────────────
+export async function fetchRoutePrediction(imo) {
+  return call(`/predict/${encodeURIComponent(imo)}`);
+}
 export async function fetchAITrajectory(imo, hours = 48) {
   // Falls back to regular history if AI endpoint not available
   try {
