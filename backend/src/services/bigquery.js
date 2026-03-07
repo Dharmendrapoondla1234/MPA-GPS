@@ -420,14 +420,26 @@ async function getVesselTypes() {
 // ════════════════════════════════════════════════════════════════
 async function warmCache() {
   logger.info("🔥 Warming cache…");
-  try {
-    const dbt = await useDbt();   // detect first
-    await Promise.all([
-      getLatestVessels(), getFleetStats(), getVesselTypes(),
-      getRecentArrivals(), getPortActivity(),
-    ]);
-    logger.info(`✅ Cache warmed (${dbt ? "Photons_MPA dbt tables" : "legacy MPA tables"})`);
-  } catch (e) { logger.warn("⚠️ Cache warm failed:", e.message); }
+  const dbt = await useDbt();
+  // Run each independently so one failure doesn't block the others
+  const jobs = [
+    ["vessels",      getLatestVessels],
+    ["stats",        getFleetStats],
+    ["vesselTypes",  getVesselTypes],
+    ["arrivals",     getRecentArrivals],
+    ["portActivity", getPortActivity],
+  ];
+  let ok = 0;
+  for (const [name, fn] of jobs) {
+    try {
+      await fn();
+      logger.info(`  ✅ warmed: ${name}`);
+      ok++;
+    } catch (e) {
+      logger.warn(`  ⚠️ warm failed [${name}]: ${e.message}`);
+    }
+  }
+  logger.info(`🔥 Cache warm done: ${ok}/${jobs.length} (${dbt ? "Photons_MPA" : "legacy MPA"})`);
 }
 
 async function healthCheck() {
