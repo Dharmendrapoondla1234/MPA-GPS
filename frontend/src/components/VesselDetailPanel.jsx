@@ -703,12 +703,6 @@ function PredictTab({ prediction, predLoading, predError, predRouteOn, onLoad, o
 }
 
 
-function formatEtaHours(h) {
-  if (h < 1)  return `${Math.round(h*60)}min`;
-  if (h < 24) return `${h.toFixed(1)}h`;
-  return `${Math.floor(h/24)}d ${Math.round(h%24)}h`;
-}
-
 function SH({ children }) {
   return (
     <div className="dp-sh">
