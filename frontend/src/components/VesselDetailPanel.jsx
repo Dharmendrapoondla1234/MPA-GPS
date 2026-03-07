@@ -1,35 +1,39 @@
-// src/components/VesselDetailPanel.jsx
+// src/components/VesselDetailPanel.jsx — Ultra v5 with AI Route Prediction
 import React, { useState, useEffect, useCallback } from "react";
 import {
   getVesselStatus, getSpeedColor, formatTimestamp, timeAgo,
   getFlagEmoji, getVesselTypeLabel, getCountryName,
   calcDistanceNM, getRegionName,
 } from "../utils/vesselUtils";
-import { fetchVesselHistory } from "../services/api";
+import { fetchVesselHistory, fetchRoutePrediction } from "../services/api";
 import "./VesselDetailPanel.css";
 
-// Unwrap BigQuery value wrapper {value:"..."} or plain string
 function bq(val) {
   if (val === null || val === undefined) return null;
-  if (typeof val === 'object' && val.value !== undefined) return val.value || null;
+  if (typeof val === "object" && val.value !== undefined) return val.value || null;
   const s = String(val).trim();
-  return (s === '' || s === 'null' || s === 'undefined') ? null : s;
+  return (s === "" || s === "null" || s === "undefined") ? null : s;
 }
 
-
-const TABS         = ["VESSEL", "VOYAGE", "MISSION", "TRAIL"];
+const TABS = ["VESSEL", "VOYAGE", "MISSION", "TRAIL", "PREDICT"];
 const HOUR_OPTIONS = [12, 24, 48, 72];
 
-export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
-  const [tab,     setTab]     = useState("VESSEL");
-  const [hours,   setHours]   = useState(24);
-  const [trailOn, setTrailOn] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [stats,   setStats]   = useState(null);
+export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShowPredictRoute }) {
+  const [tab,       setTab]       = useState("VESSEL");
+  const [hours,     setHours]     = useState(24);
+  const [trailOn,   setTrailOn]   = useState(false);
+  const [loading,   setLoading]   = useState(false);
+  const [stats,     setStats]     = useState(null);
+  const [prediction, setPrediction] = useState(null);
+  const [predLoading, setPredLoading] = useState(false);
+  const [predError,   setPredError]   = useState(null);
+  const [predRouteOn, setPredRouteOn] = useState(false);
 
   useEffect(() => {
     setTab("VESSEL"); setTrailOn(false); setStats(null);
+    setPrediction(null); setPredError(null); setPredRouteOn(false);
     onShowTrail?.(null);
+    onShowPredictRoute?.(null);
   }, [vessel?.imo_number]); // eslint-disable-line
 
   const loadTrail = useCallback(async (h) => {
@@ -50,23 +54,41 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
         }
         const firstPt = hist[0], lastPt = hist[hist.length-1];
         setStats({
-          pts:  hist.length,
-          dist: dist.toFixed(1),
-          avg:  spds.length ? (spds.reduce((a,b)=>a+b,0)/spds.length).toFixed(1) : "—",
-          max:  spds.length ? Math.max(...spds).toFixed(1) : "—",
+          pts: hist.length, dist: dist.toFixed(1),
+          avg: spds.length ? (spds.reduce((a,b)=>a+b,0)/spds.length).toFixed(1) : "—",
+          max: spds.length ? Math.max(...spds).toFixed(1) : "—",
           from: formatTimestamp(firstPt?.effective_timestamp),
           to:   formatTimestamp(lastPt?.effective_timestamp),
           fromRegion: getRegionName(Number(firstPt?.latitude_degrees||0), Number(firstPt?.longitude_degrees||0)),
           toRegion:   getRegionName(Number(lastPt?.latitude_degrees||0),  Number(lastPt?.longitude_degrees||0)),
         });
       }
-    } catch (e) { console.error("Trail error:", e); }
+    } catch(e) { console.error("Trail error:", e); }
     finally { setLoading(false); }
   }, [vessel?.imo_number, onShowTrail]); // eslint-disable-line
 
+  const loadPrediction = useCallback(async () => {
+    if (!vessel?.imo_number) return;
+    setPredLoading(true); setPredError(null);
+    try {
+      const data = await fetchRoutePrediction(vessel.imo_number);
+      setPrediction(data);
+    } catch(e) {
+      setPredError(e.message || "Prediction failed");
+    } finally {
+      setPredLoading(false);
+    }
+  }, [vessel?.imo_number]);
+
+  const togglePredictRoute = useCallback(() => {
+    if (!prediction?.route_waypoints?.length) return;
+    const next = !predRouteOn;
+    setPredRouteOn(next);
+    onShowPredictRoute?.(next ? prediction : null);
+  }, [prediction, predRouteOn, onShowPredictRoute]);
+
   if (!vessel) return null;
 
-  // ── Core AIS fields ────────────────────────────────────────────────
   const name     = vessel.vessel_name    || "Unknown Vessel";
   const imoNum   = vessel.imo_number;
   const mmsi     = vessel.mmsi_number;
@@ -86,8 +108,6 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
   const netT     = vessel.net_tonnage    ? Number(vessel.net_tonnage)    : null;
   const dw       = vessel.deadweight     ? Number(vessel.deadweight)     : null;
   const built    = vessel.year_built && Number(vessel.year_built) > 0 ? String(vessel.year_built) : null;
-
-  // ── Enriched port data from MPA_Master_Vessels ────────────────────
   const lastPortDeparted    = bq(vessel.last_port_departed);
   const nextPortDest        = bq(vessel.next_port_destination);
   const lastArrivedTime     = bq(vessel.last_arrived_time);
@@ -116,7 +136,7 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
   return (
     <div className="dp-root">
 
-      {/* ── HEADER ── */}
+      {/* HEADER */}
       <div className="dp-head">
         <span className="dp-flag">{flagE}</span>
         <div className="dp-head-info">
@@ -128,14 +148,14 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
         <button className="dp-close" onClick={onClose}>✕</button>
       </div>
 
-      {/* ── STATUS BAR ── */}
+      {/* STATUS BAR */}
       <div className="dp-status-bar" style={{background:`${color}14`,borderColor:`${color}30`}}>
         <span className="dp-sdot" style={{background:color,boxShadow:`0 0 8px ${color}`}}/>
         <span className="dp-slabel" style={{color}}>{status.icon} {status.label}</span>
         <span className="dp-time-ago">{timeAgo(ts)}</span>
       </div>
 
-      {/* ── PORT QUICK STRIP (new — from MPA_Master_Vessels) ── */}
+      {/* PORT STRIP */}
       {(lastPortDeparted || nextPortDest || berthLocation) && (
         <div className="dp-port-strip">
           {lastPortDeparted && (
@@ -171,7 +191,7 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
         </div>
       )}
 
-      {/* ── SPEED HERO ── */}
+      {/* SPEED HERO */}
       <div className="dp-hero">
         <div>
           <div className="dp-speed-num" style={{color}}>{speed.toFixed(1)}</div>
@@ -196,7 +216,7 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
         </div>
       </div>
 
-      {/* ── TRAIL BAR ── */}
+      {/* TRAIL BAR */}
       <div className="dp-trailbar">
         <span className="dp-tl">TRAIL</span>
         <div className="dp-th-btns">
@@ -220,14 +240,16 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
         </div>
       )}
 
-      {/* ── TABS ── */}
+      {/* TABS */}
       <div className="dp-tabs">
         {TABS.map(t => (
-          <button key={t} className={`dp-tab ${tab===t?"on":""}`} onClick={()=>setTab(t)}>{t}</button>
+          <button key={t} className={`dp-tab ${tab===t?"on":""} ${t==="PREDICT"?"dp-tab-ai":""}`} onClick={()=>setTab(t)}>
+            {t === "PREDICT" ? "🤖 AI" : t}
+          </button>
         ))}
       </div>
 
-      {/* ── TAB BODY ── */}
+      {/* TAB BODY */}
       <div className="dp-body">
 
         {/* ═══ VESSEL TAB ═══ */}
@@ -240,16 +262,14 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
             <R k="Call Sign"      v={callSign} mono/>
             <R k="Vessel Type"    v={getVesselTypeLabel(vtype)}/>
             <R k="Flag / Country" v={flag ? `${flagE} ${getCountryName(flag)} (${flag})` : null}/>
-
             <SH>DIMENSIONS</SH>
-            <R k="Length Overall" v={lenOA  ? `${lenOA} m`                    : null}/>
-            <R k="Beam / Breadth" v={beam   ? `${beam} m`                     : null}/>
-            <R k="Depth"          v={depth  ? `${depth} m`                    : null}/>
-            <R k="Gross Tonnage"  v={grossT ? `${grossT.toLocaleString()} GT`  : null}/>
-            <R k="Net Tonnage"    v={netT   ? `${netT.toLocaleString()} NT`    : null}/>
-            <R k="Dead Weight"    v={dw     ? `${dw.toLocaleString()} DWT`     : null} hi/>
+            <R k="Length Overall" v={lenOA  ? `${lenOA} m`                   : null}/>
+            <R k="Beam / Breadth" v={beam   ? `${beam} m`                    : null}/>
+            <R k="Depth"          v={depth  ? `${depth} m`                   : null}/>
+            <R k="Gross Tonnage"  v={grossT ? `${grossT.toLocaleString()} GT` : null}/>
+            <R k="Net Tonnage"    v={netT   ? `${netT.toLocaleString()} NT`   : null}/>
+            <R k="Dead Weight"    v={dw     ? `${dw.toLocaleString()} DWT`    : null} hi/>
             <R k="Year Built"     v={built}/>
-
             <SH>POSITION</SH>
             <R k="Region"         v={region} hi/>
             <R k="Latitude"       v={lat ? `${lat.toFixed(6)}°` : null} mono/>
@@ -264,8 +284,6 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
         {/* ═══ VOYAGE TAB ═══ */}
         {tab === "VOYAGE" && (
           <div className="dp-section">
-
-            {/* Port movement card — from MPA_Master_Vessels enriched data */}
             {(lastPortDeparted || nextPortDest) && (
               <>
                 <SH>PORT MOVEMENT</SH>
@@ -274,48 +292,37 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
                     <div className="dp-vr-icon">⚓</div>
                     <div className="dp-vr-label">LAST PORT DEPARTED</div>
                     <div className="dp-vr-val hi">{lastPortDeparted || "—"}</div>
-                    {lastArrivedTime && (
-                      <div className="dp-vr-time">Arrived: {formatTimestamp(lastArrivedTime)}</div>
-                    )}
-                    {lastDepartedTime && (
-                      <div className="dp-vr-time">Departed: {formatTimestamp(lastDepartedTime)}</div>
-                    )}
+                    {lastArrivedTime  && <div className="dp-vr-time">Arrived: {formatTimestamp(lastArrivedTime)}</div>}
+                    {lastDepartedTime && <div className="dp-vr-time">Departed: {formatTimestamp(lastDepartedTime)}</div>}
                   </div>
                   <div className="dp-vr-arrow">→</div>
                   <div className="dp-vr-box">
                     <div className="dp-vr-icon">🏁</div>
                     <div className="dp-vr-label">DESTINATION</div>
                     <div className="dp-vr-val hi">{nextPortDest || "—"}</div>
-                    {declaredArrivalTime && (
-                      <div className="dp-vr-time">ETA: {formatTimestamp(declaredArrivalTime)}</div>
-                    )}
+                    {declaredArrivalTime && <div className="dp-vr-time">ETA: {formatTimestamp(declaredArrivalTime)}</div>}
                   </div>
                 </div>
               </>
             )}
-
-            {/* Berth & declaration data */}
             {(berthLocation || shippingAgent || voyagePurpose) && (
               <>
                 <SH>BERTH & DECLARATION</SH>
-                <R k="Berth Location"  v={berthLocation} hi/>
-                <R k="Berth Grid"      v={berthGrid}/>
-                <R k="Voyage Purpose"  v={voyagePurpose}/>
-                <R k="Shipping Agent"  v={shippingAgent} hi/>
+                <R k="Berth Location"   v={berthLocation} hi/>
+                <R k="Berth Grid"       v={berthGrid}/>
+                <R k="Voyage Purpose"   v={voyagePurpose}/>
+                <R k="Shipping Agent"   v={shippingAgent} hi/>
                 <R k="Declared Arrival" v={formatTimestamp(declaredArrivalTime)}/>
-                <R k="Crew on Board"   v={crewCount}/>
-                <R k="Passengers"      v={passengerCount}/>
+                <R k="Crew on Board"    v={crewCount}/>
+                <R k="Passengers"       v={passengerCount}/>
               </>
             )}
-
-            {/* Data source badges */}
             <SH>DATA SOURCES</SH>
             <div className="dp-source-badges">
               <span className={`dp-src ${hasArrival    ? "active" : "off"}`}>✈ Arrivals</span>
               <span className={`dp-src ${hasDeparture  ? "active" : "off"}`}>🚢 Departures</span>
               <span className={`dp-src ${hasDeclaration? "active" : "off"}`}>📋 Declaration</span>
             </div>
-
             <SH>CURRENT POSITION</SH>
             <R k="Region"      v={region} hi/>
             <R k="Latitude"    v={lat ? `${lat.toFixed(6)}°` : null} mono/>
@@ -324,30 +331,6 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
             <R k="Heading"     v={`${heading}°`}/>
             <R k="Last Update" v={formatTimestamp(ts)}/>
             <R k="Updated"     v={timeAgo(ts)} hi/>
-
-            {/* Trail route analysis */}
-            {stats && (
-              <>
-                <SH>TRAIL ROUTE ANALYSIS</SH>
-                <R k="Last Port (Trail)" v={stats.fromRegion} hi/>
-                <R k="Current (Trail)"   v={stats.toRegion}   hi/>
-                <R k="Distance"          v={`${stats.dist} NM`} hi/>
-                <R k="Avg Speed"         v={`${stats.avg} kn`}/>
-                <R k="Max Speed"         v={`${stats.max} kn`}/>
-                <R k="Track Points"      v={stats.pts}/>
-                <R k="Track Start"       v={stats.from} mono/>
-                <R k="Track End"         v={stats.to}   mono/>
-              </>
-            )}
-            {!stats && (
-              <div className="dp-trail-hint">
-                <span>🛤️</span>
-                <p>Load a trail to see AIS route analysis</p>
-                <button className="dp-hint-btn" onClick={()=>loadTrail(hours)}>
-                  Load {hours}h Trail
-                </button>
-              </div>
-            )}
           </div>
         )}
 
@@ -362,26 +345,24 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
                 <div className="dp-op-sub">{speed.toFixed(2)} kn · {(speed*1.852).toFixed(2)} km/h{heading?` · HDG ${heading}°`:""}</div>
               </div>
             </div>
-
             {(shippingAgent || voyagePurpose) && (
               <>
                 <SH>VOYAGE INFO</SH>
-                <R k="Shipping Agent"  v={shippingAgent} hi/>
-                <R k="Voyage Purpose"  v={voyagePurpose}/>
-                <R k="Crew on Board"   v={crewCount}/>
-                <R k="Passengers"      v={passengerCount}/>
+                <R k="Shipping Agent" v={shippingAgent} hi/>
+                <R k="Voyage Purpose" v={voyagePurpose}/>
+                <R k="Crew on Board"  v={crewCount}/>
+                <R k="Passengers"     v={passengerCount}/>
               </>
             )}
-
             <SH>CAPACITY</SH>
             <div className="dp-cap-grid">
               {[
-                ["DWT",  dw     ? dw.toLocaleString()     : "N/A", "Dead Weight Tons"],
-                ["GT",   grossT ? grossT.toLocaleString()  : "N/A", "Gross Tonnage"],
-                ["NT",   netT   ? netT.toLocaleString()    : "N/A", "Net Tonnage"],
-                ["LOA",  lenOA  ? `${lenOA}m`              : "N/A", "Length Overall"],
-                ["BM",   beam   ? `${beam}m`               : "N/A", "Beam/Breadth"],
-                ["DEP",  depth  ? `${depth}m`              : "N/A", "Vessel Depth"],
+                ["DWT",  dw     ? dw.toLocaleString()    : "N/A", "Dead Weight Tons"],
+                ["GT",   grossT ? grossT.toLocaleString() : "N/A", "Gross Tonnage"],
+                ["NT",   netT   ? netT.toLocaleString()   : "N/A", "Net Tonnage"],
+                ["LOA",  lenOA  ? `${lenOA}m`             : "N/A", "Length Overall"],
+                ["BM",   beam   ? `${beam}m`              : "N/A", "Beam/Breadth"],
+                ["DEP",  depth  ? `${depth}m`             : "N/A", "Vessel Depth"],
               ].map(([code,val,desc]) => (
                 <div key={code} className="dp-cap-card">
                   <div className="dp-cap-code">{code}</div>
@@ -409,8 +390,6 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
                   : <>📍 Show {hours}h Route</>}
               </button>
             </div>
-
-            {/* Port data from master table — always visible */}
             {(lastPortDeparted || nextPortDest) && (
               <>
                 <SH>ROUTE JOURNEY</SH>
@@ -439,8 +418,6 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
                 </div>
               </>
             )}
-
-            {/* AIS trail stats */}
             {stats && (
               <>
                 <SH>AIS TRAIL STATS</SH>
@@ -464,7 +441,6 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
                 {stats.toRegion   && <R k="End Region"   v={stats.toRegion}   hi/>}
               </>
             )}
-
             <SH>CURRENT POSITION</SH>
             <R k="Region"      v={region} hi/>
             <R k="Latitude"    v={lat ? `${lat.toFixed(6)}°` : null} mono/>
@@ -473,9 +449,234 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail }) {
             <R k="Updated"     v={timeAgo(ts)} hi/>
           </div>
         )}
+
+        {/* ═══ PREDICT TAB ═══ */}
+        {tab === "PREDICT" && (
+          <PredictTab
+            vessel={vessel}
+            prediction={prediction}
+            predLoading={predLoading}
+            predError={predError}
+            predRouteOn={predRouteOn}
+            onLoad={loadPrediction}
+            onToggleRoute={togglePredictRoute}
+            speed={speed}
+            heading={heading}
+          />
+        )}
       </div>
     </div>
   );
+}
+
+// ── PREDICT TAB COMPONENT ─────────────────────────────────────
+function PredictTab({ vessel, prediction, predLoading, predError, predRouteOn, onLoad, onToggleRoute, speed, heading }) {
+
+  const hasRun = prediction !== null || predError !== null;
+  const pred   = prediction?.prediction;
+  const alts   = prediction?.alternatives || [];
+  const analysis = prediction?.analysis;
+
+  // Confidence color
+  function confColor(c) {
+    if (c >= 75) return "#00ff9d";
+    if (c >= 50) return "#ffaa00";
+    return "#ff5577";
+  }
+
+  return (
+    <div className="dp-section dp-predict">
+
+      {/* Hero CTA if not yet run */}
+      {!hasRun && !predLoading && (
+        <div className="pred-hero">
+          <div className="pred-hero-icon">🤖</div>
+          <div className="pred-hero-title">AI Route Prediction</div>
+          <div className="pred-hero-sub">
+            Predicts next port, ETA, and likely route using AIS trajectory
+            analysis, heading alignment, and historical port patterns.
+          </div>
+          <button className="pred-run-btn" onClick={onLoad}>
+            <span className="pred-run-icon">▶</span>
+            Run Prediction
+          </button>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {predLoading && (
+        <div className="pred-loading">
+          <div className="pred-spinner"/>
+          <div className="pred-loading-title">Analysing trajectory…</div>
+          <div className="pred-loading-steps">
+            {["Fetching 72h AIS history","Computing heading alignment","Scoring 20 candidate ports","Generating route waypoints"].map((s,i) => (
+              <div key={i} className="pred-step" style={{animationDelay:`${i*0.4}s`}}>
+                <span className="pred-step-dot"/>
+                {s}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {predError && !predLoading && (
+        <div className="pred-error">
+          <div className="pred-error-icon">⚠️</div>
+          <div className="pred-error-msg">{predError}</div>
+          <button className="pred-retry-btn" onClick={onLoad}>Retry</button>
+        </div>
+      )}
+
+      {/* Results */}
+      {pred && !predLoading && (
+        <>
+          {/* Primary prediction card */}
+          <div className="pred-main-card">
+            <div className="pred-mc-header">
+              <span className="pred-mc-label">PREDICTED DESTINATION</span>
+              {pred.is_declared && <span className="pred-declared-badge">✓ DECLARED</span>}
+            </div>
+            <div className="pred-mc-port">{pred.destination}</div>
+            <div className="pred-mc-meta">
+              <span className="pred-mc-dist">{pred.distance_nm} NM away</span>
+              <span className="pred-mc-bearing">HDG {pred.bearing_deg}°</span>
+            </div>
+
+            {/* ETA display */}
+            <div className="pred-eta-block">
+              <div className="pred-eta-label">ESTIMATED TIME OF ARRIVAL</div>
+              <div className="pred-eta-value">{pred.eta_label}</div>
+              {pred.eta_iso && (
+                <div className="pred-eta-date">
+                  {new Date(pred.eta_iso).toLocaleString("en-SG", {
+                    weekday: "short", month: "short", day: "2-digit",
+                    hour: "2-digit", minute: "2-digit", hour12: false,
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Confidence bar */}
+            <div className="pred-conf-wrap">
+              <div className="pred-conf-label">
+                <span>CONFIDENCE</span>
+                <span style={{color: confColor(pred.confidence)}}>{pred.confidence}%</span>
+              </div>
+              <div className="pred-conf-bar">
+                <div className="pred-conf-fill"
+                  style={{
+                    width: `${pred.confidence}%`,
+                    background: `linear-gradient(90deg, ${confColor(pred.confidence)}88, ${confColor(pred.confidence)})`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Method */}
+            <div className="pred-method">
+              <span className="pred-method-icon">🔬</span>
+              {pred.method}
+            </div>
+
+            {/* Show route toggle */}
+            <button
+              className={`pred-route-btn ${predRouteOn ? "on" : ""}`}
+              onClick={onToggleRoute}
+            >
+              <span>{predRouteOn ? "🗺️ Hide Route on Map" : "🗺️ Show Route on Map"}</span>
+            </button>
+          </div>
+
+          {/* Voyage context */}
+          {(prediction.vessel?.last_port || prediction.vessel?.declared_dest) && (
+            <div className="pred-voyage-context">
+              <SH>VOYAGE CONTEXT</SH>
+              {prediction.vessel.last_port && (
+                <R k="Last Port" v={prediction.vessel.last_port} hi/>
+              )}
+              {prediction.vessel.declared_dest && (
+                <R k="Declared Dest" v={prediction.vessel.declared_dest} hi/>
+              )}
+              <R k="Current Speed" v={`${prediction.vessel.speed_kn} kn (${prediction.vessel.speed_kmh} km/h)`}/>
+              <R k="Heading"       v={`${prediction.vessel.heading}°`}/>
+            </div>
+          )}
+
+          {/* Alternative destinations */}
+          {alts.length > 0 && (
+            <>
+              <SH>ALTERNATIVE ROUTES</SH>
+              <div className="pred-alts">
+                {alts.map((a, i) => (
+                  <div key={i} className="pred-alt-item">
+                    <div className="pred-alt-rank">#{i+2}</div>
+                    <div className="pred-alt-info">
+                      <div className="pred-alt-port">{a.port}</div>
+                      <div className="pred-alt-meta">{a.distance_nm} NM · {a.eta_label}</div>
+                    </div>
+                    <div className="pred-alt-conf" style={{color: confColor(a.confidence)}}>
+                      {a.confidence}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Analysis details */}
+          {analysis && (
+            <>
+              <SH>ANALYSIS DETAILS</SH>
+              <R k="AIS Points Used"  v={`${analysis.history_points} pts (72h)`}/>
+              <R k="Avg Speed"        v={`${analysis.avg_speed_kn} kn`}/>
+              <R k="Avg Heading"      v={`${analysis.avg_heading_deg}°`}/>
+              <R k="Ports Evaluated"  v={`${analysis.ports_evaluated}`}/>
+            </>
+          )}
+
+          {/* Waypoints */}
+          {prediction?.route_waypoints?.length > 0 && (
+            <>
+              <SH>ROUTE WAYPOINTS</SH>
+              <div className="pred-waypoints">
+                {prediction.route_waypoints.map((wp, i) => (
+                  <div key={i} className={`pred-wp ${wp.type}`}>
+                    <div className={`pred-wp-dot ${wp.type}`}/>
+                    <div className="pred-wp-info">
+                      <div className="pred-wp-label">{wp.label}</div>
+                      {wp.eta_hours_from_now && (
+                        <div className="pred-wp-eta">in {formatEtaHours(wp.eta_hours_from_now)}</div>
+                      )}
+                      {wp.eta_label && wp.type === "destination" && (
+                        <div className="pred-wp-eta">{wp.eta_label}</div>
+                      )}
+                    </div>
+                    <div className="pred-wp-coords mono">
+                      {wp.lat.toFixed(3)}°, {wp.lng.toFixed(3)}°
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Re-run button */}
+          <div style={{padding:"10px 14px 14px"}}>
+            <button className="pred-rerun-btn" onClick={onLoad}>
+              ↺ Re-run Prediction
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function formatEtaHours(h) {
+  if (h < 1)  return `${Math.round(h*60)}min`;
+  if (h < 24) return `${h.toFixed(1)}h`;
+  return `${Math.floor(h/24)}d ${Math.round(h%24)}h`;
 }
 
 function SH({ children }) {
