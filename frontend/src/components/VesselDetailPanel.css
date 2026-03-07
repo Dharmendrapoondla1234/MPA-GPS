@@ -1,5 +1,5 @@
 /* VesselPanel.css — Ultra v4 */
-
+@import './VesselDetailPanel_dbt_additions.css';
 .vp-root {
   display: flex;
   flex-direction: column;
