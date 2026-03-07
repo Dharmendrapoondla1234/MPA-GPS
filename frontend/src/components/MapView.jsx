@@ -129,6 +129,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   const [alerts,         setAlerts]         = useState([]);
   const [showLayerPanel, setShowLayerPanel] = useState(false);
   const [showAlerts,     setShowAlerts]     = useState(true);
+  const [showAllAlerts,  setShowAllAlerts]  = useState(false);
   const [loadingGIS,     setLoadingGIS]     = useState(true);
   const [aiStats,        setAiStats]        = useState(null);
   const [layers, setLayers] = useState({
@@ -163,7 +164,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: 340 });
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
       map.addListener("mousemove", e => setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) }));
-      map.addListener("click", () => { infoWin.current.close(); hoverWin.current.close(); setShowLayerPanel(false); });
+      map.addListener("click", () => { infoWin.current.close(); hoverWin.current.close(); setShowLayerPanel(false); setShowAlerts(false); });
       clusterer.current = new MarkerClusterer({ map, markers: [], renderer: { render({ count, position }) {
         const sz = count < 10 ? 24 : count < 50 ? 28 : count < 200 ? 32 : 38;
         return new window.google.maps.Marker({ position, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: sz/2, fillColor: "rgba(0,16,36,0.88)", fillOpacity: 1, strokeColor: "rgba(0,229,255,0.55)", strokeWeight: 1.5 }, label: { text: count > 999 ? `${(count/1000).toFixed(1)}k` : String(count), color: "#00e5ff", fontSize: "11px", fontFamily: "'JetBrains Mono',monospace", fontWeight: "700" }, zIndex: 999 });
@@ -205,8 +206,8 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
         const vl=parseFloat(v.latitude_degrees),vg=parseFloat(v.longitude_degrees);
         let cd=Infinity,cn=null;
         pts.forEach(d => { const dist=distanceM(vl,vg,d.lat,d.lng);if(dist<cd){cd=dist;cn=d;} });
-        if(cd<RADIUS.DANGER){newAlerts.push({level:"danger",vessel:v.vessel_name,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});alertCircles.current[`d_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.DANGER,map:mapObj.current,fillColor:"#ff2244",fillOpacity:0.08,strokeColor:"#ff2244",strokeWeight:2,strokeOpacity:0.9,zIndex:20});}
-        else if(cd<RADIUS.WARNING){newAlerts.push({level:"warning",vessel:v.vessel_name,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});alertCircles.current[`w_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.WARNING,map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.05,strokeColor:"#ffaa00",strokeWeight:1.5,strokeOpacity:0.7,zIndex:19});}
+        if(cd<RADIUS.DANGER){newAlerts.push({level:"danger",vessel:v.vessel_name,imo:v.imo_number,lat:vl,lng:vg,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});alertCircles.current[`d_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.DANGER,map:mapObj.current,fillColor:"#ff2244",fillOpacity:0.08,strokeColor:"#ff2244",strokeWeight:2,strokeOpacity:0.9,zIndex:20});}
+        else if(cd<RADIUS.WARNING){newAlerts.push({level:"warning",vessel:v.vessel_name,imo:v.imo_number,lat:vl,lng:vg,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});alertCircles.current[`w_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.WARNING,map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.05,strokeColor:"#ffaa00",strokeWeight:1.5,strokeOpacity:0.7,zIndex:19});}
       });
     }
     const NEAR=0.02,cap=Math.min(fresh.length,200);
@@ -216,7 +217,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       if(Math.abs(+a.longitude_degrees-+b.longitude_degrees)>NEAR)continue;
       const d=distanceM(+a.latitude_degrees,+a.longitude_degrees,+b.latitude_degrees,+b.longitude_degrees);
       if(d<RADIUS.DANGER){
-        newAlerts.push({level:"danger",vessel:a.vessel_name,detail:`${Math.round(d)}m from ${b.vessel_name} — COLLISION RISK`});
+        newAlerts.push({level:"danger",vessel:a.vessel_name,imo:a.imo_number,lat:+a.latitude_degrees,lng:+a.longitude_degrees,otherVessel:b.vessel_name,otherLat:+b.latitude_degrees,otherLng:+b.longitude_degrees,detail:`${Math.round(d)}m from ${b.vessel_name} — COLLISION RISK`});
         const ml=(+a.latitude_degrees + +b.latitude_degrees)/2,mg=(+a.longitude_degrees + +b.longitude_degrees)/2;
         vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:ml,lng:mg},radius:d/2,map:mapObj.current,fillColor:"#ff0000",fillOpacity:0.12,strokeColor:"#ff0000",strokeWeight:2,strokeOpacity:1,zIndex:25});
       } else if(d<RADIUS.WARNING){
@@ -389,27 +390,62 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       {/* ALERT PANEL */}
       {alerts.length>0 && showAlerts && (
         <div className="mv-alert-panel" onClick={e=>e.stopPropagation()}>
+          {/* Radar sweep animation */}
+          <div className="mv-ap-radar">
+            <div className="mv-ap-radar-sweep"/>
+            <div className="mv-ap-radar-ring mv-ap-radar-r1"/>
+            <div className="mv-ap-radar-ring mv-ap-radar-r2"/>
+            <div className="mv-ap-radar-dot"/>
+          </div>
           <div className="mv-ap-head">
-            <div className="mv-ap-badges">
-              {dangerCount>0&&<span className="mv-ap-badge mv-ap-danger">🚨 {dangerCount} DANGER</span>}
-              {warnCount>0&&<span className="mv-ap-badge mv-ap-warn">⚠️ {warnCount} CAUTION</span>}
+            <div className="mv-ap-title-row">
+              <span className="mv-ap-title">⚡ COLLISION ALERTS</span>
+              <div className="mv-ap-badges">
+                {dangerCount>0&&<span className="mv-ap-badge mv-ap-danger">🚨 {dangerCount}</span>}
+                {warnCount>0&&<span className="mv-ap-badge mv-ap-warn">⚠️ {warnCount}</span>}
+              </div>
             </div>
-            <button className="mv-ap-close" onClick={()=>setShowAlerts(false)}>✕</button>
+            <button className="mv-ap-close" onClick={e=>{e.stopPropagation();setShowAlerts(false);}}>✕</button>
           </div>
           <div className="mv-ap-list">
-            {alerts.slice(0,5).map((a,i)=>(
-              <div key={i} className={`mv-ap-item mv-ap-${a.level}`}>
-                <div className="mv-ap-vessel">{a.vessel||"Unknown"}</div>
-                <div className="mv-ap-detail">{a.detail}</div>
+            {(showAllAlerts ? alerts : alerts.slice(0,5)).map((a,i)=>(
+              <div key={i}
+                className={`mv-ap-item mv-ap-${a.level}`}
+                onClick={e=>{
+                  e.stopPropagation();
+                  if(a.lat&&a.lng&&mapObj.current){
+                    mapObj.current.panTo({lat:a.lat,lng:a.lng});
+                    mapObj.current.setZoom(15);
+                  }
+                  if(a.imo) onVesselClick(vessels.find(v=>v.imo_number===a.imo||String(v.imo_number)===String(a.imo))||null);
+                }}
+              >
+                <div className="mv-ap-item-left">
+                  <span className={`mv-ap-level-dot mv-ap-dot-${a.level}`}/>
+                  <div>
+                    <div className="mv-ap-vessel">{a.vessel||"Unknown"}</div>
+                    <div className="mv-ap-detail">{a.detail}</div>
+                  </div>
+                </div>
+                <span className="mv-ap-arrow">›</span>
               </div>
             ))}
-            {alerts.length>5&&<div className="mv-ap-more">+{alerts.length-5} more</div>}
+            {alerts.length>5&&(
+              <button className="mv-ap-more-btn" onClick={e=>{e.stopPropagation();setShowAllAlerts(x=>!x);}}>
+                {showAllAlerts ? "▲ Show less" : `▼ +${alerts.length-5} more`}
+              </button>
+            )}
+          </div>
+          <div className="mv-ap-footer">
+            <span>LIVE MONITORING · {alerts.length} ACTIVE</span>
           </div>
         </div>
       )}
       {alerts.length>0&&!showAlerts&&(
-        <button className="mv-ap-bubble" onClick={e=>{e.stopPropagation();setShowAlerts(true);}}>
-          🚨 <span>{alerts.length}</span>
+        <button className="mv-ap-bubble" onClick={e=>{e.stopPropagation();setShowAlerts(true);setShowAllAlerts(false);}}>
+          <span className="mv-ap-bubble-ping"/>
+          🚨 <span>{dangerCount>0?dangerCount:alerts.length}</span>
+          <span className="mv-ap-bubble-label">DANGER</span>
         </button>
       )}
 
