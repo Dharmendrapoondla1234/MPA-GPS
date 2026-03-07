@@ -1,4 +1,4 @@
-// src/App.jsx
+// src/App.jsx — Ultra v4
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import AuthPage from "./components/Authpage";
 import TopBar from "./components/TopBar";
@@ -11,48 +11,43 @@ import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import "./styles/App.css";
 
+const IS_MOBILE = () => window.innerWidth <= 768;
+
 export default function App() {
   const [user, setUser] = useState(() => getCurrentUser());
-  const [filters, setFilters] = useState({
-    search: "",
-    vesselType: "",
-    speedRange: "",
-    speedMin: null,
-    speedMax: null,
-  });
+  const [filters, setFilters] = useState({ search: "", vesselType: "", speedRange: "", speedMin: null, speedMax: null });
   const [selectedVessel, setSelectedVessel] = useState(null);
   const [trailData, setTrailData] = useState(null);
-  const [panelOpen, setPanelOpen] = useState(true);
-  const mapRef = useRef(null); // ref to MapView so we can call panTo from outside
+  const [panelOpen, setPanelOpen] = useState(!IS_MOBILE());
+  const mapRef = useRef(null);
 
-  const {
-    vessels,
-    stats,
-    vesselTypes,
-    loading,
-    error,
-    nextRefresh,
-    lastUpdated,
-    refresh,
-  } = useVessels(filters);
+  const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
 
-  // ── Auto-locate vessel when search matches exactly 1 result ─────────
+  // Auto-locate vessel on exact search match
   useEffect(() => {
     if (!filters.search || filters.search.length < 2) return;
     if (vessels.length === 1) {
-      // Exact match — auto-select and pan
       setSelectedVessel(vessels[0]);
       setTrailData(null);
-      // Pan map via ref
-      if (mapRef.current?.panToVessel) {
-        mapRef.current.panToVessel(vessels[0]);
-      }
+      if (mapRef.current?.panToVessel) mapRef.current.panToVessel(vessels[0]);
+      if (IS_MOBILE()) setPanelOpen(false);
     }
   }, [vessels, filters.search]);
+
+  // Close panel on resize from mobile -> desktop
+  useEffect(() => {
+    const handler = () => {
+      if (!IS_MOBILE() && !panelOpen) setPanelOpen(true);
+    };
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, [panelOpen]);
 
   const handleSelectVessel = useCallback((vessel) => {
     setSelectedVessel(vessel);
     setTrailData(null);
+    // On mobile, auto-close left panel when selecting vessel
+    if (IS_MOBILE()) setPanelOpen(false);
   }, []);
 
   const handleCloseDetail = useCallback(() => {
@@ -65,17 +60,26 @@ export default function App() {
     setUser(null);
   }, []);
 
-  // On Enter key in search — pan to first matching vessel
   const handleSearchEnter = useCallback(() => {
     if (vessels.length > 0) {
       const v = vessels[0];
       setSelectedVessel(v);
       setTrailData(null);
       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(v);
+      if (IS_MOBILE()) setPanelOpen(false);
     }
   }, [vessels]);
 
+  // Mobile: clicking backdrop dismisses panel
+  const handleBackdropClick = useCallback(() => {
+    setPanelOpen(false);
+    setSelectedVessel(null);
+  }, []);
+
   if (!user) return <AuthPage onAuth={setUser} />;
+
+  const showLeftBackdrop  = IS_MOBILE() && panelOpen;
+  const showRightBackdrop = IS_MOBILE() && !!selectedVessel;
 
   return (
     <div className="app-root">
@@ -88,7 +92,7 @@ export default function App() {
         loading={loading}
         onRefresh={refresh}
         panelOpen={panelOpen}
-        onTogglePanel={() => setPanelOpen((p) => !p)}
+        onTogglePanel={() => setPanelOpen(p => !p)}
         lastUpdated={lastUpdated}
         user={user}
         onLogout={handleLogout}
@@ -97,6 +101,7 @@ export default function App() {
       <ErrorBanner message={error} onRetry={refresh} />
 
       <div className="app-body">
+        {/* LEFT PANEL */}
         <div className={`app-left-panel ${panelOpen ? "open" : "closed"}`}>
           <VesselPanel
             vessels={vessels}
@@ -109,6 +114,12 @@ export default function App() {
           />
         </div>
 
+        {/* Left panel backdrop (mobile) */}
+        {showLeftBackdrop && (
+          <div className="app-mobile-backdrop" onClick={() => setPanelOpen(false)} />
+        )}
+
+        {/* MAP */}
         <div className="app-map-area">
           <MapView
             ref={mapRef}
@@ -128,9 +139,13 @@ export default function App() {
           )}
         </div>
 
-        <div
-          className={`app-right-panel ${selectedVessel ? "open" : "closed"}`}
-        >
+        {/* Right panel backdrop (mobile) */}
+        {showRightBackdrop && (
+          <div className="app-mobile-backdrop" onClick={handleCloseDetail} style={{ zIndex: 45 }} />
+        )}
+
+        {/* RIGHT PANEL (detail) */}
+        <div className={`app-right-panel ${selectedVessel ? "open" : "closed"}`}>
           <VesselDetailPanel
             vessel={selectedVessel}
             onClose={handleCloseDetail}
