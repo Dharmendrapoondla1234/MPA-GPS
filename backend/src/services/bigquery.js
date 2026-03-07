@@ -250,12 +250,11 @@ async function healthCheck() {
     return false;
   }
 }
-
 module.exports = {
   bigquery,
   BQ_LOCATION,
-  SNAPSHOT_TABLE,
   FULL_TABLE,
+  SNAPSHOT_TABLE,
   getUserByEmail,
   createUser,
   updateLastLogin,
