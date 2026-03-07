@@ -1,0 +1,129 @@
+/* Additions to VesselDetailPanel.css for dbt enriched fields */
+
+/* dbt STATUS STRIP */
+
+.dp-dbt-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-top: 1px solid rgba(0,229,255,0.05);
+  border-bottom: 1px solid rgba(0,229,255,0.05);
+  gap: 8px;
+  flex-shrink: 0;
+}
+.dp-dbt-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+}
+.dp-dbt-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dp-dbt-label {
+  font-family: 'Orbitron', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.dp-dbt-port-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  color: #5a8aaa;
+}
+
+/* Data quality inline bar */
+.dp-dq-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.dp-dq-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7px;
+  color: #3d6a8a;
+  letter-spacing: 0.1em;
+}
+.dp-dq-bar {
+  width: 40px; height: 3px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.dp-dq-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.8s ease;
+}
+.dp-dq-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 22px;
+  text-align: right;
+}
+
+/* Speed category label */
+.dp-spd-cat {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  margin-top: 2px;
+}
+
+/* Data quality full section */
+.dp-dq-full {
+  background: rgba(0,229,255,0.03);
+  border: 1px solid rgba(0,229,255,0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 4px 0 8px;
+}
+.dp-dq-full-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 6px;
+  color: #8ab4d0;
+}
+.dp-dq-full-bar {
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.dp-dq-full-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.8s ease;
+}
+.dp-dq-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dp-dq-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 11px;
+  color: #5a8aaa;
+}
+.dp-dq-check.ok { color: #8ab4d0; }
+.dp-dq-pts {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  color: #3d6a8a;
+  min-width: 26px;
+}
+.dp-dq-icon { font-weight: 700; min-width: 12px; }
+.dp-dq-icon.ok { color: #00ff9d; }
+.dp-dq-icon.na { color: #ff3355; }
