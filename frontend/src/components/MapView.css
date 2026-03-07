@@ -501,3 +501,13 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
   .mv-range-legend { bottom: 50px; }
   .mv-bottom-hud { bottom: 10px; }
 }
+
+/* ── Predicted Route Info Window ───────────────────────── */
+.gm-style .gm-style-iw-c {
+  border-radius: 10px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  box-shadow: 0 8px 32px rgba(167,139,250,0.4) !important;
+}
+.gm-style .gm-style-iw-d { overflow: hidden !important; }
+.gm-style .gm-style-iw-t::after { background: #1a0a2e !important; }

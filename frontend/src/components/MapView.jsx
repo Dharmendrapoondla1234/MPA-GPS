@@ -1,6 +1,6 @@
 // src/components/MapView.jsx — ULTRA-ADVANCED v4
 import React, {
-  useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle,
+  useEffect, useRef, useState, useCallback, useMemo, forwardRef, useImperativeHandle,
 } from "react";
 import { Loader } from "@googlemaps/js-api-loader";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
@@ -13,6 +13,7 @@ let loaderPromise = null;
 const RADIUS = { DANGER: 500, WARNING: 1500 };
 const STALE_MS = 24 * 60 * 60 * 1000;
 const IS_MOBILE = /Mobi|Android/i.test(navigator.userAgent);
+const VESSEL_CAP = IS_MOBILE ? 800 : 5000; // perf cap
 
 function isStale(v) {
   const ts = v.effective_timestamp;
@@ -106,7 +107,7 @@ function interpolateTrajectory(points, gapThresholdMinutes = 30) {
   return result;
 }
 
-const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselClick, trailData }, ref) {
+const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselClick, trailData, predictRoute }, ref) {
   const mapRef       = useRef(null);
   const mapObj       = useRef(null);
   const markersRef   = useRef({});
@@ -121,6 +122,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   const pulseTimer   = useRef(null);
   const clusterDirty = useRef(false);
   const aiObjs       = useRef([]);
+  const predRouteObjs= useRef([]);
 
   const [coords,         setCoords]         = useState(null);
   const [mapStyle,       setMapStyle]       = useState("satellite");
@@ -149,6 +151,22 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     fetch(`${BASE_URL}/gis/all`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(j => { if (j?.data) setGisData(j.data); }).catch(e => console.warn("[GIS]", e.message)).finally(() => setLoadingGIS(false));
   }, []);
+
+
+  // ── PERFORMANCE: memoised derived data ──────────────────────
+  const freshVessels = useMemo(() =>
+    vessels.filter(v => {
+      if (isStale(v)) return false;
+      const lat = parseFloat(v.latitude_degrees), lng = parseFloat(v.longitude_degrees);
+      return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+    }),
+  [vessels]);
+
+  const alertMap = useMemo(() => {
+    const m = {};
+    alerts.forEach(a => { if (a.vessel && !m[a.vessel]) m[a.vessel] = a.level; });
+    return m;
+  }, [alerts]);
 
   useEffect(() => {
     if (mapObj.current) return;
@@ -183,7 +201,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
 
     if (layers.regulated && gisData.regulated) gisData.regulated.forEach(f => { const p = wktToLatLng(f.coords,f.type); if(!p||!Array.isArray(p))return; add(new window.google.maps.Polygon({paths:p,map,fillColor:"#ffcc0020",strokeColor:"#ffcc00",strokeWeight:1.5,strokeOpacity:0.9,fillOpacity:1,zIndex:2,clickable:true})).addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#1a1200;border:1px solid #ffcc00;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#ffcc00;font-weight:700;font-size:12px">⚠️ REGULATED AREA</div><div style="margin-top:6px;font-size:11px">${f.name||"Restricted Zone"}</div></div>`);infoWin.current.setPosition(p[0]);infoWin.current.open(map);}); });
     if (layers.tracks && gisData.tracks) gisData.tracks.forEach(f => { if(f.type==="track_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#00aaff12",strokeColor:"#00aaff88",strokeWeight:1,fillOpacity:1,zIndex:1}));}else if(f.type==="track_line"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polyline({path:p,map,strokeColor:"#0088ffaa",strokeWeight:1.5,strokeOpacity:0.8,zIndex:3,icons:[{icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:2,fillColor:"#0088ff",fillOpacity:0.7,strokeColor:"#fff",strokeWeight:0.5},offset:"50%",repeat:"80px"}]}));} });
-    if (layers.depths && gisData.depths) gisData.depths.forEach(f => { const p=wktToLatLng(f.coords,f.type);if(!p)return;const d=parseFloat(f.depth)||0;const c=d<=5?"#ff440088":d<=10?"#ff880055":d<=20?"#ffcc0044":"#0055aa44";add(new window.google.maps.Polyline({path:p,map,strokeColor:c,strokeWeight:d<=5?2:1,zIndex:1})); });
+    if (layers.depths && gisData.depths) gisData.depths.forEach(f => { const p=wktToLatLng(f.coords,f.type);if(!p)return;const depth=parseFloat(f.depth)||0;const c=depth<=5?"#ff440088":depth<=10?"#ff880055":depth<=20?"#ffcc0044":"#0055aa44";add(new window.google.maps.Polyline({path:p,map,strokeColor:c,strokeWeight:depth<=5?2:1,zIndex:1})); });
     if (layers.dangers && gisData.dangers) gisData.dangers.forEach(f => { if(f.type==="danger_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos)return;const m=add(new window.google.maps.Marker({position:pos,map,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#ff2244",fillOpacity:0.9,strokeColor:"#fff",strokeWeight:1.5},title:f.name||"Danger",zIndex:10}));m.addListener("click",()=>{infoWin.current.setContent(dangerInfoContent(f));infoWin.current.open(map,m);});add(new window.google.maps.Circle({center:pos,radius:80,map,fillColor:"#ff2244",fillOpacity:0.15,strokeColor:"#ff2244",strokeWeight:1,strokeOpacity:0.6,zIndex:4}));}else if(f.type==="danger_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#ff224433",strokeColor:"#ff2244",strokeWeight:2,fillOpacity:1,zIndex:5,clickable:true})).addListener("click",()=>{infoWin.current.setContent(dangerInfoContent(f));infoWin.current.setPosition(p[0]);infoWin.current.open(map);});}else if(f.type==="danger_line"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polyline({path:p,map,strokeColor:"#ff4466",strokeWeight:2.5,zIndex:6}));} });
     if (layers.aids && gisData.aids) gisData.aids.forEach(f => { if(!f.coords||isNaN(f.coords[0]))return;const pos={lat:f.coords[1],lng:f.coords[0]};const c=f.colour==="1"?"#ff2244":f.colour==="3"?"#00cc44":f.lighted?"#ffee00":"#cccccc";const m=add(new window.google.maps.Marker({position:pos,map,icon:{path:f.lighted?"M -2 -8 L 0 -10 L 2 -8 L 1 -8 L 1 0 L -1 0 L -1 -8 Z":window.google.maps.SymbolPath.CIRCLE,scale:f.lighted?1:4,fillColor:c,fillOpacity:0.9,strokeColor:"#000",strokeWeight:1},title:f.name||"Aid",zIndex:8}));if(f.lighted&&f.range_nm>0)add(new window.google.maps.Circle({center:pos,radius:f.range_nm*1852,map,fillColor:c+"08",strokeColor:c+"30",strokeWeight:0.5,zIndex:1}));m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#061020;border:1px solid ${c};border-radius:8px;padding:10px 14px;color:#fff"><div style="color:${c};font-weight:700;font-size:12px">${f.lighted?"💡":"🔘"} ${f.buoy?"BUOY":"BEACON"}</div><div style="margin-top:4px;font-size:11px">${f.name||"Aid"}</div></div>`);infoWin.current.open(map,m);}); });
     if (layers.ports && gisData.ports) gisData.ports.forEach(f => { if(!f.coords)return;const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;const m=add(new window.google.maps.Marker({position:pos,map,icon:{path:"M -4 0 L -2 -6 L 2 -6 L 4 0 L 2 0 L 2 2 L -2 2 L -2 0 Z",scale:1,fillColor:"#44aaff",fillOpacity:0.9,strokeColor:"#fff",strokeWeight:1},title:f.name||"Port",zIndex:7}));m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#001830;border:1px solid #44aaff;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#44aaff;font-weight:700;font-size:12px">⚓ PORT / SERVICE</div><div style="font-size:11px;margin-top:4px">${f.name||"Facility"}</div>${f.depth?`<div style="font-size:10px;color:#88aacc">Depth: ${f.depth}m</div>`:""}</div>`);infoWin.current.open(map,m);}); });
@@ -197,15 +215,15 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     Object.values(alertCircles.current).forEach(c => { try{c.setMap(null);}catch(_){} });
     Object.values(vesselCircles.current).forEach(c => { try{c.setMap(null);}catch(_){} });
     alertCircles.current = {}; vesselCircles.current = {};
-    if (!mapObj.current || !layers.vesselProximity) return;
-    const fresh = vessels.filter(v => !isStale(v) && v.latitude_degrees && v.longitude_degrees);
+    if (!mapObj.current || !layers.vesselProximity) { setAlerts([]); return; }
+    const fresh = freshVessels;
     const newAlerts = [];
     if (gisData && layers.dangers && gisData.dangers) {
       const pts = gisData.dangers.filter(d=>d.type==="danger_point"&&Array.isArray(d.coords)&&typeof d.coords[0]==="number").map(d=>({lat:d.coords[1],lng:d.coords[0],name:d.name}));
       fresh.forEach(v => {
         const vl=parseFloat(v.latitude_degrees),vg=parseFloat(v.longitude_degrees);
         let cd=Infinity,cn=null;
-        pts.forEach(d => { const dist=distanceM(vl,vg,d.lat,d.lng);if(dist<cd){cd=dist;cn=d;} });
+        pts.forEach(dp => { const dist=distanceM(vl,vg,dp.lat,dp.lng);if(dist<cd){cd=dist;cn=dp;} });
         if(cd<RADIUS.DANGER){newAlerts.push({level:"danger",vessel:v.vessel_name,imo:v.imo_number,lat:vl,lng:vg,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});alertCircles.current[`d_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.DANGER,map:mapObj.current,fillColor:"#ff2244",fillOpacity:0.08,strokeColor:"#ff2244",strokeWeight:2,strokeOpacity:0.9,zIndex:20});}
         else if(cd<RADIUS.WARNING){newAlerts.push({level:"warning",vessel:v.vessel_name,imo:v.imo_number,lat:vl,lng:vg,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});alertCircles.current[`w_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.WARNING,map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.05,strokeColor:"#ffaa00",strokeWeight:1.5,strokeOpacity:0.7,zIndex:19});}
       });
@@ -213,29 +231,28 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     const NEAR=0.02,cap=Math.min(fresh.length,200);
     for(let i=0;i<cap;i++)for(let j=i+1;j<cap;j++){
       const a=fresh[i],b=fresh[j];
+      if(!a.imo_number||!b.imo_number||a.imo_number===b.imo_number)continue;
       if(Math.abs(+a.latitude_degrees-+b.latitude_degrees)>NEAR)continue;
       if(Math.abs(+a.longitude_degrees-+b.longitude_degrees)>NEAR)continue;
-      const d=distanceM(+a.latitude_degrees,+a.longitude_degrees,+b.latitude_degrees,+b.longitude_degrees);
-      if(d<RADIUS.DANGER){
-        newAlerts.push({level:"danger",vessel:a.vessel_name,imo:a.imo_number,lat:+a.latitude_degrees,lng:+a.longitude_degrees,otherVessel:b.vessel_name,otherLat:+b.latitude_degrees,otherLng:+b.longitude_degrees,detail:`${Math.round(d)}m from ${b.vessel_name} — COLLISION RISK`});
+      const dist=distanceM(+a.latitude_degrees,+a.longitude_degrees,+b.latitude_degrees,+b.longitude_degrees);
+      if(dist<RADIUS.DANGER){
+        newAlerts.push({level:"danger",vessel:a.vessel_name,imo:a.imo_number,lat:+a.latitude_degrees,lng:+a.longitude_degrees,otherVessel:b.vessel_name,otherLat:+b.latitude_degrees,otherLng:+b.longitude_degrees,detail:`${Math.round(dist)}m from ${b.vessel_name} — COLLISION RISK`});
         const ml=(+a.latitude_degrees + +b.latitude_degrees)/2,mg=(+a.longitude_degrees + +b.longitude_degrees)/2;
-        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:ml,lng:mg},radius:d/2,map:mapObj.current,fillColor:"#ff0000",fillOpacity:0.12,strokeColor:"#ff0000",strokeWeight:2,strokeOpacity:1,zIndex:25});
-      } else if(d<RADIUS.WARNING){
-        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:(+a.latitude_degrees + +b.latitude_degrees)/2,lng:(+a.longitude_degrees + +b.longitude_degrees)/2},radius:d/2,map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.06,strokeColor:"#ffaa00",strokeWeight:1,strokeOpacity:0.6,zIndex:18});
+        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:ml,lng:mg},radius:Math.max(dist/2,50),map:mapObj.current,fillColor:"#ff0000",fillOpacity:0.12,strokeColor:"#ff0000",strokeWeight:2,strokeOpacity:1,zIndex:25});
+      } else if(dist<RADIUS.WARNING){
+        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:(+a.latitude_degrees + +b.latitude_degrees)/2,lng:(+a.longitude_degrees + +b.longitude_degrees)/2},radius:Math.max(dist/2,50),map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.06,strokeColor:"#ffaa00",strokeWeight:1,strokeOpacity:0.6,zIndex:18});
       }
     }
     setAlerts(newAlerts.slice(0,20));
-  }, [vessels, gisData, layers.dangers, layers.vesselProximity]);
+  }, [freshVessels, gisData, layers.dangers, layers.vesselProximity]);
 
   // MARKERS
   useEffect(() => {
     if (!mapObj.current || !clusterer.current) return;
-    const fresh=vessels.filter(v=>!isStale(v));
+    const fresh=freshVessels;
     const activeIds=new Set(fresh.map(v=>String(v.imo_number)));
     const selId=selectedVessel?.imo_number;
     const toAdd=[],toRemove=[];
-    const alertMap={};
-    alerts.forEach(a=>{if(a.vessel&&!alertMap[a.vessel])alertMap[a.vessel]=a.level;});
     Object.keys(markersRef.current).forEach(id=>{if(!activeIds.has(id)){const m=markersRef.current[id];if(m._animId)cancelAnimationFrame(m._animId);toRemove.push(m);delete markersRef.current[id];}});
     fresh.forEach(v=>{
       const lat=Number(v.latitude_degrees),lng=Number(v.longitude_degrees);
@@ -251,7 +268,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       }
     });
     if(!clusterDirty.current&&(toAdd.length>0||toRemove.length>0)){clusterDirty.current=true;requestAnimationFrame(()=>{clusterDirty.current=false;if(!clusterer.current)return;if(toRemove.length)clusterer.current.removeMarkers(toRemove,true);if(toAdd.length)clusterer.current.addMarkers(toAdd,true);if(toRemove.length||toAdd.length)clusterer.current.render();});}
-  }, [vessels, selectedVessel, onVesselClick, alerts, mapReady]);
+  }, [freshVessels, selectedVessel, onVesselClick, alertMap, mapReady]);
 
   // PULSE
   useEffect(() => {
@@ -320,7 +337,128 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     mapObj.current.fitBounds(bounds,{padding:90});
   }, [trailData, layers.aiTrajectory]);
 
-  // STYLE CYCLE
+  // PREDICT ROUTE OVERLAY
+  useEffect(() => {
+    // Clear previous route
+    predRouteObjs.current.forEach(o => { try{ o.setMap(null); }catch(_){} });
+    predRouteObjs.current = [];
+
+    const wps = predictRoute?.route_waypoints;
+    if (!wps || wps.length < 2 || !mapObj.current) return;
+
+    const path = wps.map(wp => ({ lat: wp.lat, lng: wp.lng }));
+    const dest = wps[wps.length - 1];
+    const start= wps[0];
+
+    // Animated dashed purple route line
+    const routeLine = new window.google.maps.Polyline({
+      path,
+      geodesic: true,
+      strokeColor: "#a78bfa",
+      strokeOpacity: 0,
+      strokeWeight: 0,
+      zIndex: 8,
+      map: mapObj.current,
+      icons: [{
+        icon: { path: "M 0,-1 0,1", strokeOpacity: 0.85, strokeColor: "#a78bfa", scale: 3.5 },
+        offset: "0", repeat: "14px",
+      }],
+    });
+    predRouteObjs.current.push(routeLine);
+
+    // Solid glowing underline
+    const glowLine = new window.google.maps.Polyline({
+      path,
+      geodesic: true,
+      strokeColor: "#7c3aed",
+      strokeOpacity: 0.25,
+      strokeWeight: 5,
+      zIndex: 7,
+      map: mapObj.current,
+    });
+    predRouteObjs.current.push(glowLine);
+
+    // Waypoint dots
+    wps.slice(1, -1).forEach((wp, i) => {
+      const dot = new window.google.maps.Marker({
+        position: { lat: wp.lat, lng: wp.lng },
+        map: mapObj.current,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 5,
+          fillColor: "#c4b5fd",
+          fillOpacity: 0.85,
+          strokeColor: "#7c3aed",
+          strokeWeight: 1.5,
+        },
+        title: wp.label || `Waypoint ${i+1}`,
+        zIndex: 9,
+      });
+      predRouteObjs.current.push(dot);
+    });
+
+    // Destination marker
+    const destMarker = new window.google.maps.Marker({
+      position: { lat: dest.lat, lng: dest.lng },
+      map: mapObj.current,
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 10,
+        fillColor: "#a78bfa",
+        fillOpacity: 1,
+        strokeColor: "#fff",
+        strokeWeight: 2,
+      },
+      title: `📍 ${dest.label}`,
+      zIndex: 12,
+    });
+    destMarker.addListener("click", () => {
+      const pred = predictRoute?.prediction;
+      infoWin.current.setContent(
+        `<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#1a0a2e,#2d1b4e);border:1px solid #a78bfa88;border-radius:10px;padding:12px 16px;color:#fff;min-width:200px">
+          <div style="color:#a78bfa;font-weight:700;font-size:11px;letter-spacing:0.1em">🎯 PREDICTED DESTINATION</div>
+          <div style="font-size:16px;font-weight:700;color:#ede9fe;margin:6px 0 4px">${dest.label}</div>
+          ${pred ? `<div style="font-size:10px;color:#c4b5fd">ETA: <b>${pred.eta_label}</b></div>
+          <div style="font-size:10px;color:#c4b5fd">Distance: <b>${pred.distance_nm} NM</b></div>
+          <div style="font-size:9px;color:#a78bfa;margin-top:4px">${pred.confidence}% confidence</div>` : ""}
+        </div>`
+      );
+      infoWin.current.setPosition({ lat: dest.lat, lng: dest.lng });
+      infoWin.current.open(mapObj.current);
+    });
+    predRouteObjs.current.push(destMarker);
+
+    // Origin pulse circle
+    const originCircle = new window.google.maps.Circle({
+      center: { lat: start.lat, lng: start.lng },
+      radius: 1200,
+      map: mapObj.current,
+      fillColor: "#a78bfa",
+      fillOpacity: 0.07,
+      strokeColor: "#a78bfa",
+      strokeWeight: 1.5,
+      strokeOpacity: 0.4,
+      zIndex: 6,
+    });
+    predRouteObjs.current.push(originCircle);
+
+    // Destination zone circle
+    const destCircle = new window.google.maps.Circle({
+      center: { lat: dest.lat, lng: dest.lng },
+      radius: 8000,
+      map: mapObj.current,
+      fillColor: "#7c3aed",
+      fillOpacity: 0.06,
+      strokeColor: "#a78bfa",
+      strokeWeight: 1.5,
+      strokeOpacity: 0.5,
+      zIndex: 6,
+    });
+    predRouteObjs.current.push(destCircle);
+
+  }, [predictRoute]);
+
+    // STYLE CYCLE
   const cycleStyle = useCallback(() => {
     if (!mapObj.current) return;
     const next = {satellite:"map", map:"dark", dark:"satellite"}[mapStyle];
