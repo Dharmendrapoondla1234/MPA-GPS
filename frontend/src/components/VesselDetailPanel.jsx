@@ -470,106 +470,133 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
 }
 
 // ── PREDICT TAB COMPONENT ─────────────────────────────────────
-function PredictTab({ vessel, prediction, predLoading, predError, predRouteOn, onLoad, onToggleRoute, speed, heading }) {
-
-  const hasRun = prediction !== null || predError !== null;
-  const pred   = prediction?.prediction;
-  const alts   = prediction?.alternatives || [];
+function PredictTab({ prediction, predLoading, predError, predRouteOn, onLoad, onToggleRoute }) {
+  const hasRun   = prediction !== null || predError !== null;
+  const pred     = prediction?.prediction;
+  const alts     = prediction?.alternatives || [];
   const analysis = prediction?.analysis;
+  const wps      = prediction?.route_waypoints || [];
 
-  // Confidence color
   function confColor(c) {
-    if (c >= 75) return "#00ff9d";
-    if (c >= 50) return "#ffaa00";
-    return "#ff5577";
+    return c >= 75 ? "#00ff9d" : c >= 50 ? "#ffaa00" : "#ff5577";
+  }
+  function confClass(c) {
+    return c >= 75 ? "conf-high" : c >= 50 ? "conf-medium" : "conf-low";
+  }
+  function fmtEta(h) {
+    if (!h) return "—";
+    if (h < 1)  return `${Math.round(h*60)}min`;
+    if (h < 24) return `${h.toFixed(1)}h`;
+    return `${Math.floor(h/24)}d ${Math.round(h%24)}h`;
   }
 
   return (
-    <div className="dp-section dp-predict">
+    <div className="dp-section">
 
-      {/* Hero CTA if not yet run */}
+      {/* ── HERO (not yet run) ── */}
       {!hasRun && !predLoading && (
         <div className="pred-hero">
-          <div className="pred-hero-icon">🤖</div>
+          <div className="pred-hero-orb">🤖</div>
           <div className="pred-hero-title">AI Route Prediction</div>
           <div className="pred-hero-sub">
-            Predicts next port, ETA, and likely route using AIS trajectory
-            analysis, heading alignment, and historical port patterns.
+            Analyses AIS trajectory, heading alignment, and port proximity
+            to predict the next destination and ETA.
+          </div>
+          <div className="pred-hero-caps">
+            <span className="pred-hero-cap">Next Port</span>
+            <span className="pred-hero-cap">ETA</span>
+            <span className="pred-hero-cap">Route</span>
+            <span className="pred-hero-cap">Confidence</span>
           </div>
           <button className="pred-run-btn" onClick={onLoad}>
             <span className="pred-run-icon">▶</span>
-            Run Prediction
+            Predict Route
           </button>
         </div>
       )}
 
-      {/* Loading state */}
+      {/* ── LOADING ── */}
       {predLoading && (
         <div className="pred-loading">
-          <div className="pred-spinner"/>
+          <div className="pred-spinner-wrap">
+            <div className="pred-spinner"/>
+            <div className="pred-spinner-core"/>
+          </div>
           <div className="pred-loading-title">Analysing trajectory…</div>
           <div className="pred-loading-steps">
-            {["Fetching 72h AIS history","Computing heading alignment","Scoring 20 candidate ports","Generating route waypoints"].map((s,i) => (
-              <div key={i} className="pred-step" style={{animationDelay:`${i*0.4}s`}}>
-                <span className="pred-step-dot"/>
-                {s}
-              </div>
-            ))}
+            {["Fetching 72h AIS history","Computing heading alignment","Scoring 20 candidate ports","Generating route waypoints"]
+              .map((s,i) => (
+                <div key={i} className="pred-step" style={{animationDelay:`${i*0.45}s`}}>
+                  <span className="pred-step-dot"/>
+                  {s}
+                </div>
+              ))}
           </div>
         </div>
       )}
 
-      {/* Error state */}
+      {/* ── ERROR ── */}
       {predError && !predLoading && (
         <div className="pred-error">
           <div className="pred-error-icon">⚠️</div>
           <div className="pred-error-msg">{predError}</div>
-          <button className="pred-retry-btn" onClick={onLoad}>Retry</button>
+          <button className="pred-retry-btn" onClick={onLoad}>↺ Retry</button>
         </div>
       )}
 
-      {/* Results */}
+      {/* ── RESULTS ── */}
       {pred && !predLoading && (
         <>
-          {/* Primary prediction card */}
+          {/* Primary card */}
           <div className="pred-main-card">
             <div className="pred-mc-header">
               <span className="pred-mc-label">PREDICTED DESTINATION</span>
               {pred.is_declared && <span className="pred-declared-badge">✓ DECLARED</span>}
             </div>
+
             <div className="pred-mc-port">{pred.destination}</div>
+
             <div className="pred-mc-meta">
-              <span className="pred-mc-dist">{pred.distance_nm} NM away</span>
-              <span className="pred-mc-bearing">HDG {pred.bearing_deg}°</span>
+              <span className="pred-mc-dist">{pred.distance_nm} NM</span>
+              <span className="pred-mc-bearing">· HDG {pred.bearing_deg}°</span>
+              {/* Mini compass */}
+              <div className="pred-compass">
+                <div className="pred-compass-needle" style={{transform:`rotate(${pred.bearing_deg}deg)`}}/>
+                <div className="pred-compass-dot"/>
+              </div>
             </div>
 
-            {/* ETA display */}
+            {/* ETA block */}
             <div className="pred-eta-block">
-              <div className="pred-eta-label">ESTIMATED TIME OF ARRIVAL</div>
-              <div className="pred-eta-value">{pred.eta_label}</div>
-              {pred.eta_iso && (
-                <div className="pred-eta-date">
-                  {new Date(pred.eta_iso).toLocaleString("en-SG", {
-                    weekday: "short", month: "short", day: "2-digit",
-                    hour: "2-digit", minute: "2-digit", hour12: false,
-                  })}
-                </div>
-              )}
+              <div className="pred-eta-left">
+                <div className="pred-eta-label">ESTIMATED ARRIVAL</div>
+                <div className="pred-eta-value">{pred.eta_label}</div>
+                {pred.eta_iso && (
+                  <div className="pred-eta-date">
+                    {new Date(pred.eta_iso).toLocaleString("en-SG",{
+                      weekday:"short", month:"short", day:"2-digit",
+                      hour:"2-digit", minute:"2-digit", hour12:false,
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="pred-eta-right">
+                <div className="pred-eta-dist-big">{pred.distance_nm}</div>
+                <div className="pred-eta-dist-unit">NAUTICAL MI</div>
+              </div>
             </div>
 
-            {/* Confidence bar */}
+            {/* Confidence */}
             <div className="pred-conf-wrap">
-              <div className="pred-conf-label">
+              <div className="pred-conf-header">
                 <span>CONFIDENCE</span>
-                <span style={{color: confColor(pred.confidence)}}>{pred.confidence}%</span>
+                <span className={`pred-conf-pct ${confClass(pred.confidence)}`}>{pred.confidence}%</span>
               </div>
               <div className="pred-conf-bar">
-                <div className="pred-conf-fill"
-                  style={{
-                    width: `${pred.confidence}%`,
-                    background: `linear-gradient(90deg, ${confColor(pred.confidence)}88, ${confColor(pred.confidence)})`,
-                  }}
-                />
+                <div className="pred-conf-fill" style={{
+                  width:`${pred.confidence}%`,
+                  background:`linear-gradient(90deg, ${confColor(pred.confidence)}66, ${confColor(pred.confidence)})`,
+                }}/>
               </div>
             </div>
 
@@ -579,44 +606,38 @@ function PredictTab({ vessel, prediction, predLoading, predError, predRouteOn, o
               {pred.method}
             </div>
 
-            {/* Show route toggle */}
-            <button
-              className={`pred-route-btn ${predRouteOn ? "on" : ""}`}
-              onClick={onToggleRoute}
-            >
-              <span>{predRouteOn ? "🗺️ Hide Route on Map" : "🗺️ Show Route on Map"}</span>
+            {/* Map toggle */}
+            <button className={`pred-route-btn ${predRouteOn?"on":""}`} onClick={onToggleRoute}>
+              {predRouteOn ? "🗺️  Hide Route on Map" : "🗺️  Show Route on Map"}
             </button>
           </div>
 
-          {/* Voyage context */}
+          {/* Voyage context rows */}
           {(prediction.vessel?.last_port || prediction.vessel?.declared_dest) && (
-            <div className="pred-voyage-context">
+            <>
               <SH>VOYAGE CONTEXT</SH>
-              {prediction.vessel.last_port && (
-                <R k="Last Port" v={prediction.vessel.last_port} hi/>
-              )}
-              {prediction.vessel.declared_dest && (
-                <R k="Declared Dest" v={prediction.vessel.declared_dest} hi/>
-              )}
-              <R k="Current Speed" v={`${prediction.vessel.speed_kn} kn (${prediction.vessel.speed_kmh} km/h)`}/>
-              <R k="Heading"       v={`${prediction.vessel.heading}°`}/>
-            </div>
+              {prediction.vessel.last_port     && <R k="Last Port"      v={prediction.vessel.last_port}     hi/>}
+              {prediction.vessel.declared_dest  && <R k="Declared Dest" v={prediction.vessel.declared_dest}  hi/>}
+              <R k="Speed" v={`${prediction.vessel.speed_kn} kn · ${prediction.vessel.speed_kmh} km/h`}/>
+              <R k="Heading" v={`${prediction.vessel.heading}°`}/>
+            </>
           )}
 
-          {/* Alternative destinations */}
+          {/* Alternatives */}
           {alts.length > 0 && (
             <>
-              <SH>ALTERNATIVE ROUTES</SH>
-              <div className="pred-alts">
-                {alts.map((a, i) => (
+              <SH>ALTERNATIVES</SH>
+              <div className="pred-alts-list">
+                {alts.map((a,i) => (
                   <div key={i} className="pred-alt-item">
                     <div className="pred-alt-rank">#{i+2}</div>
                     <div className="pred-alt-info">
                       <div className="pred-alt-port">{a.port}</div>
                       <div className="pred-alt-meta">{a.distance_nm} NM · {a.eta_label}</div>
                     </div>
-                    <div className="pred-alt-conf" style={{color: confColor(a.confidence)}}>
-                      {a.confidence}%
+                    <div className="pred-alt-right">
+                      <div className={`pred-alt-conf ${confClass(a.confidence)}`}>{a.confidence}%</div>
+                      <div className="pred-alt-eta">{a.heading_alignment}% align</div>
                     </div>
                   </div>
                 ))}
@@ -624,54 +645,63 @@ function PredictTab({ vessel, prediction, predLoading, predError, predRouteOn, o
             </>
           )}
 
-          {/* Analysis details */}
+          {/* Analysis grid */}
           {analysis && (
             <>
-              <SH>ANALYSIS DETAILS</SH>
-              <R k="AIS Points Used"  v={`${analysis.history_points} pts (72h)`}/>
-              <R k="Avg Speed"        v={`${analysis.avg_speed_kn} kn`}/>
-              <R k="Avg Heading"      v={`${analysis.avg_heading_deg}°`}/>
-              <R k="Ports Evaluated"  v={`${analysis.ports_evaluated}`}/>
+              <SH>ANALYSIS</SH>
+              <div className="pred-analysis-grid">
+                <div className="pred-analysis-card">
+                  <div className="pred-analysis-val">{analysis.history_points}</div>
+                  <div className="pred-analysis-key">AIS POINTS</div>
+                </div>
+                <div className="pred-analysis-card">
+                  <div className="pred-analysis-val">{analysis.avg_speed_kn} kn</div>
+                  <div className="pred-analysis-key">AVG SPEED</div>
+                </div>
+                <div className="pred-analysis-card">
+                  <div className="pred-analysis-val">{analysis.avg_heading}°</div>
+                  <div className="pred-analysis-key">AVG HEADING</div>
+                </div>
+                <div className="pred-analysis-card">
+                  <div className="pred-analysis-val">{analysis.ports_scored}</div>
+                  <div className="pred-analysis-key">PORTS SCORED</div>
+                </div>
+              </div>
             </>
           )}
 
-          {/* Waypoints */}
-          {prediction?.route_waypoints?.length > 0 && (
+          {/* Route waypoints timeline */}
+          {wps.length > 0 && (
             <>
               <SH>ROUTE WAYPOINTS</SH>
-              <div className="pred-waypoints">
-                {prediction.route_waypoints.map((wp, i) => (
-                  <div key={i} className={`pred-wp ${wp.type}`}>
-                    <div className={`pred-wp-dot ${wp.type}`}/>
+              <div className="pred-timeline">
+                {wps.map((wp,i) => (
+                  <div key={i} className="pred-wp">
+                    <div className="pred-wp-dot-wrap">
+                      <div className={`pred-wp-dot ${wp.type}`}/>
+                    </div>
                     <div className="pred-wp-info">
                       <div className="pred-wp-label">{wp.label}</div>
-                      {wp.eta_hours_from_now && (
-                        <div className="pred-wp-eta">in {formatEtaHours(wp.eta_hours_from_now)}</div>
-                      )}
-                      {wp.eta_label && wp.type === "destination" && (
-                        <div className="pred-wp-eta">{wp.eta_label}</div>
-                      )}
+                      {wp.eta_hours_from_now && <div className="pred-wp-eta">in {fmtEta(wp.eta_hours_from_now)}</div>}
+                      {wp.eta_label && wp.type==="destination" && <div className="pred-wp-eta">{wp.eta_label}</div>}
                     </div>
-                    <div className="pred-wp-coords mono">
-                      {wp.lat.toFixed(3)}°, {wp.lng.toFixed(3)}°
-                    </div>
+                    <div className="pred-wp-coords">{wp.lat.toFixed(3)}°, {wp.lng.toFixed(3)}°</div>
                   </div>
                 ))}
               </div>
             </>
           )}
 
-          {/* Re-run button */}
-          <div style={{padding:"10px 14px 14px"}}>
-            <button className="pred-rerun-btn" onClick={onLoad}>
-              ↺ Re-run Prediction
-            </button>
+          {/* Re-run */}
+          <div style={{padding:"6px 12px 14px"}}>
+            <button className="pred-rerun-btn" onClick={onLoad}>↺ Re-run Prediction</button>
           </div>
         </>
       )}
     </div>
   );
 }
+
 
 function formatEtaHours(h) {
   if (h < 1)  return `${Math.round(h*60)}min`;
