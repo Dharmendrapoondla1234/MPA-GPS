@@ -338,7 +338,6 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
 
   // PREDICT ROUTE OVERLAY
   useEffect(() => {
-    // Clear previous route
     predRouteObjs.current.forEach(o => { try{ o.setMap(null); }catch(_){} });
     predRouteObjs.current = [];
 
@@ -346,80 +345,145 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     if (!wps || wps.length < 2 || !mapObj.current) return;
 
     const path = wps.map(wp => ({ lat: wp.lat, lng: wp.lng }));
-    const dest = wps[wps.length - 1];
-    const start= wps[0];
+    const dest  = wps[wps.length - 1];
+    const start = wps[0];
+    const pred  = predictRoute?.prediction;
 
-    // Animated dashed purple route line
-    const routeLine = new window.google.maps.Polyline({
-      path,
-      geodesic: true,
-      strokeColor: "#a78bfa",
-      strokeOpacity: 0,
-      strokeWeight: 0,
-      zIndex: 8,
-      map: mapObj.current,
+    // ── Outer glow (thick, low opacity) ──
+    predRouteObjs.current.push(new window.google.maps.Polyline({
+      path, geodesic: true,
+      strokeColor: "#7c3aed", strokeOpacity: 0.18, strokeWeight: 14,
+      zIndex: 6, map: mapObj.current,
+    }));
+
+    // ── Main route line ──
+    predRouteObjs.current.push(new window.google.maps.Polyline({
+      path, geodesic: true,
+      strokeColor: "#a78bfa", strokeOpacity: 0.7, strokeWeight: 3,
+      zIndex: 8, map: mapObj.current,
+    }));
+
+    // ── Animated dashes overlay ──
+    predRouteObjs.current.push(new window.google.maps.Polyline({
+      path, geodesic: true,
+      strokeColor: "#c4b5fd", strokeOpacity: 0, strokeWeight: 0,
+      zIndex: 9, map: mapObj.current,
       icons: [{
-        icon: { path: "M 0,-1 0,1", strokeOpacity: 0.85, strokeColor: "#a78bfa", scale: 3.5 },
-        offset: "0", repeat: "14px",
+        icon: { path: "M 0,-1 0,1", strokeOpacity: 1, strokeColor: "#e0d4ff", scale: 2.5 },
+        offset: "0", repeat: "20px",
       }],
-    });
-    predRouteObjs.current.push(routeLine);
+    }));
 
-    // Solid glowing underline
-    const glowLine = new window.google.maps.Polyline({
-      path,
-      geodesic: true,
-      strokeColor: "#7c3aed",
-      strokeOpacity: 0.25,
-      strokeWeight: 5,
-      zIndex: 7,
-      map: mapObj.current,
-    });
-    predRouteObjs.current.push(glowLine);
+    // ── Direction arrows every ~25% of route ──
+    const arrowOffsets = ["15%", "35%", "55%", "75%", "90%"];
+    predRouteObjs.current.push(new window.google.maps.Polyline({
+      path, geodesic: true,
+      strokeOpacity: 0, strokeWeight: 0,
+      zIndex: 10, map: mapObj.current,
+      icons: arrowOffsets.map(offset => ({
+        icon: {
+          path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          scale: 3.5,
+          strokeColor: "#a78bfa",
+          strokeWeight: 2,
+          fillColor: "#c4b5fd",
+          fillOpacity: 0.9,
+          strokeOpacity: 1,
+        },
+        offset,
+      })),
+    }));
 
-    // Waypoint dots
+    // ── Waypoint markers (intermediate) ──
     wps.slice(1, -1).forEach((wp, i) => {
       const dot = new window.google.maps.Marker({
         position: { lat: wp.lat, lng: wp.lng },
         map: mapObj.current,
         icon: {
           path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 5,
-          fillColor: "#c4b5fd",
-          fillOpacity: 0.85,
-          strokeColor: "#7c3aed",
-          strokeWeight: 1.5,
+          scale: 6,
+          fillColor: "#7c3aed",
+          fillOpacity: 1,
+          strokeColor: "#e0d4ff",
+          strokeWeight: 2,
         },
         title: wp.label || `Waypoint ${i+1}`,
-        zIndex: 9,
+        zIndex: 10,
+      });
+      // Waypoint info on click
+      dot.addListener("click", () => {
+        const etaT = wp.eta_hours_from_now;
+        infoWin.current.setContent(
+          `<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#12082a,#1e0f40);border:1px solid #7c3aed88;border-radius:8px;padding:10px 14px;color:#fff;min-width:160px">
+            <div style="color:#a78bfa;font-weight:700;font-size:10px;letter-spacing:0.1em">⚓ SEA ROUTE WAYPOINT</div>
+            <div style="font-size:13px;font-weight:700;color:#ede9fe;margin:5px 0 3px">${wp.label||"Waypoint"}</div>
+            ${etaT ? `<div style="font-size:9px;color:#c4b5fd">ETA from now: ~${etaT}h</div>` : ""}
+            <div style="font-size:8px;color:#6d28d9;margin-top:3px">${wp.lat.toFixed(3)}°N ${wp.lng.toFixed(3)}°E</div>
+          </div>`
+        );
+        infoWin.current.setPosition({ lat: wp.lat, lng: wp.lng });
+        infoWin.current.open(mapObj.current);
       });
       predRouteObjs.current.push(dot);
     });
 
-    // Destination marker
+    // ── Origin marker ──
+    predRouteObjs.current.push(new window.google.maps.Marker({
+      position: { lat: start.lat, lng: start.lng },
+      map: mapObj.current,
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 8, fillColor: "#00e5ff", fillOpacity: 1,
+        strokeColor: "#fff", strokeWeight: 2,
+      },
+      title: "Current Position", zIndex: 12,
+    }));
+    predRouteObjs.current.push(new window.google.maps.Circle({
+      center: { lat: start.lat, lng: start.lng },
+      radius: 8000, map: mapObj.current,
+      fillColor: "#00e5ff", fillOpacity: 0.06,
+      strokeColor: "#00e5ff", strokeWeight: 1.5, strokeOpacity: 0.4, zIndex: 6,
+    }));
+
+    // ── Destination marker (flag icon) ──
     const destMarker = new window.google.maps.Marker({
       position: { lat: dest.lat, lng: dest.lng },
       map: mapObj.current,
       icon: {
-        path: window.google.maps.SymbolPath.CIRCLE,
-        scale: 10,
-        fillColor: "#a78bfa",
-        fillOpacity: 1,
-        strokeColor: "#fff",
-        strokeWeight: 2,
+        // Flag shape
+        path: "M -1 -10 L -1 4 M -1 -10 L 8 -6 L -1 -2",
+        strokeColor: "#a78bfa", strokeWeight: 2.5, strokeOpacity: 1,
+        fillColor: "#7c3aed", fillOpacity: 0.8, scale: 1.8,
       },
-      title: `📍 ${dest.label}`,
-      zIndex: 12,
+      title: `🏁 ${dest.label}`,
+      zIndex: 15,
     });
     destMarker.addListener("click", () => {
-      const pred = predictRoute?.prediction;
       infoWin.current.setContent(
-        `<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#1a0a2e,#2d1b4e);border:1px solid #a78bfa88;border-radius:10px;padding:12px 16px;color:#fff;min-width:200px">
-          <div style="color:#a78bfa;font-weight:700;font-size:11px;letter-spacing:0.1em">🎯 PREDICTED DESTINATION</div>
-          <div style="font-size:16px;font-weight:700;color:#ede9fe;margin:6px 0 4px">${dest.label}</div>
-          ${pred ? `<div style="font-size:10px;color:#c4b5fd">ETA: <b>${pred.eta_label}</b></div>
-          <div style="font-size:10px;color:#c4b5fd">Distance: <b>${pred.distance_nm} NM</b></div>
-          <div style="font-size:9px;color:#a78bfa;margin-top:4px">${pred.confidence}% confidence</div>` : ""}
+        `<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#1a0a2e,#2d1b4e);border:1px solid #a78bfa88;border-radius:10px;padding:14px 18px;color:#fff;min-width:220px">
+          <div style="color:#a78bfa;font-weight:700;font-size:10px;letter-spacing:0.12em">🎯 PREDICTED DESTINATION</div>
+          <div style="font-size:18px;font-weight:700;color:#ede9fe;margin:7px 0 5px">${dest.label}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+            ${pred ? `
+            <div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px">
+              <div style="font-size:8px;color:#a78bfa;letter-spacing:0.08em">ETA</div>
+              <div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.eta_label}</div>
+            </div>
+            <div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px">
+              <div style="font-size:8px;color:#a78bfa;letter-spacing:0.08em">DISTANCE</div>
+              <div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.distance_nm} NM</div>
+            </div>
+            <div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px">
+              <div style="font-size:8px;color:#a78bfa;letter-spacing:0.08em">CONFIDENCE</div>
+              <div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.confidence}%</div>
+            </div>
+            <div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px">
+              <div style="font-size:8px;color:#a78bfa;letter-spacing:0.08em">BEARING</div>
+              <div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.bearing_deg}°</div>
+            </div>
+            ` : ""}
+          </div>
+          ${pred?.method ? `<div style="margin-top:8px;font-size:8px;color:#6d28d9;border-top:1px solid rgba(124,58,237,0.3);padding-top:6px">${pred.method}</div>` : ""}
         </div>`
       );
       infoWin.current.setPosition({ lat: dest.lat, lng: dest.lng });
@@ -427,33 +491,13 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     });
     predRouteObjs.current.push(destMarker);
 
-    // Origin pulse circle
-    const originCircle = new window.google.maps.Circle({
-      center: { lat: start.lat, lng: start.lng },
-      radius: 1200,
-      map: mapObj.current,
-      fillColor: "#a78bfa",
-      fillOpacity: 0.07,
-      strokeColor: "#a78bfa",
-      strokeWeight: 1.5,
-      strokeOpacity: 0.4,
-      zIndex: 6,
-    });
-    predRouteObjs.current.push(originCircle);
-
-    // Destination zone circle
-    const destCircle = new window.google.maps.Circle({
+    // ── Destination zone circle ──
+    predRouteObjs.current.push(new window.google.maps.Circle({
       center: { lat: dest.lat, lng: dest.lng },
-      radius: 8000,
-      map: mapObj.current,
-      fillColor: "#7c3aed",
-      fillOpacity: 0.06,
-      strokeColor: "#a78bfa",
-      strokeWeight: 1.5,
-      strokeOpacity: 0.5,
-      zIndex: 6,
-    });
-    predRouteObjs.current.push(destCircle);
+      radius: 15000, map: mapObj.current,
+      fillColor: "#7c3aed", fillOpacity: 0.06,
+      strokeColor: "#a78bfa", strokeWeight: 1.5, strokeOpacity: 0.45, zIndex: 6,
+    }));
 
   }, [predictRoute]);
 
