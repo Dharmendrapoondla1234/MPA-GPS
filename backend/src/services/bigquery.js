@@ -256,19 +256,6 @@ async function getRecentArrivals(limit = 50) {
   const dbt = await useDbt();
   const lim = Math.min(parseInt(limit) || 50, 200);
 
-  const legacyArrQuery = `
-    SELECT
-      SAFE_CAST(imoNumber AS INT64) AS imo_number,
-      vesselName   AS vessel_name,  callSign AS call_sign, flag,
-      arrivedTime  AS arrival_time, DATE(arrivedTime) AS arrival_date,
-      locationFrom AS location_from, locationTo AS location_to,
-      'AIS_CONFIRMED' AS arrival_source,
-      NULL AS berth_grid, NULL AS voyage_purpose,
-      NULL AS shipping_agent, NULL AS crew_count, NULL AS passenger_count
-    FROM ${T.LEGACY_ARRIVALS}
-    WHERE arrivedTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 DAY)
-    ORDER BY arrivedTime DESC LIMIT ${lim}`;
-
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
@@ -282,7 +269,14 @@ async function getRecentArrivals(limit = 50) {
       logger.warn(`[BQ] fct_vessel_arrivals not ready, falling back: ${e.message.slice(0,80)}`);
     }
   }
-  const [rows] = await bigquery.query({ query: legacyArrQuery, location: BQ_LOCATION });
+  // Legacy: SELECT * and normalise in normalizeArrival
+  const [rows] = await bigquery.query({
+    query: `SELECT * FROM ${T.LEGACY_ARRIVALS}
+            WHERE TIMESTAMP(COALESCE(arrivedTime, arrived_time, arrival_time))
+              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 DAY)
+            ORDER BY 1 DESC LIMIT ${lim}`,
+    location: BQ_LOCATION,
+  });
   return toCache("arrivals", rows);
 }
 
@@ -292,18 +286,6 @@ async function getRecentArrivals(limit = 50) {
 async function getRecentDepartures(limit = 50) {
   const dbt = await useDbt();
   const lim = Math.min(parseInt(limit) || 50, 200);
-
-  const legacyDepQuery = `
-    SELECT
-      SAFE_CAST(imoNumber AS INT64) AS imo_number,
-      vesselName   AS vessel_name,  callSign AS call_sign, flag,
-      departedTime AS departure_time, DATE(departedTime) AS departure_date,
-      'AIS_CONFIRMED' AS departure_source,
-      NULL AS next_port, NULL AS shipping_agent,
-      NULL AS crew_count, NULL AS passenger_count
-    FROM ${T.LEGACY_DEPARTURES}
-    WHERE departedTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 DAY)
-    ORDER BY departedTime DESC LIMIT ${lim}`;
 
   if (dbt) {
     try {
@@ -318,7 +300,14 @@ async function getRecentDepartures(limit = 50) {
       logger.warn(`[BQ] fct_vessel_departures not ready, falling back: ${e.message.slice(0,80)}`);
     }
   }
-  const [rows] = await bigquery.query({ query: legacyDepQuery, location: BQ_LOCATION });
+  // Legacy: SELECT * and normalise known column name variants in normalizeDeparture
+  const [rows] = await bigquery.query({
+    query: `SELECT * FROM ${T.LEGACY_DEPARTURES}
+            WHERE TIMESTAMP(COALESCE(departedTime, departed_time, departure_time))
+              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 DAY)
+            ORDER BY 1 DESC LIMIT ${lim}`,
+    location: BQ_LOCATION,
+  });
   return rows;
 }
 
@@ -342,12 +331,12 @@ async function getFleetStats() {
         ROUND(MAX(speed),2)                    AS max_speed,
         COUNT(DISTINCT vessel_type)            AS vessel_type_count,
         COUNT(DISTINCT flag)                   AS flag_count,
-        COUNTIF(has_arrival_data=TRUE)         AS with_arrival_data,
-        COUNTIF(has_departure_data=TRUE)       AS with_departure_data,
-        COUNTIF(has_declaration_data=TRUE)     AS with_declaration_data,
-        -- derived from speed (works even without dbt vessel_status column)
-        COUNTIF(speed > 0.5)                           AS underway,
-        COUNTIF(speed <= 0.5 OR speed IS NULL)         AS in_port,
+        -- flag columns may not exist in all table versions — default to 0
+        0 AS with_arrival_data,
+        0 AS with_departure_data,
+        0 AS with_declaration_data,
+        COUNTIF(speed > 0.5)                   AS underway,
+        COUNTIF(speed <= 0.5 OR speed IS NULL) AS in_port,
         0 AS departed,
         0 AS expected,
         0 AS avg_data_quality,
