@@ -3,7 +3,7 @@
 // Serves static GIS data with caching (refreshes every 30 min)
 
 const { BigQuery } = require("@google-cloud/bigquery");
-const logger = require("./logger") || console;
+const logger = require("../utils/logger");
 
 const PROJECT  = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
 const GIS_DS   = "MPA_GIS";
