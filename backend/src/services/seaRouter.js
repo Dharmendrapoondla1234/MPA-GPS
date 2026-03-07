@@ -39,6 +39,19 @@ const NODES = {
   // ── Riau / Batam ──
   RIAU_W:  [0.90, 103.80],
   RIAU_S:  [0.50, 104.00],
+
+  // ── Riau Archipelago — East corridor (safe, east of all islands) ──
+  RIAU_E1: [1.00, 105.00],   // east of Bintan — open water
+  RIAU_E2: [0.50, 105.10],   // east of N Lingga — open water
+  RIAU_E3: [0.00, 105.20],   // equator, east of Lingga — open water
+  RIAU_E4: [-0.50, 105.30],  // south of Singkep — open water
+  RIAU_E5: [-0.90, 105.45],  // approach Bangka from north — open water
+
+  // ── Durian / Berhala Strait (west of Riau islands, narrow but navigable) ──
+  DUR_N:  [0.80, 103.72],    // Durian Strait north
+  DUR_M:  [0.30, 103.90],    // Durian Strait mid
+  DUR_S:  [-0.20, 104.10],   // Durian Strait south exit
+  DUR_E:  [-0.80, 104.50],   // East of Singkep, open
   BATAM_S: [0.70, 104.30],
 
   // ── Dumai / Rupat approach (west of Rupat island, in strait) ──
@@ -192,7 +205,8 @@ const EDGES = [
   ["SCS_W2","GT_S2"],
 
   // Bangka / Belitung
-  ["SG_EAST","BANGKA_N"],["SCS_SW2","BANGKA_N"],
+  // SG_EAST→BANGKA_N removed (crosses Riau islands) — use RIAU_E corridor instead
+  ["SCS_SW3","BANGKA_N"],
   ["BANGKA_N","BANGKA_S"],["BANGKA_S","BELI"],
   ["BANGKA_S","JAVA_W1"],["BELI","JAVA_W1"],
   ["BANGKA_N","P_PALM"],
@@ -209,6 +223,20 @@ const EDGES = [
   // Sunda Strait
   ["SUNDA_N","SUNDA_S"],["JAVA_W1","SUNDA_N"],["SUNDA_S","IO_E1"],
   ["MAL_S1","SUNDA_N"],  // from S Malacca, go south around tip
+
+
+  // East-of-Riau corridor (main south highway, all open water)
+  ["SG_EAST","RIAU_E1"],["RIAU_E1","RIAU_E2"],["RIAU_E2","RIAU_E3"],
+  ["RIAU_E3","RIAU_E4"],["RIAU_E4","RIAU_E5"],["RIAU_E5","BANGKA_N"],
+  // Also connect SCS_SW1 → RIAU_E1
+  ["SCS_SW1","RIAU_E1"],["RIAU_E2","SCS_SW2"],
+
+  // Durian Strait (west corridor around Riau)
+  ["RIAU_W","DUR_N"],["DUR_N","DUR_M"],["DUR_M","DUR_S"],
+  ["DUR_S","DUR_E"],["DUR_E","BANGKA_N"],
+  // Batam connections
+  ["BATAM_S","RIAU_E1"],["P_BATAM","RIAU_E1"],
+  ["RIAU_S","DUR_N"],["RIAU_W","DUR_N"],
 
   // Makassar
   ["JAVA_E","MAKAS_S"],["MAKAS_S","MAKAS_N"],["MAKAS_N","CELIB_W"],
