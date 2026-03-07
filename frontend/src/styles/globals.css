@@ -24,6 +24,7 @@
   --red-dim:    rgba(255,51,85,0.1);
   --gold:       #ffd700;
   --violet:     #7c4dff;
+  --ai-blue:    #7cdcff;
 
   --text-1:     #f0f8ff;
   --text-2:     #8ab4d0;
@@ -47,6 +48,21 @@
   --t1: 120ms;
   --t2: 240ms;
   --t3: 400ms;
+}
+
+/* Mobile bottom sheet drag handle */
+.app-right-panel.open::before {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 4px;
+  background: rgba(0,229,255,0.25);
+  border-radius: 2px;
+  margin: 10px auto 2px;
+  flex-shrink: 0;
+}
+@media (min-width: 769px) {
+  .app-right-panel.open::before { display: none; }
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

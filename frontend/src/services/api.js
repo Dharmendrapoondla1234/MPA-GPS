@@ -55,6 +55,17 @@ export async function fetchVessels({
 export async function fetchVesselHistory(imo, hours = 24) {
   return call(`/vessels/${encodeURIComponent(imo)}/history?hours=${hours}`);
 }
+export async function fetchAITrajectory(imo, hours = 48) {
+  // Falls back to regular history if AI endpoint not available
+  try {
+    const data = await call(`/ai/trajectory/${encodeURIComponent(imo)}?hours=${hours}`);
+    // AI endpoint returns { data, ai_analysis } — extract data array
+    return Array.isArray(data) ? data : (data?.data || data);
+  } catch(e) {
+    console.warn("[AI Trajectory] falling back to regular history:", e.message);
+    return call(`/vessels/${encodeURIComponent(imo)}/history?hours=${hours}`);
+  }
+}
 export async function fetchVesselTypes() { return call("/vessel-types"); }
 export async function fetchFleetStats()  { return call("/stats"); }
 
