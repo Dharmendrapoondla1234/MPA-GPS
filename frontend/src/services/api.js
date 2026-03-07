@@ -2,8 +2,6 @@
 const BASE = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.com/api";
 
 // ── REQUEST DEDUPLICATION ─────────────────────────────────────
-// If the same URL is already in-flight, return the same Promise.
-// Prevents duplicate calls when React strict mode double-invokes effects.
 const inFlight = new Map();
 
 async function call(path) {
@@ -23,7 +21,14 @@ async function call(path) {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let errMsg = `HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          if (errJson?.error) errMsg = errJson.error;
+        } catch(_) {}
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       if (json?.success === false) throw new Error(json.error || "API error");
       return json?.data !== undefined ? json.data : json;
@@ -60,17 +65,17 @@ export async function fetchVesselHistory(imo, hours = 24) {
 export async function fetchRoutePrediction(imo) {
   return call(`/predict/${encodeURIComponent(imo)}`);
 }
+
 export async function fetchAITrajectory(imo, hours = 48) {
-  // Falls back to regular history if AI endpoint not available
   try {
     const data = await call(`/ai/trajectory/${encodeURIComponent(imo)}?hours=${hours}`);
-    // AI endpoint returns { data, ai_analysis } — extract data array
     return Array.isArray(data) ? data : (data?.data || data);
   } catch(e) {
     console.warn("[AI Trajectory] falling back to regular history:", e.message);
     return call(`/vessels/${encodeURIComponent(imo)}/history?hours=${hours}`);
   }
 }
+
 export async function fetchVesselTypes() { return call("/vessel-types"); }
 export async function fetchFleetStats()  { return call("/stats"); }
 
