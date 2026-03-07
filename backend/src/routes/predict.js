@@ -1,4 +1,4 @@
-// backend/src/routes/predict.js — AI Route Prediction v2
+// backend/src/routes/predict.js — AI Route Prediction v3
 "use strict";
 
 const express = require("express");
@@ -27,28 +27,27 @@ const cache = new Map();
 function getCached(k) { const c = cache.get(k); return c && Date.now()-c.ts < 300000 ? c.data : null; }
 function setCache(k, d) { cache.set(k, { data: d, ts: Date.now() }); }
 
-// Major regional ports with coordinates
 const PORTS = [
-  { name: "Singapore",           lat:  1.264,  lng: 103.820, code: "SGSIN", region: "SG" },
-  { name: "Port Klang",          lat:  3.000,  lng: 101.390, code: "MYPKG", region: "MY" },
-  { name: "Johor Port",          lat:  1.764,  lng: 103.920, code: "MYJHB", region: "MY" },
-  { name: "Tanjung Pelepas",     lat:  1.363,  lng: 103.553, code: "MYPTP", region: "MY" },
-  { name: "Batam",               lat:  1.107,  lng: 104.030, code: "IDBTH", region: "ID" },
-  { name: "Karimun",             lat:  1.040,  lng: 103.440, code: "IDKRM", region: "ID" },
-  { name: "Dumai",               lat:  1.670,  lng: 101.450, code: "IDDUM", region: "ID" },
-  { name: "Belawan",             lat:  3.794,  lng:  98.682, code: "IDBLW", region: "ID" },
-  { name: "Tanjung Priok",       lat: -6.100,  lng: 106.880, code: "IDTPP", region: "ID" },
-  { name: "Palembang",           lat: -2.916,  lng: 104.745, code: "IDPLM", region: "ID" },
-  { name: "Penang",              lat:  5.414,  lng: 100.329, code: "MYPNG", region: "MY" },
-  { name: "Pasir Gudang",        lat:  1.467,  lng: 103.886, code: "MYPGU", region: "MY" },
-  { name: "Bangkok",             lat: 13.759,  lng: 100.502, code: "THBKK", region: "TH" },
-  { name: "Laem Chabang",        lat: 13.086,  lng: 100.880, code: "THLCH", region: "TH" },
-  { name: "Ho Chi Minh City",    lat: 10.782,  lng: 106.700, code: "VNSGN", region: "VN" },
-  { name: "Hai Phong",           lat: 20.870,  lng: 106.688, code: "VNHPH", region: "VN" },
-  { name: "Hong Kong",           lat: 22.302,  lng: 114.177, code: "HKHKG", region: "HK" },
-  { name: "Colombo",             lat:  6.930,  lng:  79.858, code: "LKCMB", region: "LK" },
-  { name: "Port Dickson",        lat:  2.527,  lng: 101.795, code: "MYPDK", region: "MY" },
-  { name: "Kota Kinabalu",       lat:  5.976,  lng: 116.073, code: "MYBKI", region: "MY" },
+  { name: "Singapore",        lat:  1.264, lng: 103.820, code: "SGSIN" },
+  { name: "Port Klang",       lat:  3.000, lng: 101.390, code: "MYPKG" },
+  { name: "Johor Port",       lat:  1.764, lng: 103.920, code: "MYJHB" },
+  { name: "Tanjung Pelepas",  lat:  1.363, lng: 103.553, code: "MYPTP" },
+  { name: "Batam",            lat:  1.107, lng: 104.030, code: "IDBTH" },
+  { name: "Karimun",          lat:  1.040, lng: 103.440, code: "IDKRM" },
+  { name: "Dumai",            lat:  1.670, lng: 101.450, code: "IDDUM" },
+  { name: "Belawan",          lat:  3.794, lng:  98.682, code: "IDBLW" },
+  { name: "Tanjung Priok",    lat: -6.100, lng: 106.880, code: "IDTPP" },
+  { name: "Palembang",        lat: -2.916, lng: 104.745, code: "IDPLM" },
+  { name: "Penang",           lat:  5.414, lng: 100.329, code: "MYPNG" },
+  { name: "Pasir Gudang",     lat:  1.467, lng: 103.886, code: "MYPGU" },
+  { name: "Bangkok",          lat: 13.759, lng: 100.502, code: "THBKK" },
+  { name: "Laem Chabang",     lat: 13.086, lng: 100.880, code: "THLCH" },
+  { name: "Ho Chi Minh City", lat: 10.782, lng: 106.700, code: "VNSGN" },
+  { name: "Hai Phong",        lat: 20.870, lng: 106.688, code: "VNHPH" },
+  { name: "Hong Kong",        lat: 22.302, lng: 114.177, code: "HKHKG" },
+  { name: "Colombo",          lat:  6.930, lng:  79.858, code: "LKCMB" },
+  { name: "Port Dickson",     lat:  2.527, lng: 101.795, code: "MYPDK" },
+  { name: "Kota Kinabalu",    lat:  5.976, lng: 116.073, code: "MYBKI" },
 ];
 
 function distNM(la1, lo1, la2, lo2) {
@@ -65,10 +64,15 @@ function bearing(la1, lo1, la2, lo2) {
 }
 function formatETA(h) {
   if (!h||h<0) return "Unknown";
-  if (h<1) return `~${Math.round(h*60)} min`;
+  if (h<1)  return `~${Math.round(h*60)} min`;
   if (h<24) return `~${h.toFixed(1)} hrs`;
   const d=Math.floor(h/24), rem=Math.round(h%24);
   return rem>0 ? `~${d}d ${rem}h` : `~${d} days`;
+}
+function bqVal(v) {
+  if (v===null||v===undefined) return null;
+  if (typeof v==="object"&&v.value!==undefined) return String(v.value).trim()||null;
+  return String(v).trim()||null;
 }
 
 // GET /api/predict/:imo
@@ -81,8 +85,10 @@ router.get("/:imo", async (req, res, next) => {
     const hit = getCached(ck);
     if (hit) return res.json({ success:true, cached:true, ...hit });
 
-    // 1. Current vessel state
-    const [[vessel]] = await bigquery.query({
+    if (!bigquery) return res.status(500).json({ success:false, error:"BigQuery not initialised" });
+
+    // 1. Current vessel state — use simple [rows] destructuring
+    const [vesselRows] = await bigquery.query({
       query: `SELECT vessel_name, imo_number, mmsi_number, flag, vessel_type,
                      latitude_degrees, longitude_degrees, speed, heading, course,
                      last_port_departed, next_port_destination, declared_arrival_time,
@@ -90,7 +96,11 @@ router.get("/:imo", async (req, res, next) => {
               FROM ${FULL_TABLE} WHERE imo_number=${imo} LIMIT 1`,
       location: BQ_LOCATION,
     });
-    if (!vessel) return res.status(404).json({ success:false, error:"Vessel not found" });
+
+    if (!vesselRows || vesselRows.length === 0) {
+      return res.status(404).json({ success:false, error:"Vessel not found" });
+    }
+    const vessel = vesselRows[0];
 
     // 2. Recent AIS history 72h
     const [hist] = await bigquery.query({
@@ -103,68 +113,65 @@ router.get("/:imo", async (req, res, next) => {
       location: BQ_LOCATION,
     });
 
-    const curLat = Number(vessel.latitude_degrees||0);
-    const curLng = Number(vessel.longitude_degrees||0);
+    const curLat = Number(vessel.latitude_degrees || 0);
+    const curLng = Number(vessel.longitude_degrees || 0);
 
-    // Average heading/speed from last 10 points
-    const recent = hist.slice(-10);
-    let avgHdg = Number(vessel.heading||vessel.course||0);
-    let avgSpd = Number(vessel.speed||0);
-    if (recent.length>=2) {
+    if (!curLat || !curLng) {
+      return res.status(422).json({ success:false, error:"Vessel has no position data" });
+    }
+
+    // Average heading/speed from last 10 AIS points
+    const recent = (hist || []).slice(-10);
+    let avgHdg = Number(vessel.heading || vessel.course || 0);
+    let avgSpd = Number(vessel.speed || 0);
+    if (recent.length >= 2) {
       const hdgs = recent.map(p=>Number(p.heading||p.course||0)).filter(h=>h>0);
       const spds = recent.map(p=>Number(p.speed||0)).filter(s=>s>0.3);
       if (hdgs.length) avgHdg = hdgs.reduce((a,b)=>a+b)/hdgs.length;
       if (spds.length) avgSpd = spds.reduce((a,b)=>a+b)/spds.length;
     }
 
-    // Declared destination string
-    const declRaw = vessel.next_port_destination;
-    const declaredDest = declRaw ? String(declRaw.value||declRaw).trim() : null;
+    const declaredDest = bqVal(vessel.next_port_destination);
 
     // Score each port
     const scored = PORTS.map(port => {
       const d   = distNM(curLat, curLng, port.lat, port.lng);
       const brg = bearing(curLat, curLng, port.lat, port.lng);
 
-      // Heading alignment (0-1)
       let diff = Math.abs(brg - avgHdg);
       if (diff>180) diff=360-diff;
-      const hdgScore = Math.max(0, 1 - diff/90);
-
-      // Distance score (sweet spot 50-800 NM)
+      const hdgScore  = Math.max(0, 1 - diff/90);
       const distScore = d<5?0 : d<50?0.2 : d<800?1.0 : d<2000?0.5 : 0.1;
-
-      // Declared match
       const isDecl = declaredDest && (
         declaredDest.toLowerCase().includes(port.name.toLowerCase().slice(0,6)) ||
         port.name.toLowerCase().includes(declaredDest.toLowerCase().slice(0,6)) ||
-        (port.code && declaredDest.toUpperCase().includes(port.code))
+        declaredDest.toUpperCase().includes(port.code)
       );
       const declScore = isDecl ? 3.0 : 0;
-
       const total = hdgScore*1.8 + distScore + declScore;
-      const etaH  = avgSpd>0.3 ? d/avgSpd : null;
-      const etaDate= etaH ? new Date(Date.now()+etaH*3600000) : null;
+
+      const etaH   = avgSpd > 0.3 ? d / avgSpd : null;
+      const etaDate = etaH ? new Date(Date.now() + etaH*3600000) : null;
 
       return {
-        port: port.name, code: port.code, region: port.region,
-        lat: port.lat, lng: port.lng,
-        distance_nm:        Math.round(d),
-        bearing_deg:        Math.round(brg),
-        heading_alignment:  Math.round(hdgScore*100),
-        score:              total,
-        eta_hours:          etaH ? Math.round(etaH*10)/10 : null,
-        eta_iso:            etaDate ? etaDate.toISOString() : null,
-        eta_label:          etaH ? formatETA(etaH) : "Unknown",
-        is_declared:        !!isDecl,
-        confidence:         Math.min(Math.round(total*20), 97),
+        port: port.name, code: port.code,
+        lat: port.lat,   lng: port.lng,
+        distance_nm:       Math.round(d),
+        bearing_deg:       Math.round(brg),
+        heading_alignment: Math.round(hdgScore*100),
+        score:             total,
+        eta_hours:         etaH ? Math.round(etaH*10)/10 : null,
+        eta_iso:           etaDate ? etaDate.toISOString() : null,
+        eta_label:         etaH ? formatETA(etaH) : "Unknown",
+        is_declared:       !!isDecl,
+        confidence:        Math.min(Math.round(total*20), 97),
       };
     }).filter(p=>p.distance_nm>3).sort((a,b)=>b.score-a.score);
 
     const top  = scored[0];
-    const alts = scored.slice(1,4);
+    const alts = scored.slice(1, 4);
 
-    // Route waypoints (great circle interpolation)
+    // Route waypoints
     const waypoints = [];
     if (top) {
       waypoints.push({ lat:curLat, lng:curLng, label:"Current Position", type:"current" });
@@ -172,10 +179,9 @@ router.get("/:imo", async (req, res, next) => {
       for (let i=1; i<steps; i++) {
         const t=i/steps;
         waypoints.push({
-          lat: curLat+(top.lat-curLat)*t,
-          lng: curLng+(top.lng-curLng)*t,
-          label: `Waypoint ${i}`,
-          type: "waypoint",
+          lat: curLat + (top.lat-curLat)*t,
+          lng: curLng + (top.lng-curLng)*t,
+          label: `Waypoint ${i}`, type:"waypoint",
           eta_hours_from_now: top.eta_hours ? Math.round(top.eta_hours*t*10)/10 : null,
         });
       }
@@ -184,36 +190,39 @@ router.get("/:imo", async (req, res, next) => {
 
     const result = {
       vessel: {
-        name: vessel.vessel_name, imo, flag: vessel.flag,
-        lat: curLat, lng: curLng,
-        speed_kn:  Math.round(avgSpd*10)/10,
-        speed_kmh: Math.round(avgSpd*1.852*10)/10,
-        heading:   Math.round(avgHdg),
-        last_port: vessel.last_port_departed ? String(vessel.last_port_departed.value||vessel.last_port_departed).trim() : null,
+        name:         bqVal(vessel.vessel_name) || "Unknown",
+        imo,
+        flag:         bqVal(vessel.flag),
+        lat:          curLat,
+        lng:          curLng,
+        speed_kn:     Math.round(avgSpd*10)/10,
+        speed_kmh:    Math.round(avgSpd*1.852*10)/10,
+        heading:      Math.round(avgHdg),
+        last_port:    bqVal(vessel.last_port_departed),
         declared_dest: declaredDest,
       },
       prediction: top ? {
-        destination:     top.port,
-        destination_code:top.code,
-        destination_lat: top.lat,
-        destination_lng: top.lng,
-        eta_hours:       top.eta_hours,
-        eta_label:       top.eta_label,
-        eta_iso:         top.eta_iso,
-        distance_nm:     top.distance_nm,
-        bearing_deg:     top.bearing_deg,
-        confidence:      top.confidence,
-        is_declared:     top.is_declared,
+        destination:      top.port,
+        destination_code: top.code,
+        destination_lat:  top.lat,
+        destination_lng:  top.lng,
+        eta_hours:        top.eta_hours,
+        eta_label:        top.eta_label,
+        eta_iso:          top.eta_iso,
+        distance_nm:      top.distance_nm,
+        bearing_deg:      top.bearing_deg,
+        confidence:       top.confidence,
+        is_declared:      top.is_declared,
         method: top.is_declared
           ? "Declared destination confirmed"
-          : hist.length>20
+          : (hist||[]).length > 20
             ? "AIS trajectory extrapolation"
             : "Heading & proximity analysis",
       } : null,
       alternatives: alts,
       route_waypoints: waypoints,
       analysis: {
-        history_points: hist.length,
+        history_points: (hist||[]).length,
         avg_speed_kn:   Math.round(avgSpd*10)/10,
         avg_heading:    Math.round(avgHdg),
         ports_scored:   PORTS.length,
@@ -225,7 +234,8 @@ router.get("/:imo", async (req, res, next) => {
     res.json({ success:true, cached:false, ...result });
 
   } catch(err) {
-    logger.error("[PREDICT]", err.message);
+    logger.error(`[PREDICT] IMO ${req.params.imo} — ${err.message}`);
+    logger.error(err.stack);
     next(err);
   }
 });
