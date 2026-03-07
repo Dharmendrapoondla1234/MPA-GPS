@@ -13,7 +13,6 @@ let loaderPromise = null;
 const RADIUS = { DANGER: 500, WARNING: 1500 };
 const STALE_MS = 24 * 60 * 60 * 1000;
 const IS_MOBILE = /Mobi|Android/i.test(navigator.userAgent);
-const VESSEL_CAP = IS_MOBILE ? 800 : 5000; // perf cap
 
 function isStale(v) {
   const ts = v.effective_timestamp;
