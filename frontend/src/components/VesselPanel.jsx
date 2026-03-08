@@ -195,9 +195,9 @@ function VirtualList({ items, selectedId, onSelect, compact }) {
       style={{ overflowY: "auto", height: "100%", contain: "strict" }}
     >
       {paddingTop > 0 && <div style={{ height: paddingTop }} />}
-      {visible.map((v, i) => compact
-        ? <CompactItem key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect} idx={startIdx + i} />
-        : <FullItem    key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect} idx={startIdx + i} />
+      {visible.map((v) => compact
+        ? <CompactItem key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect} idx={0} />
+        : <FullItem    key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect} idx={0} />
       )}
       {paddingBottom > 0 && <div style={{ height: paddingBottom }} />}
     </div>
@@ -205,7 +205,7 @@ function VirtualList({ items, selectedId, onSelect, compact }) {
 }
 
 
-function FullItem({ v, selected, onSelect, idx }) {
+const FullItem = React.memo(function FullItem({ v, selected, onSelect, idx }) {
   const st    = getVesselStatus(v.speed);
   const speed = parseFloat(v.speed||0);
   const pct   = Math.min((speed/25)*100,100);
@@ -239,9 +239,9 @@ function FullItem({ v, selected, onSelect, idx }) {
       </div>
     </div>
   );
-}
+});
 
-function CompactItem({ v, selected, onSelect, idx }) {
+const CompactItem = React.memo(function CompactItem({ v, selected, onSelect, idx }) {
   const st = getVesselStatus(v.speed);
   return (
     <div className={`vp-compact ${selected?"selected":""}`} onClick={()=>onSelect(v)} style={{animationDelay:`${Math.min(idx*10,200)}ms`}}>
@@ -252,4 +252,4 @@ function CompactItem({ v, selected, onSelect, idx }) {
       <span className="vp-compact-dot" style={{background:st.color}}/>
     </div>
   );
-}
+});

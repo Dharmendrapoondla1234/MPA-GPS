@@ -28,7 +28,7 @@ export function getVesselIcon(vessel, isSelected = false) {
 }
 
 export function formatTimestamp(ts) {
-  if (!ts) return "—";
+  if (!ts) return "Unknown";
   try {
     const d = new Date(ts);
     if (isNaN(d)) return String(ts);
@@ -40,7 +40,7 @@ export function formatTimestamp(ts) {
 }
 
 export function timeAgo(ts) {
-  if (!ts) return "—";
+  if (!ts) return "Unknown";
   try {
     const diff = Date.now() - new Date(ts).getTime();
     const m = Math.floor(diff / 60000);

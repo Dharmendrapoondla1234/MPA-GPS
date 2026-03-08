@@ -78,37 +78,43 @@ function normalizeVessel(v) {
 }
 
 function normalizeArrival(v) {
+  // Handle both dbt snake_case and legacy camelCase column names
   return {
-    imo_number:     bqNum(v.imo_number),
-    vessel_name:    bqStr(v.vessel_name),
-    call_sign:      bqStr(v.call_sign),
+    imo_number:     bqNum(v.imo_number    ?? v.imoNumber),
+    vessel_name:    bqStr(v.vessel_name   ?? v.vesselName),
+    call_sign:      bqStr(v.call_sign     ?? v.callSign),
     flag:           bqStr(v.flag),
-    arrival_time:   bqStr(v.arrival_time),
-    arrival_date:   bqStr(v.arrival_date),
-    location_from:  bqStr(v.location_from),
-    location_to:    bqStr(v.location_to),
-    arrival_source: bqStr(v.arrival_source),
-    berth_grid:     bqStr(v.berth_grid),
-    voyage_purpose: bqStr(v.voyage_purpose),
-    shipping_agent: bqStr(v.shipping_agent),
-    crew_count:     bqNum(v.crew_count),
-    passenger_count:bqNum(v.passenger_count),
+    // dbt: arrival_time | legacy: arrivedTime / arrived_time
+    arrival_time:   bqStr(v.arrival_time  ?? v.arrivedTime   ?? v.arrived_time),
+    arrival_date:   bqStr(v.arrival_date  ?? v.arrivedDate),
+    // dbt: location_from/to | legacy: locationFrom/locationTo
+    location_from:  bqStr(v.location_from ?? v.locationFrom  ?? v.location_from),
+    location_to:    bqStr(v.location_to   ?? v.locationTo    ?? v.location_to),
+    arrival_source: bqStr(v.arrival_source ?? v.arrivalSource ?? "AIS_CONFIRMED"),
+    berth_grid:     bqStr(v.berth_grid    ?? v.berthGrid),
+    voyage_purpose: bqStr(v.voyage_purpose ?? v.voyagePurpose),
+    shipping_agent: bqStr(v.shipping_agent ?? v.shippingAgent),
+    crew_count:     bqNum(v.crew_count    ?? v.crewCount),
+    passenger_count:bqNum(v.passenger_count ?? v.passengerCount),
   };
 }
 
 function normalizeDeparture(v) {
+  // Handle both dbt snake_case and legacy camelCase column names
   return {
-    imo_number:       bqNum(v.imo_number),
-    vessel_name:      bqStr(v.vessel_name),
-    call_sign:        bqStr(v.call_sign),
+    imo_number:       bqNum(v.imo_number      ?? v.imoNumber),
+    vessel_name:      bqStr(v.vessel_name     ?? v.vesselName),
+    call_sign:        bqStr(v.call_sign       ?? v.callSign),
     flag:             bqStr(v.flag),
-    departure_time:   bqStr(v.departure_time),
-    departure_date:   bqStr(v.departure_date),
-    departure_source: bqStr(v.departure_source),
-    next_port:        bqStr(v.next_port),
-    shipping_agent:   bqStr(v.shipping_agent),
-    crew_count:       bqNum(v.crew_count),
-    passenger_count:  bqNum(v.passenger_count),
+    // dbt: departure_time | legacy: departedTime / departed_time
+    departure_time:   bqStr(v.departure_time  ?? v.departedTime  ?? v.departed_time),
+    departure_date:   bqStr(v.departure_date  ?? v.departedDate),
+    departure_source: bqStr(v.departure_source ?? v.departureSource ?? "AIS_CONFIRMED"),
+    // dbt: next_port | legacy: nextPort / destinationPort
+    next_port:        bqStr(v.next_port       ?? v.nextPort       ?? v.destinationPort),
+    shipping_agent:   bqStr(v.shipping_agent  ?? v.shippingAgent),
+    crew_count:       bqNum(v.crew_count      ?? v.crewCount),
+    passenger_count:  bqNum(v.passenger_count ?? v.passengerCount),
   };
 }
 
@@ -127,7 +133,10 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
     // ETag — skip re-serialising + re-parsing if client already has this version
     const isFiltered = search || vesselType || speedMin || speedMax;
     if (!isFiltered) {
-      const etag = `W/"v-${data.length}-${String(data[0]?.effective_timestamp||0).slice(0,19)}"`;
+      // Unwrap BigQuery timestamp object { value: "..." } before hashing
+      const ts0 = data[0]?.effective_timestamp;
+      const tsStr = (ts0 && typeof ts0 === "object" && ts0.value) ? String(ts0.value) : String(ts0 || 0);
+      const etag = `W/"v-${data.length}-${tsStr.slice(0,19)}"`;
       if (req.headers["if-none-match"] === etag) return res.status(304).end();
       res.set("ETag", etag);
       res.set("Cache-Control", "public, max-age=55");

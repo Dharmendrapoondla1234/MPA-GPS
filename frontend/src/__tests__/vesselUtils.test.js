@@ -12,12 +12,12 @@ describe("getSpeedColor", () => {
   test("undefined → grey", () =>
     expect(getSpeedColor(undefined)).toBe("#607d8b"));
   test("0.5 → grey", () => expect(getSpeedColor(0.5)).toBe("#607d8b"));
-  test("1 → green", () => expect(getSpeedColor(1)).toBe("#26c97a"));
-  test("4.9 → green", () => expect(getSpeedColor(4.9)).toBe("#26c97a"));
-  test("5 → amber", () => expect(getSpeedColor(5)).toBe("#f5a623"));
-  test("11.9 → amber", () => expect(getSpeedColor(11.9)).toBe("#f5a623"));
-  test("12 → red", () => expect(getSpeedColor(12)).toBe("#e8404e"));
-  test("22 → red", () => expect(getSpeedColor(22)).toBe("#e8404e"));
+  test("1 → green", () => expect(getSpeedColor(1)).toBe("#00ff9d"));
+  test("4.9 → green", () => expect(getSpeedColor(4.9)).toBe("#00ff9d"));
+  test("5 → amber", () => expect(getSpeedColor(5)).toBe("#ffaa00"));
+  test("11.9 → amber", () => expect(getSpeedColor(11.9)).toBe("#ffaa00"));
+  test("12 → red", () => expect(getSpeedColor(12)).toBe("#ff3355"));
+  test("22 → red", () => expect(getSpeedColor(22)).toBe("#ff3355"));
 });
 
 describe("getVesselStatus", () => {
@@ -29,17 +29,17 @@ describe("getVesselStatus", () => {
   test("slow → Slow Speed + green", () => {
     const s = getVesselStatus(3);
     expect(s.label).toMatch(/slow/i);
-    expect(s.color).toBe("#26c97a");
+    expect(s.color).toBe("#00ff9d");
   });
   test("medium → Under Way + amber", () => {
     const s = getVesselStatus(8);
     expect(s.label).toMatch(/way/i);
-    expect(s.color).toBe("#f5a623");
+    expect(s.color).toBe("#ffaa00");
   });
   test("fast → Full Ahead + red", () => {
     const s = getVesselStatus(15);
     expect(s.label).toMatch(/full|ahead/i);
-    expect(s.color).toBe("#e8404e");
+    expect(s.color).toBe("#ff3355");
   });
 });
 

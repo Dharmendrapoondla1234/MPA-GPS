@@ -36,6 +36,7 @@ const cache = {
   vesselTypes: { data: null, ts: 0, ttl: 900_000 },  // 15 min — almost never changes
   portActivity:{ data: null, ts: 0, ttl: 300_000 },  // 5 min
   arrivals:    { data: null, ts: 0, ttl: 300_000 },  // 5 min
+  departures:  { data: null, ts: 0, ttl: 300_000 },  // 5 min
   dbtExists:   { checked: false, value: false },
 };
 function fromCache(k) {
@@ -284,6 +285,8 @@ async function getRecentArrivals(limit = 50) {
 //  DEPARTURES
 // ════════════════════════════════════════════════════════════════
 async function getRecentDepartures(limit = 50) {
+  const hit = fromCache("departures");
+  if (hit) return hit;
   const dbt = await useDbt();
   const lim = Math.min(parseInt(limit) || 50, 200);
 
@@ -295,7 +298,7 @@ async function getRecentDepartures(limit = 50) {
                 ORDER BY departure_time DESC LIMIT ${lim}`,
         location: BQ_LOCATION,
       });
-      return rows;
+      return toCache("departures", rows);
     } catch (e) {
       logger.warn(`[BQ] fct_vessel_departures not ready, falling back: ${e.message.slice(0,80)}`);
     }
@@ -308,7 +311,7 @@ async function getRecentDepartures(limit = 50) {
             ORDER BY 1 DESC LIMIT ${lim}`,
     location: BQ_LOCATION,
   });
-  return rows;
+  return toCache("departures", rows);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -416,6 +419,7 @@ async function warmCache() {
     ["stats",        getFleetStats],
     ["vesselTypes",  getVesselTypes],
     ["arrivals",     getRecentArrivals],
+    ["departures",   getRecentDepartures],
     ["portActivity", getPortActivity],
   ];
   let ok = 0;

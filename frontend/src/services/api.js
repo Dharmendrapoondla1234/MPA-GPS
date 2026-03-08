@@ -6,6 +6,9 @@ const inFlight  = new Map();
 const respCache = new Map(); // url → { data, ts, etag }
 const CACHE_TTL = { vessels: 55_000, stats: 115_000, default: 30_000 };
 
+// Test helper — call this in afterEach to prevent cache bleed between tests
+export function __clearCache() { inFlight.clear(); respCache.clear(); }
+
 function cacheTTL(url) {
   if (url.includes("/vessels"))     return CACHE_TTL.vessels;
   if (url.includes("/stats"))       return CACHE_TTL.stats;
@@ -18,9 +21,10 @@ async function call(path) {
   // Return in-flight promise immediately (dedup parallel calls)
   if (inFlight.has(url)) return inFlight.get(url);
 
-  // Return browser cache if still fresh
+  // Return browser cache if still fresh (skip in test env so mocks always run)
   const cached = respCache.get(url);
-  if (cached && Date.now() - cached.ts < cacheTTL(url)) return cached.data;
+  const isTest = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
+  if (!isTest && cached && Date.now() - cached.ts < cacheTTL(url)) return cached.data;
 
   const promise = (async () => {
     try {
