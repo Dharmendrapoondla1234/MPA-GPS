@@ -168,7 +168,7 @@ const MapView = forwardRef(function MapView(
   const hasFitBounds  = useRef(false); // auto-fit on first vessel load
 
   const [coords,         setCoords]         = useState(null);
-  const [mapStyle,       setMapStyle]       = useState("dark");  // dark nautical by default
+  const [mapStyle,       setMapStyle]       = useState("satellite");
   const [mapReady,       setMapReady]       = useState(false);
   const [mapZoom,        setMapZoom]        = useState(4);       // triggers icon redraw
   const [gisData,        setGisData]        = useState(null);
@@ -239,8 +239,8 @@ const MapView = forwardRef(function MapView(
       const map = new window.google.maps.Map(mapRef.current, {
         center: MAP_CENTER,
         zoom: 4,                         // wide overview
-        mapTypeId: "roadmap",
-        styles: DARK_NAUTICAL_STYLE,     // dark nautical from first paint
+        mapTypeId: "hybrid",
+        styles: [],                      // satellite hybrid from first paint
         zoomControl: false, streetViewControl: false, mapTypeControl: false,
         fullscreenControl: false, rotateControl: false,
         gestureHandling: "greedy", clickableIcons: false,
@@ -541,10 +541,9 @@ const MapView = forwardRef(function MapView(
   /* ── Map style cycle ──────────────────────────────────── */
   const cycleStyle = useCallback(() => {
     if (!mapObj.current) return;
-    const next = { satellite:"map", map:"dark", dark:"satellite" }[mapStyle];
+    const next = mapStyle === "satellite" ? "map" : "satellite";
     if (next === "satellite") { mapObj.current.setMapTypeId("hybrid");  mapObj.current.setOptions({ styles: [] }); }
-    else if (next === "map")  { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({ styles: CLEAN_MAP_STYLE }); }
-    else                      { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({ styles: DARK_NAUTICAL_STYLE }); }
+    else                      { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({ styles: CLEAN_MAP_STYLE }); }
     setMapStyle(next);
   }, [mapStyle]);
 
@@ -552,7 +551,7 @@ const MapView = forwardRef(function MapView(
   const dangerCount = alerts.filter(a => a.level === "danger").length;
   const warnCount   = alerts.filter(a => a.level === "warning").length;
   const toggleLayer = key => setLayers(prev => ({ ...prev, [key]: !prev[key] }));
-  const STYLE_ICON  = { satellite:"🛰️", map:"🗺️", dark:"🌑" };
+  const STYLE_ICON  = { satellite:"🛰️", map:"🗺️" };
 
   /* ── JSX ──────────────────────────────────────────────── */
   return (
@@ -723,18 +722,18 @@ const CLEAN_MAP_STYLE = [
   { elementType:"labels.icon", stylers:[{ visibility:"off" }] },
 ];
 
-const DARK_NAUTICAL_STYLE = [
-  { elementType:"geometry",              stylers:[{ color:"#0d1a28" }] },
-  { elementType:"labels.text.fill",      stylers:[{ color:"#3d6a8a" }] },
-  { elementType:"labels.text.stroke",    stylers:[{ color:"#040810" }] },
-  { featureType:"water", elementType:"geometry", stylers:[{ color:"#071828" }] },
-  { featureType:"water", elementType:"labels.text.fill", stylers:[{ color:"#1a4a6a" }] },
-  { featureType:"landscape",             elementType:"geometry", stylers:[{ color:"#111e2c" }] },
-  { featureType:"landscape.natural",     elementType:"geometry", stylers:[{ color:"#0d1a28" }] },
-  { featureType:"road",                  stylers:[{ visibility:"off" }] },
-  { featureType:"poi",                   stylers:[{ visibility:"off" }] },
-  { featureType:"transit",               stylers:[{ visibility:"off" }] },
-  { elementType:"labels.icon",           stylers:[{ visibility:"off" }] },
-  { featureType:"administrative.country", elementType:"geometry.stroke", stylers:[{ color:"#1a3a5a" }, { weight:0.8 }] },
-  { featureType:"administrative.locality", elementType:"labels.text.fill", stylers:[{ color:"#2a5a7a" }, { visibility:"simplified" }] },
-];
+// const DARK_NAUTICAL_STYLE = [
+//   { elementType:"geometry",              stylers:[{ color:"#0d1a28" }] },
+//   { elementType:"labels.text.fill",      stylers:[{ color:"#3d6a8a" }] },
+//   { elementType:"labels.text.stroke",    stylers:[{ color:"#040810" }] },
+//   { featureType:"water", elementType:"geometry", stylers:[{ color:"#071828" }] },
+//   { featureType:"water", elementType:"labels.text.fill", stylers:[{ color:"#1a4a6a" }] },
+//   { featureType:"landscape",             elementType:"geometry", stylers:[{ color:"#111e2c" }] },
+//   { featureType:"landscape.natural",     elementType:"geometry", stylers:[{ color:"#0d1a28" }] },
+//   { featureType:"road",                  stylers:[{ visibility:"off" }] },
+//   { featureType:"poi",                   stylers:[{ visibility:"off" }] },
+//   { featureType:"transit",               stylers:[{ visibility:"off" }] },
+//   { elementType:"labels.icon",           stylers:[{ visibility:"off" }] },
+//   { featureType:"administrative.country", elementType:"geometry.stroke", stylers:[{ color:"#1a3a5a" }, { weight:0.8 }] },
+//   { featureType:"administrative.locality", elementType:"labels.text.fill", stylers:[{ color:"#2a5a7a" }, { visibility:"simplified" }] },
+// ];
