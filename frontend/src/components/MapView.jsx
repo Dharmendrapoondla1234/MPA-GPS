@@ -47,32 +47,39 @@ function smoothMove(marker, newLat, newLng) {
 }
 
 function getVesselIcon(vessel, isSelected, alertLevel = null) {
-  const color   = alertLevel === "danger"  ? "#ff4466" :
-                  alertLevel === "warning" ? "#ffcc00" : getSpeedColor(vessel.speed);
-  const heading = parseFloat(vessel.heading) || 0;
   const speed   = parseFloat(vessel.speed)   || 0;
-  // Larger base scale — more visible on dark map
-  const scale   = isSelected ? 13 : alertLevel ? 10 : 8;
+  const heading = parseFloat(vessel.heading) || 0;
 
-  if (speed > 0.5) {
+  // Color: alert overrides speed-color
+  const color = alertLevel === "danger"  ? "#ff2244" :
+                alertLevel === "warning" ? "#ffcc00" :
+                getSpeedColor(speed);
+
+  // MarineTraffic-style: prominent arrows that are always readable
+  // Larger base so vessels are visible at zoom 8+
+  const scale = isSelected ? 16 : alertLevel ? 13 : 11;
+
+  if (speed > 0.3) {
+    // Moving vessel — directional arrow (MarineTraffic style)
     return {
       path:         window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
       scale,
       rotation:     heading,
       fillColor:    color,
       fillOpacity:  1,
-      strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.7)",
-      strokeWeight: isSelected ? 2.5 : 1.2,
+      strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.55)",
+      strokeWeight: isSelected ? 2.5 : 1.0,
+      anchor:       new window.google.maps.Point(0, 2.5),
     };
   }
-  // Stationary — bright circle, clearly visible on dark
+  // Stationary — circle dot like MarineTraffic
   return {
     path:         window.google.maps.SymbolPath.CIRCLE,
-    scale:        isSelected ? scale - 1 : scale - 3,
+    scale:        isSelected ? 8 : 5,
     fillColor:    color,
-    fillOpacity:  isSelected ? 1 : 0.9,
-    strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.6)",
-    strokeWeight: isSelected ? 2.5 : 1.2,
+    fillOpacity:  isSelected ? 1 : 0.85,
+    strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.5)",
+    strokeWeight: isSelected ? 2.5 : 1.0,
   };
 }
 
@@ -160,7 +167,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   useImperativeHandle(ref, () => ({
     panToVessel(vessel) {
       const lat = Number(vessel?.latitude_degrees), lng = Number(vessel?.longitude_degrees);
-      if (mapObj.current && lat && lng) { mapObj.current.panTo({ lat, lng }); mapObj.current.setZoom(13); }
+      if (mapObj.current && lat && lng) { mapObj.current.panTo({ lat, lng }); mapObj.current.setZoom(12); }
     },
   }));
 
@@ -191,7 +198,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     loaderPromise.then(() => {
       if (mapObj.current) return;
       const map = new window.google.maps.Map(mapRef.current, {
-        center: MAP_CENTER, zoom: 10, mapTypeId: "roadmap",
+        center: MAP_CENTER, zoom: 5, mapTypeId: "roadmap",
         styles: DARK_NAUTICAL_STYLE,
         zoomControl: false, streetViewControl: false, mapTypeControl: false,
         fullscreenControl: false, rotateControl: false, gestureHandling: "greedy", clickableIcons: false,
@@ -201,8 +208,8 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
       map.addListener("mousemove", e => setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) }));
       map.addListener("click", () => { infoWin.current.close(); hoverWin.current.close(); setShowLayerPanel(false); setShowAlerts(false); });
-      clusterer.current = new MarkerClusterer({ map, markers: [], renderer: { render({ count, position }) {
-        // Color-coded by density: few=teal, many=amber, lots=red
+      // Custom cluster renderer — color-coded by density
+      const clusterRenderer = { render({ count, position }) {
         const col  = count < 20  ? "#00e5ff" : count < 100 ? "#ffaa00" : "#ff3355";
         const sz   = count < 10  ? 18 : count < 50 ? 22 : count < 200 ? 27 : 33;
         const txt  = count > 999 ? `${(count/1000).toFixed(1)}k` : String(count);
@@ -214,7 +221,14 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
           label: { text: txt, color: col, fontSize: "10px",
                    fontFamily: "'JetBrains Mono',monospace", fontWeight: "700" },
         });
-      }}});
+      }};
+      // Only cluster at very low zoom levels (< 8) — at zoom 8+ show all individual vessels
+      // This matches MarineTraffic behavior: individual arrows visible from mid zoom
+      clusterer.current = new MarkerClusterer({
+        map, markers: [],
+        renderer: clusterRenderer,
+        algorithmOptions: { maxZoom: 7, radius: 80 },
+      });
       setMapReady(true);
     });
   }, []);
@@ -287,7 +301,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
 
   // MARKERS
   useEffect(() => {
-    if (!mapObj.current || !clusterer.current) return;
+    if (!mapReady || !mapObj.current || !clusterer.current) return;
     const fresh=freshVessels;
     const activeIds=new Set(fresh.map(v=>String(v.imo_number)));
     const selId=selectedVessel?.imo_number;
