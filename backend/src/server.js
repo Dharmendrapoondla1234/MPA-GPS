@@ -33,10 +33,11 @@ app.use("/api/predict", predictRoutes);
 app.use("/api",         vesselRoutes);   // covers /vessels, /arrivals, /departures, /port-activity, /stats
 
 
-// ── DEBUG: sample raw coords from fct_vessel_live_tracking ───
+// ── DEBUG: sample raw + converted coords ─────────────────────
 app.get("/debug/coords", async (_req, res) => {
   try {
     const { bigquery, BQ_LOCATION } = require("./services/bigquery");
+    const RAD = 180 / Math.PI;
     const [rows] = await bigquery.query({
       query: `SELECT vessel_name, imo_number, latitude_degrees, longitude_degrees,
                      speed, last_position_at
@@ -45,7 +46,15 @@ app.get("/debug/coords", async (_req, res) => {
               LIMIT 10`,
       location: BQ_LOCATION,
     });
-    res.json({ count: rows.length, sample: rows });
+    const sample = rows.map(r => ({
+      vessel_name: r.vessel_name,
+      raw_lat: r.latitude_degrees,
+      raw_lng: r.longitude_degrees,
+      converted_lat: Number(r.latitude_degrees) * RAD,
+      converted_lng: Number(r.longitude_degrees) * RAD,
+      speed: r.speed,
+    }));
+    res.json({ note: "raw values are radians, converted = degrees", count: rows.length, sample });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
