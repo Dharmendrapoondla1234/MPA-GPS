@@ -313,7 +313,6 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
         markersRef.current[id]=m;toAdd.push(m);
       }
     });
-    // Markers added to map on creation; just hide removed ones
     toRemove.forEach(m => m.setMap(null));
   }, [freshVessels, selectedVessel, onVesselClick, alertMap, mapReady]);
 

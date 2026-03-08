@@ -1,8 +1,7 @@
-// src/App.jsx — MPA Advanced v6
+// src/App.jsx — MarineTrack v7  (map-first, no left panel)
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import AuthPage           from "./components/Authpage";
 import TopBar             from "./components/TopBar";
-import VesselPanel        from "./components/VesselPanel";
 import VesselDetailPanel  from "./components/VesselDetailPanel";
 import MapView            from "./components/MapView";
 import SpeedLegend        from "./components/SpeedLegend";
@@ -12,107 +11,67 @@ import { useVessels }     from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import "./styles/App.css";
 
-const IS_MOBILE = () => window.innerWidth <= 768;
-const IS_TABLET = () => window.innerWidth <= 1100;
-
 export default function App() {
-  const [user,          setUser]         = useState(() => getCurrentUser());
-  const [filters,       setFilters]      = useState({ search:"", vesselType:"", speedRange:"", speedMin:null, speedMax:null });
-  const [selectedVessel,setSelectedVessel]=useState(null);
-  const [trailData,     setTrailData]    = useState(null);
-  const [predictRoute,  setPredictRoute] = useState(null);
-  const [panelOpen,     setPanelOpen]    = useState(!IS_MOBILE());
-  const [portPanelOpen, setPortPanelOpen]= useState(!IS_TABLET());
+  const [user,           setUser]          = useState(() => getCurrentUser());
+  const [filters,        setFilters]       = useState({ search:"", vesselType:"", speedRange:"", speedMin:null, speedMax:null });
+  const [selectedVessel, setSelectedVessel]= useState(null);
+  const [trailData,      setTrailData]     = useState(null);
+  const [predictRoute,   setPredictRoute]  = useState(null);
+  const [rightPanel,     setRightPanel]    = useState("port"); // "port" | "detail" | null
   const mapRef = useRef(null);
 
   const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
 
-  // Auto-locate on search — local lookup first, then filtered result
+  // Auto-locate on search
   useEffect(() => {
     const q = (filters.search || "").trim();
     if (q.length < 2) return;
-
-    // Priority 1: exact IMO/MMSI match in full vessel list (instant, no API round-trip)
     const isNum = /^\d+$/.test(q);
     if (isNum && vessels.length > 0) {
       const exact = vessels.find(v =>
-        String(v.imo_number)  === q ||
-        String(v.mmsi_number) === q
+        String(v.imo_number) === q || String(v.mmsi_number) === q
       );
-      if (exact) {
-        setSelectedVessel(exact);
-        setTrailData(null); setPredictRoute(null);
-        if (mapRef.current?.panToVessel) mapRef.current.panToVessel(exact);
-        if (IS_MOBILE()) setPanelOpen(false);
-        return;
-      }
+      if (exact) { _select(exact); return; }
     }
-
-    // Priority 2: single result from server-filtered list
-    if (vessels.length === 1) {
-      setSelectedVessel(vessels[0]);
-      setTrailData(null); setPredictRoute(null);
-      if (mapRef.current?.panToVessel) mapRef.current.panToVessel(vessels[0]);
-      if (IS_MOBILE()) setPanelOpen(false);
-    }
+    if (vessels.length === 1) _select(vessels[0]);
+  // eslint-disable-next-line
   }, [vessels, filters.search]);
 
-  // Handle resize
-  useEffect(() => {
-    const handler = () => {
-      if (!IS_MOBILE() && !panelOpen) setPanelOpen(true);
-      if (!IS_TABLET() && !portPanelOpen) setPortPanelOpen(true);
-    };
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
-  }, [panelOpen, portPanelOpen]);
+  function _select(vessel) {
+    if (!vessel?.imo_number) return;
+    const full = vessels.find(v => v.imo_number === vessel.imo_number) || vessel;
+    setSelectedVessel(full);
+    setTrailData(null);
+    setPredictRoute(null);
+    setRightPanel("detail");
+    if (mapRef.current?.panToVessel) mapRef.current.panToVessel(full);
+  }
 
-  const handleSelectVessel = useCallback((vessel) => {
-    // Accept minimal vessel object from PortActivityPanel click too
-    if (vessel?.imo_number) {
-      setSelectedVessel(vessel);
-      setTrailData(null); setPredictRoute(null);
-      // Try to find full vessel data
-      const full = vessels.find(v => v.imo_number === vessel.imo_number);
-      if (full) { setSelectedVessel(full); if (mapRef.current?.panToVessel) mapRef.current.panToVessel(full); }
-      if (IS_MOBILE()) { setPanelOpen(false); setPortPanelOpen(false); }
-    }
-  }, [vessels]);
+  const handleSelectVessel = useCallback((v) => _select(v), [vessels]); // eslint-disable-line
 
   const handleCloseDetail = useCallback(() => {
-    setSelectedVessel(null); setTrailData(null); setPredictRoute(null);
+    setSelectedVessel(null);
+    setTrailData(null);
+    setPredictRoute(null);
+    setRightPanel("port");
   }, []);
 
-  const handleLogout = useCallback(() => {
-    logoutUser(); setUser(null);
-  }, []);
+  const handleLogout = useCallback(() => { logoutUser(); setUser(null); }, []);
 
   const handleSearchEnter = useCallback(() => {
     const q = (filters.search || "").trim();
-    // Try exact IMO/MMSI match in full list first
     if (/^\d+$/.test(q)) {
-      const exact = vessels.find(v =>
-        String(v.imo_number) === q || String(v.mmsi_number) === q
-      );
-      if (exact) {
-        setSelectedVessel(exact); setTrailData(null); setPredictRoute(null);
-        if (mapRef.current?.panToVessel) mapRef.current.panToVessel(exact);
-        if (IS_MOBILE()) setPanelOpen(false);
-        return;
-      }
+      const exact = vessels.find(v => String(v.imo_number) === q || String(v.mmsi_number) === q);
+      if (exact) { _select(exact); return; }
     }
-    if (vessels.length > 0) {
-      const v = vessels[0];
-      setSelectedVessel(v); setTrailData(null); setPredictRoute(null);
-      if (mapRef.current?.panToVessel) mapRef.current.panToVessel(v);
-      if (IS_MOBILE()) setPanelOpen(false);
-    }
+    if (vessels.length > 0) _select(vessels[0]);
+  // eslint-disable-next-line
   }, [vessels, filters.search]);
 
   if (!user) return <AuthPage onAuth={setUser} />;
 
-  const showLeftBackdrop  = IS_MOBILE() && panelOpen;
-  const showRightBackdrop = IS_MOBILE() && !!selectedVessel;
+  const portOpen   = rightPanel === "port";
+  const detailOpen = rightPanel === "detail" && !!selectedVessel;
 
   return (
     <div className="app-root">
@@ -124,37 +83,22 @@ export default function App() {
         nextRefresh={nextRefresh}
         loading={loading}
         onRefresh={refresh}
-        panelOpen={panelOpen}
-        onTogglePanel={() => setPanelOpen(p=>!p)}
         lastUpdated={lastUpdated}
         user={user}
         onLogout={handleLogout}
         onSearchEnter={handleSearchEnter}
-        portPanelOpen={portPanelOpen}
-        onTogglePortPanel={() => setPortPanelOpen(p=>!p)}
+        portPanelOpen={portOpen}
+        onTogglePortPanel={() => setRightPanel(p => p === "port" ? null : "port")}
+        /* pass dummy props TopBar still expects */
+        panelOpen={false}
+        onTogglePanel={() => {}}
       />
+
       <ErrorBanner message={error} onRetry={refresh} />
 
       <div className="app-body">
 
-        {/* LEFT — Vessel List */}
-        <div className={`app-left-panel ${panelOpen?"open":"closed"}`}>
-          <VesselPanel
-            vessels={vessels}
-            selectedId={selectedVessel?.imo_number}
-            onSelect={handleSelectVessel}
-            loading={loading}
-            stats={stats}
-            panelOpen={panelOpen}
-            onMinimize={() => setPanelOpen(false)}
-          />
-        </div>
-
-        {showLeftBackdrop && (
-          <div className="app-mobile-backdrop" onClick={() => setPanelOpen(false)} />
-        )}
-
-        {/* CENTER — Map */}
+        {/* FULL-WIDTH MAP — always visible */}
         <div className="app-map-area">
           <MapView
             ref={mapRef}
@@ -175,25 +119,21 @@ export default function App() {
           )}
         </div>
 
-        {showRightBackdrop && (
-          <div className="app-mobile-backdrop" onClick={handleCloseDetail} style={{zIndex:45}} />
-        )}
+        {/* RIGHT — Port Activity (default on login) */}
+        <div className={`app-right-panel ${portOpen ? "open" : ""}`}>
+          <PortActivityPanel
+            onSelectVessel={handleSelectVessel}
+            selectedImo={selectedVessel?.imo_number}
+          />
+        </div>
 
-        {/* RIGHT — Vessel Detail */}
-        <div className={`app-right-panel ${selectedVessel?"open":"closed"}`}>
+        {/* RIGHT — Vessel Detail (appears when vessel clicked/searched) */}
+        <div className={`app-right-panel app-detail-panel ${detailOpen ? "open" : ""}`}>
           <VesselDetailPanel
             vessel={selectedVessel}
             onClose={handleCloseDetail}
             onShowTrail={setTrailData}
             onShowPredictRoute={setPredictRoute}
-          />
-        </div>
-
-        {/* FAR RIGHT — Port Activity */}
-        <div className={`app-port-panel ${portPanelOpen?"open":"closed"}`}>
-          <PortActivityPanel
-            onSelectVessel={handleSelectVessel}
-            selectedImo={selectedVessel?.imo_number}
           />
         </div>
 
