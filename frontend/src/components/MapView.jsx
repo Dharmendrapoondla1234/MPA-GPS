@@ -165,6 +165,7 @@ const MapView = forwardRef(function MapView(
   const aiObjs        = useRef([]);
   const predRouteObjs = useRef([]);
   const mapZoomRef    = useRef(4);   // ← live zoom without re-render lag
+  const hasFitBounds  = useRef(false); // auto-fit on first vessel load
 
   const [coords,         setCoords]         = useState(null);
   const [mapStyle,       setMapStyle]       = useState("dark");  // dark nautical by default
@@ -190,13 +191,12 @@ const MapView = forwardRef(function MapView(
       if (mapObj.current && lat && lng) { mapObj.current.panTo({ lat, lng }); mapObj.current.setZoom(12); }
     },
     // Called by App whenever the right detail panel opens or closes.
-    // Google Maps does not auto-detect DOM size changes — without this
-    // all markers pile up at the old centre when the container resizes.
     triggerResize() {
       if (!mapObj.current) return;
       const centre = mapObj.current.getCenter();
+      if (!centre) return;
       window.google.maps.event.trigger(mapObj.current, "resize");
-      if (centre) mapObj.current.setCenter(centre); // prevent pan-to-0,0
+      mapObj.current.setCenter(centre);
     },
   }));
 
@@ -275,12 +275,20 @@ const MapView = forwardRef(function MapView(
       // ResizeObserver fires whenever the map container changes size
       // (e.g. detail panel slides in/out). Triggers Google Maps resize
       // so markers don't pile up at the old center point.
+      // IMPORTANT: skip the first few fires that happen during initial
+      // layout — map.getCenter() returns null/0,0 before tiles load.
       if (typeof ResizeObserver !== "undefined" && mapRef.current) {
+        let resizeReady = false;
+        // Only start responding to resizes after map has fully initialised
+        window.google.maps.event.addListenerOnce(map, "tilesloaded", () => {
+          resizeReady = true;
+        });
         const ro = new ResizeObserver(() => {
-          if (!mapObj.current) return;
+          if (!mapObj.current || !resizeReady) return;
           const c = mapObj.current.getCenter();
+          if (!c) return;
           window.google.maps.event.trigger(mapObj.current, "resize");
-          if (c) mapObj.current.setCenter(c);
+          mapObj.current.setCenter(c);
         });
         ro.observe(mapRef.current);
       }
@@ -366,6 +374,19 @@ const MapView = forwardRef(function MapView(
         delete markersRef.current[id];
       }
     });
+
+    // Auto-fit map to vessel positions on first data load
+    if (!hasFitBounds.current && fresh.length > 0 && mapObj.current) {
+      hasFitBounds.current = true;
+      const bounds = new window.google.maps.LatLngBounds();
+      fresh.slice(0, 200).forEach(v => {
+        const la = Number(v.latitude_degrees), lo = Number(v.longitude_degrees);
+        if (la && lo && !isNaN(la) && !isNaN(lo)) bounds.extend({ lat: la, lng: lo });
+      });
+      if (!bounds.isEmpty()) {
+        mapObj.current.fitBounds(bounds, { padding: 60 });
+      }
+    }
 
     // Add/update markers
     fresh.forEach(v => {
