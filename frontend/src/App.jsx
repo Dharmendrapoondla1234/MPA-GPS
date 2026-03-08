@@ -27,10 +27,29 @@ export default function App() {
 
   const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
 
-  // Auto-locate on exact search match
+  // Auto-locate on search — local lookup first, then filtered result
   useEffect(() => {
-    if (!filters.search || filters.search.length<2) return;
-    if (vessels.length===1) {
+    const q = (filters.search || "").trim();
+    if (q.length < 2) return;
+
+    // Priority 1: exact IMO/MMSI match in full vessel list (instant, no API round-trip)
+    const isNum = /^\d+$/.test(q);
+    if (isNum && vessels.length > 0) {
+      const exact = vessels.find(v =>
+        String(v.imo_number)  === q ||
+        String(v.mmsi_number) === q
+      );
+      if (exact) {
+        setSelectedVessel(exact);
+        setTrailData(null); setPredictRoute(null);
+        if (mapRef.current?.panToVessel) mapRef.current.panToVessel(exact);
+        if (IS_MOBILE()) setPanelOpen(false);
+        return;
+      }
+    }
+
+    // Priority 2: single result from server-filtered list
+    if (vessels.length === 1) {
       setSelectedVessel(vessels[0]);
       setTrailData(null); setPredictRoute(null);
       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(vessels[0]);
@@ -69,13 +88,26 @@ export default function App() {
   }, []);
 
   const handleSearchEnter = useCallback(() => {
-    if (vessels.length>0) {
+    const q = (filters.search || "").trim();
+    // Try exact IMO/MMSI match in full list first
+    if (/^\d+$/.test(q)) {
+      const exact = vessels.find(v =>
+        String(v.imo_number) === q || String(v.mmsi_number) === q
+      );
+      if (exact) {
+        setSelectedVessel(exact); setTrailData(null); setPredictRoute(null);
+        if (mapRef.current?.panToVessel) mapRef.current.panToVessel(exact);
+        if (IS_MOBILE()) setPanelOpen(false);
+        return;
+      }
+    }
+    if (vessels.length > 0) {
       const v = vessels[0];
       setSelectedVessel(v); setTrailData(null); setPredictRoute(null);
       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(v);
       if (IS_MOBILE()) setPanelOpen(false);
     }
-  }, [vessels]);
+  }, [vessels, filters.search]);
 
   if (!user) return <AuthPage onAuth={setUser} />;
 

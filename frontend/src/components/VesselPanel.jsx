@@ -10,14 +10,27 @@ export default function VesselPanel({ vessels, selectedId, onSelect, loading, st
 
   const filtered = useMemo(() => {
     if (!search) return vessels;
-    const q = search.toLowerCase();
-    return vessels.filter(v =>
-      (v.vessel_name||"").toLowerCase().includes(q) ||
+    const q    = search.trim();
+    const qLow = q.toLowerCase();
+    const isNum = /^\d+$/.test(q);
+
+    const matches = vessels.filter(v =>
+      (v.vessel_name||"").toLowerCase().includes(qLow) ||
       String(v.imo_number||"").includes(q) ||
       String(v.mmsi_number||"").includes(q) ||
-      (v.flag||"").toLowerCase().includes(q) ||
-      (v.call_sign||"").toLowerCase().includes(q)
+      (v.flag||"").toLowerCase().includes(qLow) ||
+      (v.call_sign||"").toLowerCase().includes(qLow)
     );
+
+    // Exact IMO/MMSI matches float to top
+    if (isNum) {
+      matches.sort((a, b) => {
+        const aExact = String(a.imo_number) === q || String(a.mmsi_number) === q;
+        const bExact = String(b.imo_number) === q || String(b.mmsi_number) === q;
+        return (bExact ? 1 : 0) - (aExact ? 1 : 0);
+      });
+    }
+    return matches;
   }, [vessels, search]);
 
   const sorted = useMemo(() => {
@@ -167,7 +180,6 @@ function VirtualList({ items, selectedId, onSelect, compact }) {
 
   const handleScroll = useCallback(e => setScrollTop(e.currentTarget.scrollTop), []);
 
- 
   const viewH     = 500; // approximate — actual clamp happens via CSS
   const startIdx  = Math.max(0, Math.floor(scrollTop / itemH) - OVERSCAN);
   const endIdx    = Math.min(items.length, Math.ceil((scrollTop + viewH) / itemH) + OVERSCAN);

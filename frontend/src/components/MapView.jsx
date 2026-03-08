@@ -51,11 +51,30 @@ function getVesselIcon(vessel, isSelected, alertLevel = null) {
                   alertLevel === "warning" ? "#ffaa00" : getSpeedColor(vessel.speed);
   const heading = parseFloat(vessel.heading) || 0;
   const speed   = parseFloat(vessel.speed)   || 0;
-  const scale   = isSelected ? 11 : alertLevel ? 9 : 7;
+  const scale   = isSelected ? 12 : alertLevel ? 9 : 7;
+
   if (speed > 0.5) {
-    return { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale, rotation: heading, fillColor: color, fillOpacity: 1, strokeColor: isSelected ? "#ffffff" : alertLevel === "danger" ? "#ff0000" : "rgba(0,0,0,0.6)", strokeWeight: isSelected || alertLevel === "danger" ? 2.5 : 1 };
+    return {
+      path:         window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+      scale,
+      rotation:     heading,
+      fillColor:    color,
+      fillOpacity:  1,
+      strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.45)",
+      strokeWeight: isSelected ? 2.5 : 0.8,
+      // Selected vessel glows via larger stroke
+      ...(isSelected && { strokeOpacity: 1 }),
+    };
   }
-  return { path: window.google.maps.SymbolPath.CIRCLE, scale: scale - 2, fillColor: color, fillOpacity: 0.85, strokeColor: isSelected ? "#ffffff" : "rgba(0,0,0,0.5)", strokeWeight: isSelected ? 2 : 1 };
+  // Stationary — circle with subtle ring on selected
+  return {
+    path:        window.google.maps.SymbolPath.CIRCLE,
+    scale:       isSelected ? scale : scale - 2,
+    fillColor:   color,
+    fillOpacity: isSelected ? 1 : 0.8,
+    strokeColor: isSelected ? "#ffffff" : "rgba(0,0,0,0.4)",
+    strokeWeight: isSelected ? 2.5 : 0.8,
+  };
 }
 
 function wktToLatLng(coords, type) {
@@ -124,7 +143,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   const predRouteObjs= useRef([]);
 
   const [coords,         setCoords]         = useState(null);
-  const [mapStyle,       setMapStyle]       = useState("satellite");
+  const [mapStyle,       setMapStyle]       = useState("dark");
   const [mapReady,       setMapReady]       = useState(false);
   const [gisData,        setGisData]        = useState(null);
   const [alerts,         setAlerts]         = useState([]);
@@ -173,7 +192,8 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     loaderPromise.then(() => {
       if (mapObj.current) return;
       const map = new window.google.maps.Map(mapRef.current, {
-        center: MAP_CENTER, zoom: 10, mapTypeId: "hybrid",
+        center: MAP_CENTER, zoom: 10, mapTypeId: "roadmap",
+        styles: DARK_NAUTICAL_STYLE,
         zoomControl: false, streetViewControl: false, mapTypeControl: false,
         fullscreenControl: false, rotateControl: false, gestureHandling: "greedy", clickableIcons: false,
       });
@@ -183,8 +203,18 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       map.addListener("mousemove", e => setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) }));
       map.addListener("click", () => { infoWin.current.close(); hoverWin.current.close(); setShowLayerPanel(false); setShowAlerts(false); });
       clusterer.current = new MarkerClusterer({ map, markers: [], renderer: { render({ count, position }) {
-        const sz = count < 10 ? 24 : count < 50 ? 28 : count < 200 ? 32 : 38;
-        return new window.google.maps.Marker({ position, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: sz/2, fillColor: "rgba(0,16,36,0.88)", fillOpacity: 1, strokeColor: "rgba(0,229,255,0.55)", strokeWeight: 1.5 }, label: { text: count > 999 ? `${(count/1000).toFixed(1)}k` : String(count), color: "#00e5ff", fontSize: "11px", fontFamily: "'JetBrains Mono',monospace", fontWeight: "700" }, zIndex: 999 });
+        // Color-coded by density: few=teal, many=amber, lots=red
+        const col  = count < 20  ? "#00e5ff" : count < 100 ? "#ffaa00" : "#ff3355";
+        const sz   = count < 10  ? 18 : count < 50 ? 22 : count < 200 ? 27 : 33;
+        const txt  = count > 999 ? `${(count/1000).toFixed(1)}k` : String(count);
+        return new window.google.maps.Marker({
+          position, zIndex: 999,
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: sz/2,
+                  fillColor: "#060e1a", fillOpacity: 0.92,
+                  strokeColor: col, strokeWeight: 2 },
+          label: { text: txt, color: col, fontSize: "10px",
+                   fontFamily: "'JetBrains Mono',monospace", fontWeight: "700" },
+        });
       }}});
       setMapReady(true);
     });
@@ -687,4 +717,18 @@ export default MapView;
 function dangerInfoContent(f){return `<div style="font-family:'JetBrains Mono',monospace;background:#1a0010;border:1px solid #ff2244;border-radius:8px;padding:10px 14px;color:#fff;min-width:200px"><div style="color:#ff2244;font-weight:700;font-size:12px">⛔ DANGER / HAZARD</div><div style="margin-top:6px;font-size:11px">${f.name||"Unknown Hazard"}</div>${f.depth!==undefined&&f.depth!==null?`<div style="font-size:10px;color:#ff8899;margin-top:3px">Depth: ${f.depth}m</div>`:""}${f.info?`<div style="margin-top:4px;font-size:9px;color:#cc8888">${String(f.info).substring(0,200)}</div>`:""}</div>`;}
 
 const CLEAN_MAP_STYLE=[{elementType:"geometry",stylers:[{color:"#e8e8e8"}]},{featureType:"water",elementType:"geometry",stylers:[{color:"#b0c8d8"}]},{featureType:"poi",stylers:[{visibility:"off"}]},{featureType:"transit",stylers:[{visibility:"off"}]},{elementType:"labels.icon",stylers:[{visibility:"off"}]}];
-const DARK_NAUTICAL_STYLE=[{elementType:"geometry",stylers:[{color:"#0a1628"}]},{elementType:"labels.text.fill",stylers:[{color:"#4a7a9b"}]},{featureType:"water",elementType:"geometry",stylers:[{color:"#03070e"}]},{featureType:"landscape",elementType:"geometry",stylers:[{color:"#0a1820"}]},{featureType:"poi",stylers:[{visibility:"off"}]},{featureType:"transit",stylers:[{visibility:"off"}]},{elementType:"labels.icon",stylers:[{visibility:"off"}]}];
+const DARK_NAUTICAL_STYLE=[
+  {elementType:"geometry",stylers:[{color:"#080f1c"}]},
+  {elementType:"labels.text.fill",stylers:[{color:"#3d6a8a"}]},
+  {elementType:"labels.text.stroke",stylers:[{color:"#040810"}]},
+  {featureType:"water",elementType:"geometry",stylers:[{color:"#04111f"}]},
+  {featureType:"water",elementType:"labels.text.fill",stylers:[{color:"#1a4a6a"}]},
+  {featureType:"landscape",elementType:"geometry",stylers:[{color:"#0b1520"}]},
+  {featureType:"landscape.natural",elementType:"geometry",stylers:[{color:"#0d1a28"}]},
+  {featureType:"road",stylers:[{visibility:"off"}]},
+  {featureType:"poi",stylers:[{visibility:"off"}]},
+  {featureType:"transit",stylers:[{visibility:"off"}]},
+  {elementType:"labels.icon",stylers:[{visibility:"off"}]},
+  {featureType:"administrative.country",elementType:"geometry.stroke",stylers:[{color:"#1a3a5a"},{weight:0.8}]},
+  {featureType:"administrative.locality",elementType:"labels.text.fill",stylers:[{color:"#2a5a7a"},{visibility:"simplified"}]},
+];
