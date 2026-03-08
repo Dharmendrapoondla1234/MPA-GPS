@@ -56,7 +56,7 @@ function getVesselIcon(vessel, isSelected, alertLevel = null) {
 
   // MarineTraffic-style: prominent arrows that are always readable
   // Larger base so vessels are visible at zoom 8+
-  const scale = isSelected ? 16 : alertLevel ? 13 : 12;
+  const scale = isSelected ? 16 : alertLevel ? 13 : 11;
 
   if (speed > 0.3) {
     // Moving vessel — directional arrow (MarineTraffic style)
@@ -205,7 +205,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
       map.addListener("mousemove", e => setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) }));
       map.addListener("click", () => { infoWin.current.close(); hoverWin.current.close(); setShowLayerPanel(false); setShowAlerts(false); });
-      // Direct marker management — no clusterer needed
+
       setMapReady(true);
     });
   }, []);
@@ -313,7 +313,8 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
         markersRef.current[id]=m;toAdd.push(m);
       }
     });
-    toRemove.forEach(m => { m.setMap(null); });
+    // Markers added to map on creation; just hide removed ones
+    toRemove.forEach(m => m.setMap(null));
   }, [freshVessels, selectedVessel, onVesselClick, alertMap, mapReady]);
 
   // PULSE
