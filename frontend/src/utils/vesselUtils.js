@@ -1,18 +1,20 @@
 // src/utils/vesselUtils.js
+// MarineTraffic-matching speed colors
+// grey=stopped, green=slow(<5kn), orange=medium(5-12kn), red=fast(12+kn)
 export function getSpeedColor(speed) {
   const s = parseFloat(speed) || 0;
-  if (s <= 0.5) return "#607d8b";
-  if (s < 5)    return "#00ff9d";
-  if (s < 12)   return "#ffaa00";
-  return "#ff3355";
+  if (s <= 0.3) return "#90a4ae";   // grey — moored/stopped
+  if (s < 5)    return "#26de81";   // bright green — slow
+  if (s < 12)   return "#fd9644";   // orange — medium
+  return                "#fc5c65";  // red — fast
 }
 
 export function getVesselStatus(speed) {
   const s = parseFloat(speed) || 0;
-  if (s <= 0.5) return { label:"Moored / Stopped", color:"#607d8b", icon:"⚓" };
-  if (s < 5)    return { label:"Slow Speed",        color:"#00ff9d", icon:"🐢" };
-  if (s < 12)   return { label:"Under Way",          color:"#ffaa00", icon:"⚡" };
-  return               { label:"Full Ahead",          color:"#ff3355", icon:"🚀" };
+  if (s <= 0.3) return { label:"Moored / Stopped", color:"#90a4ae", icon:"⚓" };
+  if (s < 5)    return { label:"Slow Speed",        color:"#26de81", icon:"🐢" };
+  if (s < 12)   return { label:"Under Way",          color:"#fd9644", icon:"⚡" };
+  return               { label:"Full Ahead",          color:"#fc5c65", icon:"🚀" };
 }
 
 export function getVesselIcon(vessel, isSelected = false) {

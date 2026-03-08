@@ -3,10 +3,10 @@ import React, { useState } from "react";
 import "./SpeedLegend.css";
 
 const LEGEND = [
-  { label: "Stopped", range: "≤ 0.5 kn", color: "#607d8b", icon: "⚓" },
-  { label: "Slow", range: "0.5–5 kn", color: "#26c97a", icon: "🐢" },
-  { label: "Medium", range: "5–12 kn", color: "#f5a623", icon: "⚡" },
-  { label: "Fast", range: "≥ 12 kn", color: "#e8404e", icon: "🚀" },
+  { label: "Stopped", range: "≤ 0.3 kn", color: "#90a4ae", icon: "⚓" },
+  { label: "Slow",    range: "0.3–5 kn",  color: "#26de81", icon: "🐢" },
+  { label: "Medium",  range: "5–12 kn",   color: "#fd9644", icon: "⚡" },
+  { label: "Fast",    range: "≥ 12 kn",   color: "#fc5c65", icon: "🚀" },
 ];
 
 export default function SpeedLegend() {

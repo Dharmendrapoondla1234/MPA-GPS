@@ -47,8 +47,8 @@ export default function VesselPanel({ vessels, selectedId, onSelect, loading, st
 
   // Speed band counts
   const bands = useMemo(() => {
-    const stopped = vessels.filter(v=>(parseFloat(v.speed)||0)<=0.5).length;
-    const slow    = vessels.filter(v=>{const s=parseFloat(v.speed)||0;return s>0.5&&s<5;}).length;
+    const stopped = vessels.filter(v=>(parseFloat(v.speed)||0)<=0.3).length;
+    const slow    = vessels.filter(v=>{const s=parseFloat(v.speed)||0;return s>0.3&&s<5;}).length;
     const medium  = vessels.filter(v=>{const s=parseFloat(v.speed)||0;return s>=5&&s<12;}).length;
     const fast    = vessels.filter(v=>(parseFloat(v.speed)||0)>=12).length;
     return { stopped, slow, medium, fast };
@@ -95,7 +95,7 @@ export default function VesselPanel({ vessels, selectedId, onSelect, loading, st
 
         {/* Speed bar */}
         <div className="vp-dist" title={`Stopped:${bands.stopped} Slow:${bands.slow} Medium:${bands.medium} Fast:${bands.fast}`}>
-          {[{w:bands.stopped/total,c:"#607d8b"},{w:bands.slow/total,c:"#00ff9d"},{w:bands.medium/total,c:"#ffaa00"},{w:bands.fast/total,c:"#ff3355"}]
+          {[{w:bands.stopped/total,c:"#90a4ae"},{w:bands.slow/total,c:"#26de81"},{w:bands.medium/total,c:"#fd9644"},{w:bands.fast/total,c:"#fc5c65"}]
             .map((s,i)=>s.w>0&&<div key={i} style={{width:`${s.w*100}%`,background:s.c,height:"100%",borderRadius:"2px",transition:"width 0.8s ease"}}/>)}
         </div>
 
@@ -119,7 +119,7 @@ export default function VesselPanel({ vessels, selectedId, onSelect, loading, st
             <option value="type">Type</option>
           </select>
           <span className="vp-band-legends">
-            {[["#607d8b","Stop"],["#00ff9d","Slow"],["#ffaa00","Med"],["#ff3355","Fast"]]
+            {[["#90a4ae","Stop"],["#26de81","Slow"],["#fd9644","Med"],["#fc5c65","Fast"]]
               .map(([c,l])=>(
                 <span key={l} className="vp-band-badge" style={{color:c,borderColor:`${c}44`,background:`${c}0d`}}>{l}</span>
               ))}
