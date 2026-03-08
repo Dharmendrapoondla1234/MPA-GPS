@@ -45,40 +45,45 @@ function smoothMove(marker, newLat, newLng) {
   marker._animId = requestAnimationFrame(step);
 }
 
-function getVesselIcon(vessel, isSelected, alertLevel = null) {
+function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 6) {
   const speed   = parseFloat(vessel.speed)   || 0;
   const heading = parseFloat(vessel.heading) || 0;
 
-  // Color: alert overrides speed-color
+  // Zoom-adaptive scale: vessels must be visible from world view (zoom 4) to street (zoom 14)
+  // At zoom 4 (whole region): big icons. At zoom 10+ (port level): normal size.
+  const zoomScale = zoom <= 4 ? 2.8 :
+                    zoom <= 5 ? 2.2 :
+                    zoom <= 6 ? 1.8 :
+                    zoom <= 7 ? 1.4 :
+                    zoom <= 8 ? 1.2 : 1.0;
+
   const color = alertLevel === "danger"  ? "#ff2244" :
                 alertLevel === "warning" ? "#ffcc00" :
-                getSpeedColor(speed);
-
-  // MarineTraffic-style: prominent arrows that are always readable
-  // Larger base so vessels are visible at zoom 8+
-  const scale = isSelected ? 16 : alertLevel ? 13 : 11;
+                speed > 0.3 ? getSpeedColor(speed) :
+                "#00e5ff"; // stopped vessels: bright cyan — visible on dark map
 
   if (speed > 0.3) {
-    // Moving vessel — directional arrow (MarineTraffic style)
+    const base = isSelected ? 14 : alertLevel ? 11 : 9;
     return {
       path:         window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-      scale,
+      scale:        base * zoomScale,
       rotation:     heading,
       fillColor:    color,
       fillOpacity:  1,
-      strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.55)",
-      strokeWeight: isSelected ? 2.5 : 1.0,
+      strokeColor:  isSelected ? "#ffffff" : "#000000",
+      strokeWeight: isSelected ? 2.5 : 0.8,
       anchor:       new window.google.maps.Point(0, 2.5),
     };
   }
-  // Stationary — circle dot like MarineTraffic
+  // Stationary — bright circle, always visible
+  const base = isSelected ? 7 : 5;
   return {
     path:         window.google.maps.SymbolPath.CIRCLE,
-    scale:        isSelected ? 8 : 5,
+    scale:        base * zoomScale,
     fillColor:    color,
-    fillOpacity:  isSelected ? 1 : 0.85,
-    strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.5)",
-    strokeWeight: isSelected ? 2.5 : 1.0,
+    fillOpacity:  isSelected ? 1 : 0.9,
+    strokeColor:  isSelected ? "#ffffff" : "#000000",
+    strokeWeight: isSelected ? 2.5 : 0.8,
   };
 }
 
@@ -148,6 +153,8 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   const [coords,         setCoords]         = useState(null);
   const [mapStyle,       setMapStyle]       = useState("dark");
   const [mapReady,       setMapReady]       = useState(false);
+  const [mapZoom,        setMapZoom]        = useState(4);
+  const mapZoomRef       = useRef(4);
   const [gisData,        setGisData]        = useState(null);
   const [alerts,         setAlerts]         = useState([]);
   const [showLayerPanel, setShowLayerPanel] = useState(false);
@@ -195,7 +202,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     loaderPromise.then(() => {
       if (mapObj.current) return;
       const map = new window.google.maps.Map(mapRef.current, {
-        center: MAP_CENTER, zoom: 4, mapTypeId: "roadmap",
+        center: MAP_CENTER, zoom: 5, mapTypeId: "roadmap",
         styles: DARK_NAUTICAL_STYLE,
         zoomControl: false, streetViewControl: false, mapTypeControl: false,
         fullscreenControl: false, rotateControl: false, gestureHandling: "greedy", clickableIcons: false,
@@ -205,6 +212,11 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
       map.addListener("mousemove", e => setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) }));
       map.addListener("click", () => { infoWin.current.close(); hoverWin.current.close(); setShowLayerPanel(false); setShowAlerts(false); });
+      map.addListener("zoom_changed", () => {
+        const z = map.getZoom() || 4;
+        mapZoomRef.current = z;
+        setMapZoom(z);
+      });
 
       setMapReady(true);
     });
@@ -296,12 +308,12 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
         const selChanged = prev?._isSel !== isSel;
         const spdChanged = prev?.speed !== v.speed;
         if(posChanged) smoothMove(m,lat,lng);
-        if(posChanged||selChanged||spdChanged||al) { m.setIcon(getVesselIcon(v,isSel,al)); m.setZIndex(isSel?1000:al==="danger"?500:10); }
+        if(posChanged||selChanged||spdChanged||al) { m.setIcon(getVesselIcon(v,isSel,al,mapZoomRef.current)); m.setZIndex(isSel?1000:al==="danger"?500:10); }
         m._vessel=v; m._isSel=isSel;
       }
       else{const m=new window.google.maps.Marker({
           position:{lat,lng},
-          icon:getVesselIcon(v,isSel,al),
+          icon:getVesselIcon(v,isSel,al,mapZoomRef.current),
           title:v.vessel_name||"Vessel",
           optimized:true,
           zIndex:isSel?1000:al==="danger"?500:10,
@@ -314,7 +326,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       }
     });
     toRemove.forEach(m => m.setMap(null));
-  }, [freshVessels, selectedVessel, onVesselClick, alertMap, mapReady]);
+  }, [freshVessels, selectedVessel, onVesselClick, alertMap, mapReady, mapZoom]);
 
   // PULSE
   useEffect(() => {
