@@ -189,6 +189,15 @@ const MapView = forwardRef(function MapView(
       const lat = Number(vessel?.latitude_degrees), lng = Number(vessel?.longitude_degrees);
       if (mapObj.current && lat && lng) { mapObj.current.panTo({ lat, lng }); mapObj.current.setZoom(12); }
     },
+    // Called by App whenever the right detail panel opens or closes.
+    // Google Maps does not auto-detect DOM size changes — without this
+    // all markers pile up at the old centre when the container resizes.
+    triggerResize() {
+      if (!mapObj.current) return;
+      const centre = mapObj.current.getCenter();
+      window.google.maps.event.trigger(mapObj.current, "resize");
+      if (centre) mapObj.current.setCenter(centre); // prevent pan-to-0,0
+    },
   }));
 
   /* ── GIS data ─────────────────────────────────────────── */
@@ -262,6 +271,19 @@ const MapView = forwardRef(function MapView(
       });
 
       setMapReady(true);
+
+      // ResizeObserver fires whenever the map container changes size
+      // (e.g. detail panel slides in/out). Triggers Google Maps resize
+      // so markers don't pile up at the old center point.
+      if (typeof ResizeObserver !== "undefined" && mapRef.current) {
+        const ro = new ResizeObserver(() => {
+          if (!mapObj.current) return;
+          const c = mapObj.current.getCenter();
+          window.google.maps.event.trigger(mapObj.current, "resize");
+          if (c) mapObj.current.setCenter(c);
+        });
+        ro.observe(mapRef.current);
+      }
     });
   }, []);
 
