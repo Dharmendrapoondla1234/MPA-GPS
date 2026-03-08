@@ -47,11 +47,12 @@ function smoothMove(marker, newLat, newLng) {
 }
 
 function getVesselIcon(vessel, isSelected, alertLevel = null) {
-  const color   = alertLevel === "danger"  ? "#ff2244" :
-                  alertLevel === "warning" ? "#ffaa00" : getSpeedColor(vessel.speed);
+  const color   = alertLevel === "danger"  ? "#ff4466" :
+                  alertLevel === "warning" ? "#ffcc00" : getSpeedColor(vessel.speed);
   const heading = parseFloat(vessel.heading) || 0;
   const speed   = parseFloat(vessel.speed)   || 0;
-  const scale   = isSelected ? 12 : alertLevel ? 9 : 7;
+  // Larger base scale — more visible on dark map
+  const scale   = isSelected ? 13 : alertLevel ? 10 : 8;
 
   if (speed > 0.5) {
     return {
@@ -60,20 +61,18 @@ function getVesselIcon(vessel, isSelected, alertLevel = null) {
       rotation:     heading,
       fillColor:    color,
       fillOpacity:  1,
-      strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.45)",
-      strokeWeight: isSelected ? 2.5 : 0.8,
-      // Selected vessel glows via larger stroke
-      ...(isSelected && { strokeOpacity: 1 }),
+      strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.7)",
+      strokeWeight: isSelected ? 2.5 : 1.2,
     };
   }
-  // Stationary — circle with subtle ring on selected
+  // Stationary — bright circle, clearly visible on dark
   return {
-    path:        window.google.maps.SymbolPath.CIRCLE,
-    scale:       isSelected ? scale : scale - 2,
-    fillColor:   color,
-    fillOpacity: isSelected ? 1 : 0.8,
-    strokeColor: isSelected ? "#ffffff" : "rgba(0,0,0,0.4)",
-    strokeWeight: isSelected ? 2.5 : 0.8,
+    path:         window.google.maps.SymbolPath.CIRCLE,
+    scale:        isSelected ? scale - 1 : scale - 3,
+    fillColor:    color,
+    fillOpacity:  isSelected ? 1 : 0.9,
+    strokeColor:  isSelected ? "#ffffff" : "rgba(0,0,0,0.6)",
+    strokeWeight: isSelected ? 2.5 : 1.2,
   };
 }
 
@@ -155,7 +154,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   const [layers, setLayers] = useState({
     dangers: true, depths: true, regulated: true, tracks: true,
     aids: true, seabed: false, ports: true, tides: false, cultural: true,
-    vesselProximity: true, aiTrajectory: true,
+    vesselProximity: false, aiTrajectory: true,  // OFF by default — too noisy in busy ports
   });
 
   useImperativeHandle(ref, () => ({
@@ -257,19 +256,30 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
         else if(cd<RADIUS.WARNING){newAlerts.push({level:"warning",vessel:v.vessel_name,imo:v.imo_number,lat:vl,lng:vg,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});alertCircles.current[`w_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.WARNING,map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.05,strokeColor:"#ffaa00",strokeWeight:1.5,strokeOpacity:0.7,zIndex:19});}
       });
     }
-    const NEAR=0.02,cap=Math.min(fresh.length,200);
-    for(let i=0;i<cap;i++)for(let j=i+1;j<cap;j++){
-      const a=fresh[i],b=fresh[j];
-      if(!a.imo_number||!b.imo_number||a.imo_number===b.imo_number)continue;
-      if(Math.abs(+a.latitude_degrees-+b.latitude_degrees)>NEAR)continue;
-      if(Math.abs(+a.longitude_degrees-+b.longitude_degrees)>NEAR)continue;
-      const dist=distanceM(+a.latitude_degrees,+a.longitude_degrees,+b.latitude_degrees,+b.longitude_degrees);
-      if(dist<RADIUS.DANGER){
-        newAlerts.push({level:"danger",vessel:a.vessel_name,imo:a.imo_number,lat:+a.latitude_degrees,lng:+a.longitude_degrees,otherVessel:b.vessel_name,otherLat:+b.latitude_degrees,otherLng:+b.longitude_degrees,detail:`${Math.round(dist)}m from ${b.vessel_name} — COLLISION RISK`});
-        const ml=(+a.latitude_degrees + +b.latitude_degrees)/2,mg=(+a.longitude_degrees + +b.longitude_degrees)/2;
-        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:ml,lng:mg},radius:Math.max(dist/2,50),map:mapObj.current,fillColor:"#ff0000",fillOpacity:0.12,strokeColor:"#ff0000",strokeWeight:2,strokeOpacity:1,zIndex:25});
-      } else if(dist<RADIUS.WARNING){
-        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:(+a.latitude_degrees + +b.latitude_degrees)/2,lng:(+a.longitude_degrees + +b.longitude_degrees)/2},radius:Math.max(dist/2,50),map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.06,strokeColor:"#ffaa00",strokeWeight:1,strokeOpacity:0.6,zIndex:18});
+    // Only check MOVING vessels for collision risk (stationary vessels in port are expected to be close)
+    const moving = fresh.filter(v => parseFloat(v.speed || 0) > 1.0);
+    const NEAR = 0.015, cap = Math.min(moving.length, 80); // cap at 80 moving vessels
+    for (let i = 0; i < cap; i++) for (let j = i + 1; j < cap; j++) {
+      const a = moving[i], b = moving[j];
+      if (!a.imo_number || !b.imo_number || a.imo_number === b.imo_number) continue;
+      if (Math.abs(+a.latitude_degrees - +b.latitude_degrees) > NEAR) continue;
+      if (Math.abs(+a.longitude_degrees - +b.longitude_degrees) > NEAR) continue;
+      const dist = distanceM(+a.latitude_degrees, +a.longitude_degrees, +b.latitude_degrees, +b.longitude_degrees);
+      if (dist < RADIUS.DANGER) {
+        newAlerts.push({ level: "danger", vessel: a.vessel_name, imo: a.imo_number,
+          lat: +a.latitude_degrees, lng: +a.longitude_degrees,
+          otherVessel: b.vessel_name, detail: `${Math.round(dist)}m from ${b.vessel_name} — COLLISION RISK` });
+        const ml = (+a.latitude_degrees + +b.latitude_degrees) / 2, mg = (+a.longitude_degrees + +b.longitude_degrees) / 2;
+        vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`] = new window.google.maps.Circle({
+          center: { lat: ml, lng: mg }, radius: Math.max(dist / 2, 50), map: mapObj.current,
+          fillColor: "#ff0000", fillOpacity: 0.12, strokeColor: "#ff0000", strokeWeight: 2, strokeOpacity: 1, zIndex: 25,
+        });
+      }
+      // Skip drawing warning circles for vessel-vessel — too noisy, just log the alert
+      else if (dist < RADIUS.WARNING) {
+        newAlerts.push({ level: "warning", vessel: a.vessel_name, imo: a.imo_number,
+          lat: +a.latitude_degrees, lng: +a.longitude_degrees,
+          otherVessel: b.vessel_name, detail: `${Math.round(dist)}m from ${b.vessel_name}` });
       }
     }
     setAlerts(newAlerts.slice(0,20));
@@ -718,12 +728,12 @@ function dangerInfoContent(f){return `<div style="font-family:'JetBrains Mono',m
 
 const CLEAN_MAP_STYLE=[{elementType:"geometry",stylers:[{color:"#e8e8e8"}]},{featureType:"water",elementType:"geometry",stylers:[{color:"#b0c8d8"}]},{featureType:"poi",stylers:[{visibility:"off"}]},{featureType:"transit",stylers:[{visibility:"off"}]},{elementType:"labels.icon",stylers:[{visibility:"off"}]}];
 const DARK_NAUTICAL_STYLE=[
-  {elementType:"geometry",stylers:[{color:"#080f1c"}]},
+  {elementType:"geometry",stylers:[{color:"#0d1a28"}]},
   {elementType:"labels.text.fill",stylers:[{color:"#3d6a8a"}]},
   {elementType:"labels.text.stroke",stylers:[{color:"#040810"}]},
-  {featureType:"water",elementType:"geometry",stylers:[{color:"#04111f"}]},
+  {featureType:"water",elementType:"geometry",stylers:[{color:"#071828"}]},
   {featureType:"water",elementType:"labels.text.fill",stylers:[{color:"#1a4a6a"}]},
-  {featureType:"landscape",elementType:"geometry",stylers:[{color:"#0b1520"}]},
+  {featureType:"landscape",elementType:"geometry",stylers:[{color:"#111e2c"}]},
   {featureType:"landscape.natural",elementType:"geometry",stylers:[{color:"#0d1a28"}]},
   {featureType:"road",stylers:[{visibility:"off"}]},
   {featureType:"poi",stylers:[{visibility:"off"}]},
