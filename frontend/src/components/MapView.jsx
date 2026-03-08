@@ -3,7 +3,6 @@ import React, {
   useEffect, useRef, useState, useCallback, useMemo, forwardRef, useImperativeHandle,
 } from "react";
 import { Loader } from "@googlemaps/js-api-loader";
-import { MarkerClusterer, NoopAlgorithm } from "@googlemaps/markerclusterer";
 import { buildInfoWindowContent, getSpeedColor, getRegionName } from "../utils/vesselUtils";
 import "./MapView.css";
 
@@ -57,7 +56,7 @@ function getVesselIcon(vessel, isSelected, alertLevel = null) {
 
   // MarineTraffic-style: prominent arrows that are always readable
   // Larger base so vessels are visible at zoom 8+
-  const scale = isSelected ? 16 : alertLevel ? 13 : 11;
+  const scale = isSelected ? 16 : alertLevel ? 13 : 12;
 
   if (speed > 0.3) {
     // Moving vessel — directional arrow (MarineTraffic style)
@@ -135,7 +134,6 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
   const mapRef       = useRef(null);
   const mapObj       = useRef(null);
   const markersRef   = useRef({});
-  const clusterer    = useRef(null);
   const infoWin      = useRef(null);
   const hoverWin     = useRef(null);
   const trailObjs    = useRef([]);
@@ -197,7 +195,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
     loaderPromise.then(() => {
       if (mapObj.current) return;
       const map = new window.google.maps.Map(mapRef.current, {
-        center: MAP_CENTER, zoom: 5, mapTypeId: "roadmap",
+        center: MAP_CENTER, zoom: 4, mapTypeId: "roadmap",
         styles: DARK_NAUTICAL_STYLE,
         zoomControl: false, streetViewControl: false, mapTypeControl: false,
         fullscreenControl: false, rotateControl: false, gestureHandling: "greedy", clickableIcons: false,
@@ -207,28 +205,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
       map.addListener("mousemove", e => setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) }));
       map.addListener("click", () => { infoWin.current.close(); hoverWin.current.close(); setShowLayerPanel(false); setShowAlerts(false); });
-      // Custom cluster renderer — color-coded by density
-      const clusterRenderer = { render({ count, position }) {
-        const col  = count < 20  ? "#00e5ff" : count < 100 ? "#ffaa00" : "#ff3355";
-        const sz   = count < 10  ? 18 : count < 50 ? 22 : count < 200 ? 27 : 33;
-        const txt  = count > 999 ? `${(count/1000).toFixed(1)}k` : String(count);
-        return new window.google.maps.Marker({
-          position, zIndex: 999,
-          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: sz/2,
-                  fillColor: "#060e1a", fillOpacity: 0.92,
-                  strokeColor: col, strokeWeight: 2 },
-          label: { text: txt, color: col, fontSize: "10px",
-                   fontFamily: "'JetBrains Mono',monospace", fontWeight: "700" },
-        });
-      }};
-      // NoopAlgorithm = NO clustering — every vessel renders as its own marker.
-      // This is the MarineTraffic approach: individual colored arrows always visible.
-      // Performance is handled by optimized:true on each Marker + virtual DOM scroll in VesselPanel.
-      clusterer.current = new MarkerClusterer({
-        map, markers: [],
-        renderer: clusterRenderer,
-        algorithm: new NoopAlgorithm({}),
-      });
+      // Direct marker management — no clusterer needed
       setMapReady(true);
     });
   }, []);
@@ -301,7 +278,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
 
   // MARKERS
   useEffect(() => {
-    if (!mapReady || !mapObj.current || !clusterer.current) return;
+    if (!mapReady || !mapObj.current) return;
     const fresh=freshVessels;
     const activeIds=new Set(fresh.map(v=>String(v.imo_number)));
     const selId=selectedVessel?.imo_number;
@@ -336,14 +313,7 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
         markersRef.current[id]=m;toAdd.push(m);
       }
     });
-    // Direct marker management — no batching needed with NoopAlgorithm
-    // addMarkers/removeMarkers with false = don't trigger internal re-render
-    // then call render() once at end if anything changed
-    if (toRemove.length > 0 || toAdd.length > 0) {
-      if (toRemove.length) clusterer.current.removeMarkers(toRemove, true);
-      if (toAdd.length)    clusterer.current.addMarkers(toAdd, true);
-      clusterer.current.render();
-    }
+    toRemove.forEach(m => { m.setMap(null); });
   }, [freshVessels, selectedVessel, onVesselClick, alertMap, mapReady]);
 
   // PULSE
