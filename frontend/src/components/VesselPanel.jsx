@@ -167,7 +167,7 @@ function VirtualList({ items, selectedId, onSelect, compact }) {
 
   const handleScroll = useCallback(e => setScrollTop(e.currentTarget.scrollTop), []);
 
-  const totalH    = items.length * itemH;
+ 
   const viewH     = 500; // approximate — actual clamp happens via CSS
   const startIdx  = Math.max(0, Math.floor(scrollTop / itemH) - OVERSCAN);
   const endIdx    = Math.min(items.length, Math.ceil((scrollTop + viewH) / itemH) + OVERSCAN);
