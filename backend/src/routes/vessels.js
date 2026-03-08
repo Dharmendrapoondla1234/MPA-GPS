@@ -15,6 +15,23 @@ function bqStr(v)  { if(v==null)return null; if(typeof v==="object"&&"value"in v
 function bqNum(v)  { if(v==null)return null; const n=Number(bqStr(v)||v); return isNaN(n)?null:n; }
 function bqBool(v) { return v===true||v==="true"||v===1; }
 
+// fct_vessel_live_tracking stores lat/lng in RADIANS — convert to degrees
+const RAD_TO_DEG = 180 / Math.PI;
+function toLatDeg(v) {
+  const n = bqNum(v);
+  if (n === null) return null;
+  // If value is clearly already in degrees (abs > 0.5 for lat or > 2 for lng typical)
+  // leave it alone — handles legacy table fallback
+  if (Math.abs(n) > 2) return n;
+  return n * RAD_TO_DEG;
+}
+function toLngDeg(v) {
+  const n = bqNum(v);
+  if (n === null) return null;
+  if (Math.abs(n) > 4) return n;   // already degrees (lng can be up to 180)
+  return n * RAD_TO_DEG;
+}
+
 function normalizeVessel(v) {
   // Handle both dbt column names and legacy column names gracefully.
   // dbt fct_vessel_live_tracking uses different aliases than legacy MPA_Master_Vessels.
@@ -27,8 +44,8 @@ function normalizeVessel(v) {
     flag:           bqStr(v.flag),
     vessel_type:    bqStr(v.vessel_type),
     // position
-    latitude_degrees:  bqNum(v.latitude_degrees),
-    longitude_degrees: bqNum(v.longitude_degrees),
+    latitude_degrees:  toLatDeg(v.latitude_degrees),
+    longitude_degrees: toLngDeg(v.longitude_degrees),
     speed:   bqNum(v.speed)   ?? 0,
     heading: bqNum(v.heading) ?? 0,
     course:  bqNum(v.course)  ?? 0,
@@ -167,8 +184,8 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
     const raw   = await getVesselHistory(imo, hours);
     const data  = raw.map(v => ({
       imo_number:        bqNum(v.imo_number),
-      latitude_degrees:  bqNum(v.latitude_degrees),
-      longitude_degrees: bqNum(v.longitude_degrees),
+      latitude_degrees:  toLatDeg(v.latitude_degrees),
+      longitude_degrees: toLngDeg(v.longitude_degrees),
       speed:             bqNum(v.speed) ?? 0,
       heading:           bqNum(v.heading) ?? 0,
       course:            bqNum(v.course) ?? 0,
