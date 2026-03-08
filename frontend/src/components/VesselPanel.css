@@ -532,3 +532,12 @@
 .conf-high   { color: #00ff9d !important; }
 .conf-medium { color: #ffaa00 !important; }
 .conf-low    { color: #ff5577 !important; }
+
+/* ── VIRTUAL SCROLL ── */
+.vp-virtual {
+  /* contain: strict tells browser this subtree won't affect layout outside */
+  contain: strict;
+  will-change: transform;   /* promotes to GPU layer for smooth scroll */
+}
+.vp-virtual .vp-item    { height: 88px;  box-sizing: border-box; overflow: hidden; }
+.vp-virtual .vp-compact { height: 32px;  box-sizing: border-box; overflow: hidden; }

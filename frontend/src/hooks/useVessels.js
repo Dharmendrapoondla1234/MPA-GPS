@@ -6,7 +6,9 @@ import {
   fetchVesselTypes,
 } from "../services/api";
 
-const REFRESH_MS = parseInt(process.env.REACT_APP_REFRESH_INTERVAL) || 300_000;
+// Vessels change slowly — 90s refresh halves BigQuery cost vs old 300s,
+// while still feeling live (map animates marker movements between refreshes).
+const REFRESH_MS = parseInt(process.env.REACT_APP_REFRESH_INTERVAL) || 90_000;
 
 export function useVessels(filters = {}) {
   const [vessels, setVessels] = useState([]);
@@ -68,7 +70,7 @@ export function useVessels(filters = {}) {
   // Filter change reload — debounced 600ms
   useEffect(() => {
     if (firstLoad.current) return;
-    const t = setTimeout(() => load(false), 600);
+    const t = setTimeout(() => load(false), 400);
     return () => clearTimeout(t);
   }, [
     filters.search,

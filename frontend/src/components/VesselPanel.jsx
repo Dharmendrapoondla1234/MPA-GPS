@@ -1,5 +1,5 @@
 // src/components/VesselPanel.jsx
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { getVesselStatus, getFlagEmoji, getVesselTypeLabel } from "../utils/vesselUtils";
 import "./VesselPanel.css";
 
@@ -128,17 +128,70 @@ export default function VesselPanel({ vessels, selectedId, onSelect, loading, st
             <div className="vp-empty-sub">{search?"Try different search terms":"Adjust filters or refresh"}</div>
           </div>
         ) : (
-          <div className={`vp-list ${compact?"compact":""}`}>
-            {sorted.map((v,i)=>compact
-              ? <CompactItem key={v.imo_number} v={v} selected={v.imo_number===selectedId} onSelect={onSelect} idx={i}/>
-              : <FullItem    key={v.imo_number} v={v} selected={v.imo_number===selectedId} onSelect={onSelect} idx={i}/>
-            )}
-          </div>
+          <VirtualList
+            items={sorted}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            compact={compact}
+          />
         )
       )}
     </div>
   );
 }
+
+// ── VIRTUAL LIST — only renders visible rows ──────────────────────
+// Renders ~20 items at a time regardless of total count.
+// Eliminates the main render bottleneck with 3000+ vessels.
+const ITEM_H_FULL    = 88;   // px — must match .vp-item height in CSS
+const ITEM_H_COMPACT = 32;   // px — must match .vp-compact height in CSS
+const OVERSCAN       = 5;    // extra rows above/below viewport
+
+function VirtualList({ items, selectedId, onSelect, compact }) {
+  const containerRef = useRef(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const itemH = compact ? ITEM_H_COMPACT : ITEM_H_FULL;
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (!selectedId || !containerRef.current) return;
+    const idx = items.findIndex(v => v.imo_number === selectedId);
+    if (idx < 0) return;
+    const top = idx * itemH;
+    const bot = top + itemH;
+    const { scrollTop: st, clientHeight } = containerRef.current;
+    if (top < st || bot > st + clientHeight) {
+      containerRef.current.scrollTop = top - clientHeight / 2 + itemH / 2;
+    }
+  }, [selectedId, items, itemH]);
+
+  const handleScroll = useCallback(e => setScrollTop(e.currentTarget.scrollTop), []);
+
+  const totalH    = items.length * itemH;
+  const viewH     = 500; // approximate — actual clamp happens via CSS
+  const startIdx  = Math.max(0, Math.floor(scrollTop / itemH) - OVERSCAN);
+  const endIdx    = Math.min(items.length, Math.ceil((scrollTop + viewH) / itemH) + OVERSCAN);
+  const visible   = items.slice(startIdx, endIdx);
+  const paddingTop    = startIdx * itemH;
+  const paddingBottom = (items.length - endIdx) * itemH;
+
+  return (
+    <div
+      ref={containerRef}
+      className={`vp-list ${compact ? "compact" : ""} vp-virtual`}
+      onScroll={handleScroll}
+      style={{ overflowY: "auto", height: "100%", contain: "strict" }}
+    >
+      {paddingTop > 0 && <div style={{ height: paddingTop }} />}
+      {visible.map((v, i) => compact
+        ? <CompactItem key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect} idx={startIdx + i} />
+        : <FullItem    key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect} idx={startIdx + i} />
+      )}
+      {paddingBottom > 0 && <div style={{ height: paddingBottom }} />}
+    </div>
+  );
+}
+
 
 function FullItem({ v, selected, onSelect, idx }) {
   const st    = getVesselStatus(v.speed);
