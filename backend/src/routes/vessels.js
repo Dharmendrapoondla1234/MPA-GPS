@@ -33,8 +33,18 @@ function toLngDeg(v) {
 }
 
 function normalizeVessel(v) {
-  // Handle both dbt column names and legacy column names gracefully.
-  // dbt fct_vessel_live_tracking uses different aliases than legacy MPA_Master_Vessels.
+  // Handles fct_vessel_live_tracking, fct_vessel_master, and legacy MPA_Master_Vessels
+  // fct_vessel_master:       latitude/longitude (radians), speed_kn, heading_deg, course_deg
+  // fct_vessel_live_tracking: latitude_degrees/longitude_degrees (radians), speed, heading, course
+  // legacy:                   latitude_degrees/longitude_degrees (degrees), speed, heading, course
+
+  // Prefer master-style columns if present, fall back to live_tracking, then legacy
+  const rawLat = v.latitude_degrees ?? v.latitude;
+  const rawLng = v.longitude_degrees ?? v.longitude;
+  const rawSpd = v.speed_kn  ?? v.speed;
+  const rawHdg = v.heading_deg ?? v.heading;
+  const rawCrs = v.course_deg  ?? v.course;
+
   return {
     // identity
     imo_number:     bqNum(v.imo_number),
@@ -43,48 +53,48 @@ function normalizeVessel(v) {
     call_sign:      bqStr(v.call_sign),
     flag:           bqStr(v.flag),
     vessel_type:    bqStr(v.vessel_type),
-    // position
-    latitude_degrees:  toLatDeg(v.latitude_degrees),
-    longitude_degrees: toLngDeg(v.longitude_degrees),
-    speed:   bqNum(v.speed)   ?? 0,
-    heading: bqNum(v.heading) ?? 0,
-    course:  bqNum(v.course)  ?? 0,
-    // dbt: last_position_at  |  legacy: effective_timestamp
-    effective_timestamp:  bqStr(v.last_position_at) || bqStr(v.effective_timestamp),
+    // position — convert radians→degrees
+    latitude_degrees:  toLatDeg(rawLat),
+    longitude_degrees: toLngDeg(rawLng),
+    speed:   bqNum(rawSpd) ?? 0,
+    heading: bqNum(rawHdg) ?? 0,
+    course:  bqNum(rawCrs) ?? 0,
+    // timestamp — master: last_position_at | live_tracking: last_position_at | legacy: effective_timestamp
+    effective_timestamp: bqStr(v.last_position_at) || bqStr(v.effective_timestamp),
     minutes_since_last_ping: bqNum(v.minutes_since_last_ping),
-    // dbt: no is_stale column — derive from minutes_since_last_ping > 60
-    is_stale: v.is_stale != null
-      ? bqBool(v.is_stale)
-      : (bqNum(v.minutes_since_last_ping) || 0) > 60,
+    is_stale: v.is_stale != null ? bqBool(v.is_stale)
+            : v.position_is_stale != null ? bqBool(v.position_is_stale)
+            : (bqNum(v.minutes_since_last_ping) || 0) > 120,
     speed_category:     bqStr(v.speed_category),
     speed_colour_class: bqStr(v.speed_colour_class),
-    // static — dbt omits vessel_breadth, vessel_depth, net_tonnage, year_built
+    // static
     vessel_length:  bqNum(v.vessel_length),
-    vessel_breadth: bqNum(v.vessel_breadth) ?? null,
-    vessel_depth:   bqNum(v.vessel_depth)   ?? null,
+    vessel_breadth: bqNum(v.vessel_breadth),
+    vessel_depth:   bqNum(v.vessel_depth),
     gross_tonnage:  bqNum(v.gross_tonnage),
-    net_tonnage:    bqNum(v.net_tonnage)    ?? null,
+    net_tonnage:    bqNum(v.net_tonnage),
     deadweight:     bqNum(v.deadweight),
-    year_built:     bqNum(v.year_built)     ?? null,
+    year_built:     bqNum(v.year_built),
     // voyage / status
     vessel_status:  bqStr(v.vessel_status),
     status_label:   bqStr(v.status_label),
-    last_port_departed:    bqStr(v.last_port_departed),
-    next_port_destination: bqStr(v.next_port_destination),
-    // dbt: latest_arrival_time / latest_departure_time
-    last_arrived_time:  bqStr(v.latest_arrival_time)   || bqStr(v.last_arrived_time),
-    last_departed_time: bqStr(v.latest_departure_time) || bqStr(v.last_departed_time),
-    // declaration — berth_grid & declared_arrival_time not in dbt yet
-    berth_location:       bqStr(v.berth_location),
-    berth_grid:           bqStr(v.berth_grid)           ?? null,
-    voyage_purpose:       bqStr(v.voyage_purpose),
-    shipping_agent:       bqStr(v.shipping_agent),
-    declared_arrival_time:bqStr(v.declared_arrival_time) ?? null,
-    crew_count:           bqNum(v.crew_count),
-    passenger_count:      bqNum(v.passenger_count),
-    // quality flags — dbt uses has_arrival_record / has_departure_record
-    has_arrival_data:    bqBool(v.has_arrival_data    ?? v.has_arrival_record   ?? v.has_live_position),
-    has_departure_data:  bqBool(v.has_departure_data  ?? v.has_departure_record ?? false),
+    last_port_departed:    bqStr(v.last_port_departed) || bqStr(v.arrived_from),
+    next_port_destination: bqStr(v.next_port_destination) || bqStr(v.next_port),
+    // arrival info (master has these joined already)
+    last_arrived_time:   bqStr(v.latest_arrival_time)   || bqStr(v.last_arrived_time),
+    last_departed_time:  bqStr(v.latest_departure_time) || bqStr(v.last_departed_time),
+    location_from:       bqStr(v.location_from) || bqStr(v.arrived_from),
+    location_to:         bqStr(v.location_to)   || bqStr(v.arrived_at_berth),
+    berth_location:      bqStr(v.berth_location) || bqStr(v.arrived_at_berth),
+    berth_grid:          bqStr(v.berth_grid),
+    voyage_purpose:      bqStr(v.voyage_purpose),
+    shipping_agent:      bqStr(v.shipping_agent) || bqStr(v.arrival_agent) || bqStr(v.departure_agent),
+    declared_arrival_time: bqStr(v.declared_arrival_time),
+    crew_count:          bqNum(v.crew_count),
+    passenger_count:     bqNum(v.passenger_count),
+    // quality flags
+    has_arrival_data:    bqBool(v.has_arrival_data ?? v.has_arrival_record ?? v.has_live_position),
+    has_departure_data:  bqBool(v.has_departure_data ?? v.has_departure_record ?? false),
     has_declaration_data:bqBool(v.has_declaration_data ?? false),
     data_quality_score:  bqNum(v.data_quality_score),
     // port time

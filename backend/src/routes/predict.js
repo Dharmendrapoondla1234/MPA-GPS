@@ -88,7 +88,9 @@ router.get("/:imo", async (req, res) => {
 
     const [vesselRows] = await bigquery.query({
       query: `
-        SELECT vessel_name, latitude_degrees, longitude_degrees,
+        SELECT vessel_name,
+               latitude_degrees  AS lat_raw,
+               longitude_degrees AS lng_raw,
                speed, heading, course, flag,
                last_port_departed, next_port_destination,
                ${isDbt ? dbtCols : legacyCols}
@@ -101,8 +103,10 @@ router.get("/:imo", async (req, res) => {
     if (!vesselRows?.length) return res.status(404).json({ success: false, error: `IMO ${imo} not found` });
 
     const v      = vesselRows[0];
-    const curLat = Number(v.latitude_degrees  || 0);
-    const curLng = Number(v.longitude_degrees || 0);
+    const RAD = 180/Math.PI;
+    function toDeg(x){const n=Number(x||0);return Math.abs(n)<4?n*RAD:n;}
+    const curLat = toDeg(v.lat_raw || v.latitude_degrees);
+    const curLng = toDeg(v.lat_raw !== undefined ? v.lng_raw : v.longitude_degrees);
     if (!curLat && !curLng) return res.status(422).json({ success: false, error: "No position data" });
 
     let hist = [];
@@ -123,8 +127,8 @@ router.get("/:imo", async (req, res) => {
       const o = hist[0], n = hist[hist.length - 1];
       const hrs = (new Date(n.effective_timestamp || 0) - new Date(o.effective_timestamp || 0)) / 3600000;
       if (hrs > 0.5) {
-        const dLa = Number(n.latitude_degrees)  - Number(o.latitude_degrees);
-        const dLo = Number(n.longitude_degrees) - Number(o.longitude_degrees);
+        const dLa = toDeg(n.lat_raw ?? n.latitude_degrees) - toDeg(o.lat_raw ?? o.latitude_degrees);
+        const dLo = toDeg(n.lng_raw ?? n.longitude_degrees) - toDeg(o.lng_raw ?? o.longitude_degrees);
         vecBrng = (Math.atan2(dLo, dLa) * 180 / Math.PI + 360) % 360;
       }
     }
