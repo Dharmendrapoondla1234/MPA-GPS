@@ -152,10 +152,9 @@ async function getLatestVessels({ search = "", vesselType = "", speedMin = null,
   const lim = Math.min(parseInt(limit) || 5000, 10000);
 
   if (dbt) {
-    const where = cond.length ? `WHERE ${cond.join(" AND ")}` : "";
-    // Use SELECT * so missing enriched columns don't cause errors.
-    // Columns added by later dbt runs (is_stale, speed_category etc.) will
-    // appear automatically once the model is refreshed.
+    // Filter out vessels with no position update in last 32 hours
+    cond.push(`last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 32 HOUR)`);
+    const where = `WHERE ${cond.join(" AND ")}`;
     query = `
       SELECT *
       FROM ${T.VESSELS}
@@ -207,10 +206,9 @@ async function getVesselHistory(imoNumber, hours = 24) {
       SELECT imo_number, latitude_degrees, longitude_degrees,
              speed, heading, course, effective_timestamp
       FROM ${table}
-      WHERE imo_number = ${parseInt(imoNumber)}
+      WHERE CAST(imo_number AS STRING) = '${parseInt(imoNumber)}'
         AND effective_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${h} HOUR)
-        AND latitude_degrees  IS NOT NULL AND longitude_degrees IS NOT NULL
-        AND ABS(latitude_degrees) <= 90   AND ABS(longitude_degrees) <= 180
+        AND latitude_degrees IS NOT NULL AND longitude_degrees IS NOT NULL
       ORDER BY effective_timestamp ASC
       LIMIT 2000`,
     location: BQ_LOCATION,
@@ -229,20 +227,42 @@ async function getVesselDetail(imoNumber) {
     });
     return rows[0] || null;
   }
+  // fct_vessel_master already has latest arrival/departure joined in
+  // columns: latitude/longitude (radians), speed_kn, heading_deg, course_deg
   const [rows] = await bigquery.query({
     query: `
-      SELECT m.*,
-        arr.arrival_time   AS latest_arrival_time,
-        arr.location_from  AS arrival_from,
-        arr.location_to    AS arrival_to,
-        arr.berth_grid, arr.voyage_purpose, arr.shipping_agent,
-        arr.crew_count, arr.passenger_count,
-        dep.departure_time AS latest_departure_time,
-        dep.next_port      AS departure_next_port
+      SELECT
+        m.imo_number, m.mmsi_number, m.vessel_name, m.call_sign, m.flag, m.vessel_type,
+        m.gross_tonnage, m.net_tonnage, m.deadweight,
+        m.vessel_length, m.vessel_breadth, m.vessel_depth, m.year_built,
+        m.latitude  AS latitude_degrees,
+        m.longitude AS longitude_degrees,
+        m.speed_kn  AS speed,
+        m.heading_deg AS heading,
+        m.course_deg  AS course,
+        m.last_position_at,
+        m.speed_category, m.position_is_stale AS is_stale,
+        m.minutes_since_last_ping,
+        m.vessel_status, m.port_time_hours, m.hours_in_port_so_far,
+        m.data_quality_score,
+        m.has_live_position   AS has_arrival_data,
+        m.has_arrival_record  AS has_arrival_record,
+        m.has_departure_record AS has_departure_record,
+        -- arrival info already joined in master
+        m.latest_arrival_time, m.latest_arrival_date,
+        m.arrived_from    AS location_from,
+        m.arrived_at_berth AS berth_location,
+        m.berth_grid, m.voyage_purpose,
+        m.arrival_agent   AS shipping_agent,
+        m.crew_count, m.passenger_count,
+        -- departure info
+        m.latest_departure_time, m.latest_departure_date,
+        m.next_port       AS next_port_destination,
+        m.departure_agent,
+        m.last_updated_at
       FROM ${T.MASTER} m
-      LEFT JOIN (SELECT * FROM ${T.ARRIVALS}   WHERE imo_number=${imo} ORDER BY arrival_time   DESC LIMIT 1) arr ON m.imo_number=arr.imo_number
-      LEFT JOIN (SELECT * FROM ${T.DEPARTURES}  WHERE imo_number=${imo} ORDER BY departure_time DESC LIMIT 1) dep ON m.imo_number=dep.imo_number
-      WHERE m.imo_number=${imo} LIMIT 1`,
+      WHERE CAST(m.imo_number AS STRING) = '${imo}'
+      LIMIT 1`,
     location: BQ_LOCATION,
   });
   return rows[0] || null;

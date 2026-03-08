@@ -57,7 +57,13 @@ function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
   const speed   = parseFloat(vessel.speed)   || 0;
   const heading = parseFloat(vessel.heading) || 0;
 
-  // Scale up at low zoom levels so vessels are visible on overview map
+  // Stale if not updated in last 32h
+  const minsAgo = vessel.minutes_since_last_ping != null
+    ? Math.abs(Number(vessel.minutes_since_last_ping))
+    : 0;
+  const isStale = vessel.is_stale || minsAgo > 1920; // >32h
+
+  // Scale up at low zoom levels
   const zs = zoom <= 3 ? 4.0
            : zoom <= 4 ? 3.0
            : zoom <= 5 ? 2.2
@@ -66,11 +72,13 @@ function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
            : zoom <= 8 ? 1.15
            : 1.0;
 
-  // Colour: alert overrides > speed colour. Stopped = BRIGHT CYAN (not grey!)
+  // Colour: alert overrides > speed colour. Stopped = BRIGHT CYAN.
   const color = alertLevel === "danger"  ? "#ff2244"
               : alertLevel === "warning" ? "#ffcc00"
               : speed > 0.3 ? getSpeedColor(speed)
-              : "#00e5ff";          // cyan — always visible on dark background
+              : "#00e5ff";
+
+  const opacity = isStale ? 0.35 : 1.0;  // dim stale vessels
 
   if (speed > 0.3) {
     const base = isSelected ? 12 : alertLevel ? 9 : 8;
@@ -79,7 +87,7 @@ function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
       scale:        base * zs,
       rotation:     heading,
       fillColor:    color,
-      fillOpacity:  1,
+      fillOpacity:  opacity,
       strokeColor:  isSelected ? "#ffffff" : "#000000",
       strokeWeight: isSelected ? 2.5 : 0.8,
       anchor:       new window.google.maps.Point(0, 2.5),
@@ -90,7 +98,7 @@ function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
     path:         window.google.maps.SymbolPath.CIRCLE,
     scale:        base * zs,
     fillColor:    color,
-    fillOpacity:  isSelected ? 1 : 0.92,
+    fillOpacity:  isStale ? 0.3 : (isSelected ? 1 : 0.92),
     strokeColor:  isSelected ? "#ffffff" : "#000000",
     strokeWeight: isSelected ? 2.5 : 0.8,
   };
