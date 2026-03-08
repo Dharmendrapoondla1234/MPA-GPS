@@ -1,33 +1,59 @@
 // src/services/api.js — MPA Advanced v6
 const BASE = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.com/api";
 
-// ── REQUEST DEDUPLICATION ─────────────────────────────────────────
-const inFlight = new Map();
+// ── REQUEST DEDUPLICATION + BROWSER CACHE ────────────────────────
+const inFlight  = new Map();
+const respCache = new Map(); // url → { data, ts, etag }
+const CACHE_TTL = { vessels: 55_000, stats: 115_000, default: 30_000 };
+
+function cacheTTL(url) {
+  if (url.includes("/vessels"))     return CACHE_TTL.vessels;
+  if (url.includes("/stats"))       return CACHE_TTL.stats;
+  return CACHE_TTL.default;
+}
 
 async function call(path) {
   const url = `${BASE}${path}`;
+
+  // Return in-flight promise immediately (dedup parallel calls)
   if (inFlight.has(url)) return inFlight.get(url);
+
+  // Return browser cache if still fresh
+  const cached = respCache.get(url);
+  if (cached && Date.now() - cached.ts < cacheTTL(url)) return cached.data;
 
   const promise = (async () => {
     try {
-      const token = getCurrentUser()?.token;
-      const res   = await fetch(url, {
-        headers: {
-          Accept:            "application/json",
-          "Accept-Encoding": "gzip, deflate, br",
-          ...(token ? { Authorization:`Bearer ${token}` } : {}),
-        },
-      });
+      const token   = getCurrentUser()?.token;
+      const headers = {
+        Accept:            "application/json",
+        "Accept-Encoding": "gzip, deflate, br",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(cached?.etag ? { "If-None-Match": cached.etag } : {}),
+      };
+      const res = await fetch(url, { headers });
+
+      // 304 Not Modified — serve from cache
+      if (res.status === 304 && cached) {
+        respCache.set(url, { ...cached, ts: Date.now() });
+        return cached.data;
+      }
+
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
-        try { const j=await res.json(); if(j?.error) msg=j.error; } catch(_){}
+        try { const j = await res.json(); if (j?.error) msg = j.error; } catch (_) {}
         throw new Error(msg);
       }
+
       const json = await res.json();
-      if (json?.success===false) throw new Error(json.error||"API error");
-      return json?.data!==undefined ? json.data : json;
-    } catch(err) {
-      if (err.message.includes("Failed to fetch")||err.message.includes("NetworkError"))
+      if (json?.success === false) throw new Error(json.error || "API error");
+      const data = json?.data !== undefined ? json.data : json;
+
+      // Store in browser cache with ETag if provided
+      respCache.set(url, { data, ts: Date.now(), etag: res.headers.get("etag") || null });
+      return data;
+    } catch (err) {
+      if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))
         throw new Error("Backend sleeping — wait 30 seconds and retry");
       throw err;
     } finally { inFlight.delete(url); }

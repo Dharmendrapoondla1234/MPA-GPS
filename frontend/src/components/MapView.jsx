@@ -258,7 +258,16 @@ const MapView = forwardRef(function MapView({ vessels, selectedVessel, onVesselC
       if(!lat||!lng||isNaN(lat)||isNaN(lng))return;
       const id=String(v.imo_number),isSel=v.imo_number===selId;
       const al=alertMap[v.vessel_name]||null;
-      if(markersRef.current[id]){const m=markersRef.current[id];smoothMove(m,lat,lng);m.setIcon(getVesselIcon(v,isSel,al));m.setZIndex(isSel?1000:al==="danger"?500:10);m._vessel=v;}
+      if(markersRef.current[id]){
+        const m=markersRef.current[id];
+        const prev=m._vessel;
+        const posChanged = !prev || Math.abs(Number(prev.latitude_degrees)-lat)>0.00001 || Math.abs(Number(prev.longitude_degrees)-lng)>0.00001;
+        const selChanged = prev?._isSel !== isSel;
+        const spdChanged = prev?.speed !== v.speed;
+        if(posChanged) smoothMove(m,lat,lng);
+        if(posChanged||selChanged||spdChanged||al) { m.setIcon(getVesselIcon(v,isSel,al)); m.setZIndex(isSel?1000:al==="danger"?500:10); }
+        m._vessel=v; m._isSel=isSel;
+      }
       else{const m=new window.google.maps.Marker({position:{lat,lng},icon:getVesselIcon(v,isSel,al),title:v.vessel_name||"Vessel",optimized:true,zIndex:isSel?1000:al==="danger"?500:10});
         m._vessel=v;
         m.addListener("click",()=>{hoverWin.current.close();infoWin.current.setContent(buildInfoWindowContent(v));infoWin.current.open(mapObj.current,m);onVesselClick(v);});

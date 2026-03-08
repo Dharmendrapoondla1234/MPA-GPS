@@ -5,6 +5,7 @@ require("dotenv").config();
 const express       = require("express");
 const cors          = require("cors");
 const helmet        = require("helmet");
+const compression   = require("compression");
 const vesselRoutes  = require("./routes/vessels");
 const authRoutes    = require("./routes/auth");
 const gisRoutes     = require("./routes/gis_route");
@@ -15,9 +16,10 @@ const { warmCache } = require("./services/bigquery");
 const app  = express();
 const PORT = process.env.PORT || 10000;
 
-app.use(cors({ origin:"*", methods:["GET","POST","PUT","DELETE","OPTIONS"], allowedHeaders:["Content-Type","Accept","Authorization"] }));
+app.use(cors({ origin:"*", methods:["GET","POST","PUT","DELETE","OPTIONS"], allowedHeaders:["Content-Type","Accept","Authorization","If-None-Match"] }));
 app.options("*", cors());
 app.use(helmet({ contentSecurityPolicy:false }));
+app.use(compression()); // gzip all responses — massive payload reduction
 app.use(express.json());
 app.use(express.urlencoded({ extended:false }));
 app.use((req,_res,next) => { logger.info(`${req.method} ${req.path}`); next(); });
