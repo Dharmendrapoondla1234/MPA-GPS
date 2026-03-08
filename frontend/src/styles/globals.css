@@ -39,6 +39,15 @@
   --font-display: 'Orbitron', monospace;
   --font-ui:      'Rajdhani', sans-serif;
   --font-mono:    'JetBrains Mono', monospace;
+  --font-label:   'JetBrains Mono', monospace;  /* alias used by SpeedLegend, ErrorBanner */
+
+  /* Semantic text aliases (SpeedLegend.css, ErrorBanner.css) */
+  --text-primary:   var(--text-1);    /* #f0f8ff */
+  --text-secondary: var(--text-2);    /* #8ab4d0 */
+  --text-muted:     var(--text-3);    /* #3d6a8a */
+
+  /* Transition speed aliases */
+  --t-fast: var(--t1);                /* 120ms  */
 
   --topbar-h: 62px;
   --panel-w:  320px;
