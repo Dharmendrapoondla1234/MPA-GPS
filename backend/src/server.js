@@ -32,6 +32,25 @@ app.use("/api/gis",     gisRoutes);
 app.use("/api/predict", predictRoutes);
 app.use("/api",         vesselRoutes);   // covers /vessels, /arrivals, /departures, /port-activity, /stats
 
+
+// ── DEBUG: sample raw coords from fct_vessel_live_tracking ───
+app.get("/debug/coords", async (_req, res) => {
+  try {
+    const { bigquery, BQ_LOCATION } = require("./services/bigquery");
+    const [rows] = await bigquery.query({
+      query: `SELECT vessel_name, imo_number, latitude_degrees, longitude_degrees,
+                     speed, last_position_at
+              FROM \`photons-377606.Photons_MPA.fct_vessel_live_tracking\`
+              WHERE latitude_degrees IS NOT NULL AND longitude_degrees IS NOT NULL
+              LIMIT 10`,
+      location: BQ_LOCATION,
+    });
+    res.json({ count: rows.length, sample: rows });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.use((err,_req,res,_next) => {
   logger.error("Unhandled error:", err.message);
   res.status(500).json({ success:false, error:err.message });
