@@ -11,21 +11,14 @@ const BQ_LOCATION = process.env.BIGQUERY_LOCATION  || "asia-southeast1";
 const DATASET_ENV = process.env.BIGQUERY_DATASET || "Photons_MPA";
 const DATASET     = (DATASET_ENV === "MPA") ? "Photons_MPA" : DATASET_ENV;
 
-// ── RADIANS → DEGREES CONSTANT ───────────────────────────────────
-// FIX: defined at module scope so all functions share it.
-// fct_vessel_live_tracking & fct_vessel_master store lat/lng in radians.
-const RAD = 180 / Math.PI;
-
 // ── TABLE REFERENCES ──────────────────────────────────────────────
 const T = {
-  // dbt fact/staging tables (Photons_MPA)
   VESSELS:          `\`${PROJECT}.${DATASET}.fct_vessel_live_tracking\``,
   MASTER:           `\`${PROJECT}.${DATASET}.fct_vessel_master\``,
   ARRIVALS:         `\`${PROJECT}.${DATASET}.fct_vessel_arrivals\``,
   DEPARTURES:       `\`${PROJECT}.${DATASET}.fct_vessel_departures\``,
   POSITIONS_HIST:   `\`${PROJECT}.${DATASET}.stg_vessel_positions\``,
   USERS:            `\`${PROJECT}.${DATASET}.MPA_Users\``,
-  // Legacy raw tables (original MPA dataset — always available)
   LEGACY_VESSELS:   `\`${PROJECT}.MPA.MPA_Master_Vessels\``,
   LEGACY_SNAPSHOT:  `\`${PROJECT}.MPA.View_MPA_VesselPositionsSnapshot\``,
   LEGACY_ARRIVALS:  `\`${PROJECT}.MPA.MPA_VesselArrivalsbyDate\``,
@@ -34,12 +27,12 @@ const T = {
 
 // ── CACHE ─────────────────────────────────────────────────────────
 const cache = {
-  vessels:     { data: null, ts: 0, ttl: 60_000  },  // 60s
-  stats:       { data: null, ts: 0, ttl: 180_000 },  // 3 min
-  vesselTypes: { data: null, ts: 0, ttl: 900_000 },  // 15 min
-  portActivity:{ data: null, ts: 0, ttl: 300_000 },  // 5 min
-  arrivals:    { data: null, ts: 0, ttl: 300_000 },  // 5 min
-  departures:  { data: null, ts: 0, ttl: 300_000 },  // 5 min
+  vessels:     { data: null, ts: 0, ttl: 60_000  },
+  stats:       { data: null, ts: 0, ttl: 180_000 },
+  vesselTypes: { data: null, ts: 0, ttl: 900_000 },
+  portActivity:{ data: null, ts: 0, ttl: 300_000 },
+  arrivals:    { data: null, ts: 0, ttl: 300_000 },
+  departures:  { data: null, ts: 0, ttl: 300_000 },
   dbtExists:   { checked: false, value: false },
 };
 function fromCache(k) {
@@ -162,17 +155,16 @@ async function getLatestVessels({ search = "", vesselType = "", speedMin = null,
   const lim = Math.min(parseInt(limit) || 5000, 10000);
 
   if (dbt) {
-    // FIX: last_position_at is stored in SGT (UTC+8) labelled as UTC.
-    // Subtract 8h before comparing so the 48h filter uses real UTC time.
-    cond.push(`TIMESTAMP_SUB(last_position_at, INTERVAL 8 HOUR) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)`);
+    // FIX: last_position_at is already corrected UTC (done in fct_vessel_positions_latest).
+    // No need for TIMESTAMP_SUB here — use it directly in the 48h filter.
+    cond.push(`last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)`);
     const where = `WHERE ${cond.join(" AND ")}`;
 
-    // FIX: SELECT * passed raw radians as latitude_degrees/longitude_degrees.
-    // Explicitly convert radians → degrees here so every consumer gets correct values.
+    // FIX: fct_vessel_live_tracking now outputs latitude_degrees / longitude_degrees
+    // already in degrees (converted in SQL). Do NOT multiply by RAD here —
+    // that would double-convert: 1.35° × 57.3 = 77.4° (Russia). Just SELECT *.
     query = `
-      SELECT * EXCEPT (rn, latitude_degrees, longitude_degrees),
-        latitude_degrees  * ${RAD} AS latitude_degrees,
-        longitude_degrees * ${RAD} AS longitude_degrees
+      SELECT * EXCEPT (rn)
       FROM (
         SELECT *,
           ROW_NUMBER() OVER (PARTITION BY imo_number ORDER BY last_position_at DESC) AS rn
@@ -183,7 +175,7 @@ async function getLatestVessels({ search = "", vesselType = "", speedMin = null,
       ORDER BY last_position_at DESC
       LIMIT ${lim}`;
   } else {
-    // Legacy MPA_Master_Vessels — stores actual degrees, no conversion needed
+    // Legacy MPA_Master_Vessels — stores actual degrees, correct timestamps
     cond.push(`last_position_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)`);
     const where = `WHERE ${cond.join(" AND ")}`;
     query = `
@@ -221,9 +213,11 @@ async function getVesselHistory(imoNumber, hours = 24) {
   if (!imoNumber || isNaN(imoNumber)) throw new Error("Invalid IMO");
   const h   = Math.min(parseInt(hours) || 24, 168);
   const dbt = await useDbt();
+  const RAD = 180 / Math.PI;
 
   if (dbt) {
-    // stg_vessel_positions uses latitude/longitude (radians) + effective_timestamp (SGT stored as UTC)
+    // stg_vessel_positions: latitude/longitude in radians, effective_timestamp in SGT stored as UTC.
+    // We correct both here since stg_vessel_positions is the raw source — not yet fixed by dbt models.
     try {
       const [rows] = await bigquery.query({
         query: `
@@ -234,11 +228,11 @@ async function getVesselHistory(imoNumber, hours = 24) {
             speed_kn  AS speed,
             heading_deg AS heading,
             course_deg  AS course,
-            -- FIX: correct SGT → UTC so history timeline is accurate
             TIMESTAMP_SUB(effective_timestamp, INTERVAL 8 HOUR) AS effective_timestamp
           FROM ${T.POSITIONS_HIST}
           WHERE CAST(imo_number AS STRING) = '${parseInt(imoNumber)}'
-            AND TIMESTAMP_SUB(effective_timestamp, INTERVAL 8 HOUR) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${h} HOUR)
+            AND TIMESTAMP_SUB(effective_timestamp, INTERVAL 8 HOUR)
+                  >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${h} HOUR)
             AND latitude IS NOT NULL AND longitude IS NOT NULL
           ORDER BY effective_timestamp ASC
           LIMIT 2000`,
@@ -271,6 +265,8 @@ async function getVesselDetail(imoNumber) {
   if (!imoNumber || isNaN(imoNumber)) throw new Error("Invalid IMO");
   const imo = parseInt(imoNumber);
   const dbt = await useDbt();
+  const RAD = 180 / Math.PI;
+
   if (!dbt) {
     const [rows] = await bigquery.query({
       query: `SELECT * FROM ${T.LEGACY_VESSELS} WHERE CAST(imo_number AS INT64)=${imo} LIMIT 1`,
@@ -278,23 +274,27 @@ async function getVesselDetail(imoNumber) {
     });
     return rows[0] || null;
   }
+
+  // fct_vessel_master stores latitude/longitude in radians (passed through from stg_vessel_positions).
+  // last_position_at is already corrected UTC (fixed in fct_vessel_positions_latest).
+  // Do NOT apply TIMESTAMP_SUB again here — that would subtract 8h a second time.
   const [rows] = await bigquery.query({
     query: `
       SELECT
         m.imo_number, m.mmsi_number, m.vessel_name, m.call_sign, m.flag, m.vessel_type,
         m.gross_tonnage, m.net_tonnage, m.deadweight,
         m.vessel_length, m.vessel_breadth, m.vessel_depth, m.year_built,
-        -- FIX: convert radians → degrees (was: m.latitude AS latitude_degrees)
+        -- FIX: convert radians → degrees (fct_vessel_master stores lat/lng as radians)
         m.latitude  * ${RAD} AS latitude_degrees,
         m.longitude * ${RAD} AS longitude_degrees,
         m.speed_kn  AS speed,
         m.heading_deg AS heading,
         m.course_deg  AS course,
-        -- FIX: correct SGT → UTC for last_position_at
-        TIMESTAMP_SUB(m.last_position_at, INTERVAL 8 HOUR) AS last_position_at,
+        -- FIX: last_position_at already corrected UTC — do NOT subtract 8h again
+        m.last_position_at,
         m.speed_category, m.position_is_stale AS is_stale,
-        -- FIX: recalculate minutes_since_last_ping with corrected UTC time
-        TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP_SUB(m.last_position_at, INTERVAL 8 HOUR), MINUTE) AS minutes_since_last_ping,
+        -- minutes_since_last_ping is already correct from fct_vessel_positions_latest
+        m.minutes_since_last_ping,
         m.vessel_status, m.port_time_hours, m.hours_in_port_so_far,
         m.data_quality_score,
         m.has_live_position   AS has_arrival_data,
