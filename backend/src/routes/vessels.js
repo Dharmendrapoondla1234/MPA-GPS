@@ -166,7 +166,7 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
       const etag = `W/"v-${data.length}-${tsStr.slice(0,19)}"`;
       if (req.headers["if-none-match"] === etag) return res.status(304).end();
       res.set("ETag", etag);
-      res.set("Cache-Control", "public, max-age=55");
+      res.set("Cache-Control", "no-store"); // positions must be fresh
     }
 
     logger.info(`GET /api/vessels -> ${data.length}`);

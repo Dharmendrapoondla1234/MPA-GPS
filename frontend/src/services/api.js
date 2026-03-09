@@ -4,27 +4,32 @@ const BASE = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.
 // ── REQUEST DEDUPLICATION + BROWSER CACHE ────────────────────────
 const inFlight  = new Map();
 const respCache = new Map(); // url → { data, ts, etag }
-const CACHE_TTL = { vessels: 55_000, stats: 115_000, default: 30_000 };
+const CACHE_TTL = { vessels: 0, stats: 115_000, history: 30_000, default: 30_000 };
 
 // Test helper — call this in afterEach to prevent cache bleed between tests
 export function __clearCache() { inFlight.clear(); respCache.clear(); }
 
 function cacheTTL(url) {
-  if (url.includes("/vessels"))     return CACHE_TTL.vessels;
-  if (url.includes("/stats"))       return CACHE_TTL.stats;
+  // Match /vessels list only — NOT /vessels/imo/history
+  if (/\/vessels\?/.test(url) || url.endsWith("/vessels")) return CACHE_TTL.vessels;
+  if (url.includes("/history"))  return CACHE_TTL.history;
+  if (url.includes("/stats"))    return CACHE_TTL.stats;
   return CACHE_TTL.default;
 }
 
-async function call(path) {
+async function call(path, { bustCache = false } = {}) {
   const url = `${BASE}${path}`;
 
   // Return in-flight promise immediately (dedup parallel calls)
   if (inFlight.has(url)) return inFlight.get(url);
 
-  // Return browser cache if still fresh (skip in test env so mocks always run)
   const cached = respCache.get(url);
+  const ttl    = cacheTTL(url);
   const isTest = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
-  if (!isTest && cached && Date.now() - cached.ts < cacheTTL(url)) return cached.data;
+  // Skip cache when TTL=0 (vessels), bustCache=true, or in test env
+  if (!isTest && !bustCache && ttl > 0 && cached && Date.now() - cached.ts < ttl) {
+    return cached.data;
+  }
 
   const promise = (async () => {
     try {
@@ -32,14 +37,19 @@ async function call(path) {
       const headers = {
         Accept:            "application/json",
         "Accept-Encoding": "gzip, deflate, br",
+        // Force past the browser's HTTP cache — vessel positions must always be fresh
+        "Cache-Control":   "no-cache",
+        "Pragma":          "no-cache",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        // Send ETag so server can return 304 if data hasn't changed (saves bandwidth)
         ...(cached?.etag ? { "If-None-Match": cached.etag } : {}),
       };
       const res = await fetch(url, { headers });
 
-      // 304 Not Modified — serve from cache
+      // 304 Not Modified — data unchanged. Return cached data WITHOUT resetting ts.
+      // Resetting ts here caused a stale-data loop: the cache would stay "fresh"
+      // indefinitely even though BQ had new positions ready.
       if (res.status === 304 && cached) {
-        respCache.set(url, { ...cached, ts: Date.now() });
         return cached.data;
       }
 
@@ -68,14 +78,17 @@ async function call(path) {
 }
 
 // ── VESSELS ───────────────────────────────────────────────────────
-export async function fetchVessels({ search="", vesselType="", speedMin=null, speedMax=null, limit=5000 }={}) {
+export async function fetchVessels(
+  { search="", vesselType="", speedMin=null, speedMax=null, limit=5000 } = {},
+  { bustCache = false } = {}
+) {
   const p = new URLSearchParams();
   if (search)           p.set("search",    search);
   if (vesselType)       p.set("vesselType",vesselType);
   if (speedMin!=null)   p.set("speedMin",  speedMin);
   if (speedMax!=null)   p.set("speedMax",  speedMax);
   p.set("limit", limit);
-  return call(`/vessels?${p}`);
+  return call(`/vessels?${p}`, { bustCache });
 }
 
 export async function fetchVesselDetail(imo) {
