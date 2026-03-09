@@ -5,6 +5,7 @@ import React, {
 import { Loader } from "@googlemaps/js-api-loader";
 import { buildInfoWindowContent, getSpeedColor, getRegionName } from "../utils/vesselUtils";
 import "./MapView.css";
+import WeatherPanel from "./WeatherPanel";
 
 const MAP_CENTER  = { lat: 1.35, lng: 103.82 };
 const BASE_URL    = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.com/api";
@@ -171,8 +172,9 @@ const MapView = forwardRef(function MapView(
   const pulseCirc     = useRef(null);
   const pulseTimer    = useRef(null);
   const aiObjs        = useRef([]);
-  const predRouteObjs = useRef([]);
-  const mapZoomRef    = useRef(4);   // ← live zoom without re-render lag
+  const predRouteObjs  = useRef([]);
+  const weatherObjs    = useRef([]);
+  const mapZoomRef     = useRef(4);   // ← live zoom without re-render lag
   const hasFitBounds  = useRef(false); // auto-fit on first vessel load
 
   const [coords,         setCoords]         = useState(null);
@@ -186,11 +188,13 @@ const MapView = forwardRef(function MapView(
   const [showAllAlerts,  setShowAllAlerts]  = useState(false);
   const [loadingGIS,     setLoadingGIS]     = useState(true);
   const [aiStats,        setAiStats]        = useState(null);
+  const [weatherData,    setWeatherData]    = useState(null);
   const [layers, setLayers] = useState({
     dangers: true, depths: true, regulated: true, tracks: true,
     aids: true, seabed: false, ports: true, tides: false, cultural: true,
     vesselProximity: false,   // off by default — expensive + noisy in port
     aiTrajectory: true,
+    weatherStations: true,
   });
 
   useImperativeHandle(ref, () => ({
@@ -207,6 +211,19 @@ const MapView = forwardRef(function MapView(
       mapObj.current.setCenter(centre);
     },
   }));
+
+  /* ── Weather data (for station markers on map) ─────────── */
+  useEffect(() => {
+    const fetchW = () => {
+      fetch(`${BASE_URL}/weather`)
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { if (j?.data) setWeatherData(j.data); })
+        .catch(() => {});
+    };
+    fetchW();
+    const t = setInterval(fetchW, 3 * 60 * 1000);  // 3 min
+    return () => clearInterval(t);
+  }, []);
 
   /* ── GIS data ─────────────────────────────────────────── */
   useEffect(() => {
@@ -604,12 +621,84 @@ const MapView = forwardRef(function MapView(
     predRouteObjs.current.push(new window.google.maps.Circle({center:{lat:dest.lat,lng:dest.lng},radius:15000,map:mapObj.current,fillColor:"#7c3aed",fillOpacity:0.06,strokeColor:"#a78bfa",strokeWeight:1.5,strokeOpacity:0.45,zIndex:6}));
   }, [predictRoute]);
 
+
+  /* ── Weather station markers ──────────────────────────── */
+  useEffect(() => {
+    weatherObjs.current.forEach(o => { try{o.setMap(null);}catch(_){} });
+    weatherObjs.current = [];
+    if (!mapReady || !mapObj.current || !weatherData || !layers.weatherStations) return;
+    const stations = weatherData?.live?.stations || [];
+    stations.forEach(s => {
+      if (!s.lat || !s.lng) return;
+      const spd = s.wind_speed_ms || 0;
+      const col = spd < 3.4 ? "#00e5ff" : spd < 8 ? "#00ff9d" : spd < 13.9 ? "#ffcc00" : spd < 20.8 ? "#ff8800" : "#ff2244";
+      const hdg = s.wind_direction ?? 0;
+      // Wind barb arrow
+      const marker = new window.google.maps.Marker({
+        position: { lat: s.lat, lng: s.lng },
+        map: mapObj.current,
+        icon: {
+          path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          scale: 7,
+          rotation: hdg,
+          fillColor: col,
+          fillOpacity: 0.92,
+          strokeColor: "#000",
+          strokeWeight: 0.8,
+        },
+        title: `${s.station_name}: ${s.wind_speed_kn} kn`,
+        zIndex: 15,
+      });
+      // Speed label
+      const label = new window.google.maps.Marker({
+        position: { lat: s.lat - 0.012, lng: s.lng },
+        map: mapObj.current,
+        icon: { path: "M 0 0", scale: 0 },
+        label: {
+          text: `${s.wind_speed_kn}kn`,
+          color: col,
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: "9px",
+          fontWeight: "800",
+        },
+        zIndex: 14,
+        clickable: false,
+      });
+      marker.addListener("click", () => {
+        infoWin.current.setContent(
+          `<div style="font-family:'JetBrains Mono',monospace;background:rgba(4,10,22,0.97);border:1px solid ${col}55;border-radius:10px;padding:12px 15px;color:#fff;min-width:200px">
+            <div style="color:${col};font-weight:800;font-size:11px;margin-bottom:8px">🌬️ ${s.station_name}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <div style="background:rgba(0,229,255,0.06);border-radius:6px;padding:6px">
+                <div style="font-size:7px;color:#3d6a8a">WIND</div>
+                <div style="font-size:15px;font-weight:800;color:${col}">${s.wind_speed_kn} kn</div>
+                <div style="font-size:9px;color:#5a8aaa">${s.wind_speed_ms.toFixed(1)} m/s</div>
+              </div>
+              <div style="background:rgba(0,229,255,0.06);border-radius:6px;padding:6px">
+                <div style="font-size:7px;color:#3d6a8a">BEAUFORT</div>
+                <div style="font-size:15px;font-weight:800;color:${col}">${s.beaufort?.scale}</div>
+                <div style="font-size:9px;color:#5a8aaa">${s.beaufort?.label}</div>
+              </div>
+            </div>
+            ${s.wind_direction != null ? `<div style="margin-top:6px;font-size:9px;color:#6a9ab0">Direction: ${s.wind_direction}°</div>` : ""}
+            ${s.rainfall_mm != null && s.rainfall_mm > 0 ? `<div style="margin-top:4px;font-size:9px;color:#44c8ff">🌧️ Rainfall: ${s.rainfall_mm.toFixed(1)} mm</div>` : ""}
+            ${s.alert ? `<div style="margin-top:6px;font-size:9px;font-weight:700;color:${s.alert==="danger"?"#ff6688":"#ffaa44"}">${s.alert==="danger"?"⚠️ GALE WARNING":"〰️ ELEVATED WINDS"}</div>` : ""}
+          </div>`
+        );
+        infoWin.current.open(mapObj.current, marker);
+      });
+      weatherObjs.current.push(marker, label);
+    });
+  }, [weatherData, layers.weatherStations, mapReady]);
+
   /* ── Map style cycle ──────────────────────────────────── */
   const cycleStyle = useCallback(() => {
     if (!mapObj.current) return;
-    const next = mapStyle === "satellite" ? "map" : "satellite";
+    const order = ["satellite", "nautical", "map"];
+    const next  = order[(order.indexOf(mapStyle) + 1) % order.length];
     if (next === "satellite") { mapObj.current.setMapTypeId("hybrid");  mapObj.current.setOptions({ styles: [] }); }
-    else                      { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({ styles: CLEAN_MAP_STYLE }); }
+    else if (next === "nautical") { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({ styles: DARK_NAUTICAL_STYLE }); }
+    else                          { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({ styles: CLEAN_MAP_STYLE }); }
     setMapStyle(next);
   }, [mapStyle]);
 
@@ -617,7 +706,7 @@ const MapView = forwardRef(function MapView(
   const dangerCount = alerts.filter(a => a.level === "danger").length;
   const warnCount   = alerts.filter(a => a.level === "warning").length;
   const toggleLayer = key => setLayers(prev => ({ ...prev, [key]: !prev[key] }));
-  const STYLE_ICON  = { satellite:"🛰️", map:"🗺️" };
+  const STYLE_ICON  = { satellite:"🛰️", nautical:"🌊", map:"🗺️" };
 
   /* ── JSX ──────────────────────────────────────────────── */
   return (
@@ -660,6 +749,7 @@ const MapView = forwardRef(function MapView(
             { key:"seabed",          label:"Seabed Hazards",     icon:"🪨", col:"#aa6600" },
             { key:"vesselProximity", label:"Proximity Alerts",   icon:"📡", col:"#ff8800" },
             { key:"aiTrajectory",    label:"AI Trajectory Fill", icon:"🤖", col:"#7cdcff" },
+            { key:"weatherStations",  label:"Wind Stations",      icon:"🌬️", col:"#00e5ff" },
           ].map(({ key, label, icon, col }) => (
             <div key={key} className={`mv-lp-row ${layers[key] ? "mv-lp-on" : ""}`} onClick={() => toggleLayer(key)}>
               <span className="mv-lp-icon">{icon}</span>
@@ -768,6 +858,18 @@ const MapView = forwardRef(function MapView(
         <div className="mv-rl-row"><span className="mv-rl-dot" style={{ background:"#00cc44" }} /><span>SAFE</span></div>
         {layers.aiTrajectory && <div className="mv-rl-row"><span className="mv-rl-dot" style={{ background:"#7cdcff" }} /><span>AI FILLED</span></div>}
       </div>
+      {/* COMPASS ROSE DECORATION */}
+      <div className="mv-compass" aria-hidden="true">🧭</div>
+
+      {/* WEATHER OVERLAY */}
+      <WeatherPanel
+        onStationHover={s => {
+          if (!mapObj.current || !s?.lat || !s?.lng) return;
+          const z = mapObj.current.getZoom() || 10;
+          if (z < 8) { mapObj.current.panTo({ lat: s.lat, lng: s.lng }); }
+        }}
+        onStationLeave={() => {}}
+      />
     </div>
   );
 });
@@ -786,6 +888,22 @@ const CLEAN_MAP_STYLE = [
   { featureType:"poi", stylers:[{ visibility:"off" }] },
   { featureType:"transit", stylers:[{ visibility:"off" }] },
   { elementType:"labels.icon", stylers:[{ visibility:"off" }] },
+];
+
+const DARK_NAUTICAL_STYLE = [
+  { elementType:"geometry",              stylers:[{ color:"#0d1a28" }] },
+  { elementType:"labels.text.fill",      stylers:[{ color:"#3d6a8a" }] },
+  { elementType:"labels.text.stroke",    stylers:[{ color:"#040810" }] },
+  { featureType:"water", elementType:"geometry", stylers:[{ color:"#071828" }] },
+  { featureType:"water", elementType:"labels.text.fill", stylers:[{ color:"#1a4a6a" }] },
+  { featureType:"landscape",             elementType:"geometry", stylers:[{ color:"#111e2c" }] },
+  { featureType:"landscape.natural",     elementType:"geometry", stylers:[{ color:"#0d1a28" }] },
+  { featureType:"road",                  stylers:[{ visibility:"off" }] },
+  { featureType:"poi",                   stylers:[{ visibility:"off" }] },
+  { featureType:"transit",               stylers:[{ visibility:"off" }] },
+  { elementType:"labels.icon",           stylers:[{ visibility:"off" }] },
+  { featureType:"administrative.country", elementType:"geometry.stroke", stylers:[{ color:"#1a3a5a" }, { weight:0.8 }] },
+  { featureType:"administrative.locality", elementType:"labels.text.fill", stylers:[{ color:"#2a5a7a" }, { visibility:"simplified" }] },
 ];
 
 // const DARK_NAUTICAL_STYLE = [
