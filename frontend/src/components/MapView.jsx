@@ -11,7 +11,7 @@ const MAP_CENTER  = { lat: 1.35, lng: 103.82 };
 const BASE_URL    = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.com/api";
 let loaderPromise = null;
 const RADIUS   = { DANGER: 500, WARNING: 1500 };
-const STALE_MS = 24 * 60 * 60 * 1000;
+const STALE_MS = 48 * 60 * 60 * 1000; // match backend 48h filter
 const IS_MOBILE = /Mobi|Android/i.test(navigator.userAgent);
 
 /* ─── helpers ───────────────────────────────────────────── */
@@ -33,7 +33,7 @@ function smoothMove(marker, newLat, newLng) {
   const from = marker.getPosition();
   if (!from) { marker.setPosition({ lat: newLat, lng: newLng }); return; }
   const dLat = newLat - from.lat(), dLng = newLng - from.lng();
-  if (IS_MOBILE || (Math.abs(dLat) < 0.0001 && Math.abs(dLng) < 0.0001)) {
+  if (IS_MOBILE || (Math.abs(dLat) < 0.00005 && Math.abs(dLng) < 0.00005)) {
     marker.setPosition({ lat: newLat, lng: newLng }); return;
   }
   if (marker._animId) cancelAnimationFrame(marker._animId);
@@ -175,7 +175,11 @@ const MapView = forwardRef(function MapView(
   const predRouteObjs  = useRef([]);
   const weatherObjs    = useRef([]);
   const mapZoomRef     = useRef(4);   // ← live zoom without re-render lag
-  const hasFitBounds  = useRef(false); // auto-fit on first vessel load
+  const hasFitBounds   = useRef(false); // auto-fit on first vessel load
+  // Hover perf: cache pre-built tooltip HTML per IMO, throttle open calls
+  const hoverCache    = useRef({});    // imo_number -> html string
+  const hoverTimer    = useRef(null);  // debounce timer for mouseover
+  const hoverOpenImo  = useRef(null);  // currently displayed hover IMO
 
   const [coords,         setCoords]         = useState(null);
   const [mapStyle,       setMapStyle]       = useState("satellite");
@@ -274,9 +278,15 @@ const MapView = forwardRef(function MapView(
       infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: 340 });
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
 
-      map.addListener("mousemove", e =>
-        setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) })
-      );
+      // Throttle mousemove coords update to max 10fps to avoid React re-render storm
+      let _mvTimer = null;
+      map.addListener("mousemove", e => {
+        if (_mvTimer) return;
+        _mvTimer = setTimeout(() => {
+          _mvTimer = null;
+          setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) });
+        }, 100);
+      });
       map.addListener("click", () => {
         infoWin.current.close();
         hoverWin.current.close();
@@ -387,6 +397,15 @@ const MapView = forwardRef(function MapView(
   useEffect(() => {
     if (!mapReady || !mapObj.current) return;
     const fresh    = freshVessels;
+    // Rebuild hover content cache for all active vessels (fast: no DOM, pure string)
+    const newHoverCache = {};
+    fresh.forEach(v => {
+      const spd = parseFloat(v.speed || 0);
+      const col = getSpeedColor(spd);
+      const region = getRegionName(parseFloat(v.latitude_degrees || 0), parseFloat(v.longitude_degrees || 0));
+      newHoverCache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || 'Unknown'}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${v.heading || 0}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ''}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
+    });
+    hoverCache.current = newHoverCache;
     const activeIds = new Set(fresh.map(v => String(v.imo_number)));
     const selId     = selectedVessel?.imo_number;
 
@@ -426,7 +445,7 @@ const MapView = forwardRef(function MapView(
         smoothMove(m, lat, lng);
         m.setIcon(icon);
         m.setZIndex(isSel ? 1000 : al === "danger" ? 500 : 10);
-        m._vessel = v;
+        m._vessel = v; // hoverCache already rebuilt above for all vessels
       } else {
         const m = new window.google.maps.Marker({
           position: { lat, lng },
@@ -445,12 +464,25 @@ const MapView = forwardRef(function MapView(
         });
         if (!IS_MOBILE) {
           m.addListener("mouseover", () => {
-            const ve=m._vessel, spd=parseFloat(ve.speed||0), col=getSpeedColor(spd);
-            const region=getRegionName(parseFloat(ve.latitude_degrees||0),parseFloat(ve.longitude_degrees||0));
-            hoverWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${ve.vessel_name||"Unknown"}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${ve.heading||0}° HDG</span></div>${region?`<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>`:""}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`);
-            hoverWin.current.open(mapObj.current, m);
+            // Throttle: only open if not already showing this vessel, debounce 80ms
+            const imo = m._vessel?.imo_number;
+            if (hoverOpenImo.current === imo) return;
+            clearTimeout(hoverTimer.current);
+            hoverTimer.current = setTimeout(() => {
+              if (!m.getMap()) return; // marker may have been removed
+              const html = hoverCache.current[imo];
+              if (!html) return;
+              hoverWin.current.setContent(html);
+              hoverWin.current.open(mapObj.current, m);
+              hoverOpenImo.current = imo;
+            }, 80);
           });
-          m.addListener("mouseout", () => hoverWin.current.close());
+          m.addListener("mouseout", () => {
+            clearTimeout(hoverTimer.current);
+            hoverTimer.current = null;
+            hoverOpenImo.current = null;
+            hoverWin.current.close();
+          });
         }
         markersRef.current[id] = m;
       }
