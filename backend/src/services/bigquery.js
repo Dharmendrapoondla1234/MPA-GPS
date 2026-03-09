@@ -162,17 +162,22 @@ async function getLatestVessels({ search = "", vesselType = "", speedMin = null,
 
   if (dbt) {
     // Filter out vessels with no position update in last 32 hours
-    cond.push(`last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 32 HOUR)`);
+    cond.push(`last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)`);
     const where = `WHERE ${cond.join(" AND ")}`;
     query = `
-      SELECT *
-      FROM ${T.VESSELS}
-      ${where}
+      SELECT * EXCEPT (rn)
+      FROM (
+        SELECT *,
+          ROW_NUMBER() OVER (PARTITION BY imo_number ORDER BY last_position_at DESC) AS rn
+        FROM ${T.VESSELS}
+        ${where}
+      )
+      WHERE rn = 1
       ORDER BY last_position_at DESC
       LIMIT ${lim}`;
   } else {
     // Legacy MPA_Master_Vessels — add staleness filter + null-pad missing columns
-    cond.push(`last_position_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)`);
+    cond.push(`last_position_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)`);
     const where = `WHERE ${cond.join(" AND ")}`;
     query = `
       SELECT

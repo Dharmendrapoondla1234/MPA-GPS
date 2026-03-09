@@ -83,13 +83,30 @@ app.listen(PORT, "0.0.0.0", () => {
   logger.info(`🚢 MPA Vessel Tracking API v6 → http://localhost:${PORT}`);
   setTimeout(() => warmCache(), 3000);
 
+  // ── KEEP-ALIVE SELF-PING ──────────────────────────────────────────
+  // Render free tier sleeps after 15 min of INBOUND inactivity.
+  // We ping /health every 4 min so the service is always awake.
+  // RENDER_EXTERNAL_URL is automatically set by Render for web services.
   const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-  setInterval(() => {
+  logger.info(`🏓 Keep-alive target: ${SELF_URL}/health (every 4 min)`);
+
+  function selfPing() {
     try {
       const mod = SELF_URL.startsWith("https") ? require("https") : require("http");
-      mod.get(`${SELF_URL}/health`, r => logger.info(`🏓 Keep-alive → ${r.statusCode}`)).on("error", ()=>{});
-    } catch(_) {}
-  }, 10*60*1000);
+      const req = mod.get(`${SELF_URL}/health`, (r) => {
+        logger.info(`🏓 Keep-alive ping → HTTP ${r.statusCode}`);
+        r.resume(); // drain response so socket closes cleanly
+      });
+      req.on("error", (e) => logger.warn(`🏓 Keep-alive ping failed: ${e.message}`));
+      req.setTimeout(10000, () => { req.destroy(); logger.warn("🏓 Keep-alive ping timed out"); });
+    } catch (e) {
+      logger.warn(`🏓 Keep-alive error: ${e.message}`);
+    }
+  }
+
+  // First ping after 30s (let server fully start), then every 4 min
+  setTimeout(selfPing, 30_000);
+  setInterval(selfPing, 4 * 60 * 1000);
 });
 
 module.exports = app;

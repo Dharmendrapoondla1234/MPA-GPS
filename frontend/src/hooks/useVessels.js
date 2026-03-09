@@ -29,10 +29,8 @@ export function useVessels(filters = {}) {
     setError(null);
     try {
       // ── STAGGERED LOAD ─────────────────────────────────────────
-      // Always bypass the api-layer cache on background refreshes so
-      // vessel positions on the map stay current. The vessels cache TTL
-      // is already 0, but bustCache=true also bypasses any ETag-refreshed
-      // entries and forces a genuine network round-trip every time.
+      // Fetch vessels first — show map as fast as possible.
+      // Stats and types load in parallel after, without blocking the map.
       const data = await fetchVessels(filtersRef.current, { bustCache: bg });
       if (Array.isArray(data)) setVessels(data);
       setLoading(false); // ← map visible NOW, before stats finish
