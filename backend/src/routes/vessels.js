@@ -194,8 +194,8 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
     const raw   = await getVesselHistory(imo, hours);
     const data  = raw.map(v => ({
       imo_number:        bqNum(v.imo_number),
-      latitude_degrees:  toLatDeg(v.latitude_degrees),
-      longitude_degrees: toLngDeg(v.longitude_degrees),
+      latitude_degrees:  bqNum(v.latitude_degrees),   // already converted in SQL
+      longitude_degrees: bqNum(v.longitude_degrees),  // already converted in SQL
       speed:             bqNum(v.speed) ?? 0,
       heading:           bqNum(v.heading) ?? 0,
       course:            bqNum(v.course) ?? 0,

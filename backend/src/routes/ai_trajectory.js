@@ -27,15 +27,16 @@ router.get("/trajectory/:imo", async (req, res, next) => {
     // Try stg first, fall back to positions_latest
     let rows = [];
     try {
+      // stg_vessel_positions uses latitude/longitude (radians), speed_kn, heading_deg, course_deg
       const [r] = await bigquery.query({
         query: `
           SELECT
             imo_number, vessel_name,
-            latitude_degrees  AS lat_raw,
-            longitude_degrees AS lng_raw,
-            speed             AS speed_kn,
-            heading           AS heading_deg,
-            course            AS course_deg,
+            latitude  AS lat_raw,
+            longitude AS lng_raw,
+            speed_kn,
+            heading_deg,
+            course_deg,
             effective_timestamp AS ts,
             TIMESTAMP_DIFF(
               effective_timestamp,
@@ -45,7 +46,7 @@ router.get("/trajectory/:imo", async (req, res, next) => {
           FROM ${T.POSITIONS_HIST}
           WHERE CAST(imo_number AS STRING) = '${parseInt(imo)}'
             AND effective_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${hours} HOUR)
-            AND latitude_degrees IS NOT NULL AND longitude_degrees IS NOT NULL
+            AND latitude IS NOT NULL AND longitude IS NOT NULL
           ORDER BY effective_timestamp ASC
           LIMIT 2000`,
         location: BQ_LOCATION,
@@ -100,9 +101,9 @@ router.get("/trajectory/:imo", async (req, res, next) => {
       vessel_name:          r.vessel_name,
       latitude_degrees:     toDeg(r.lat_raw),
       longitude_degrees:    toDeg(r.lng_raw),
-      speed:                Number(r.speed_kn  || 0),
+      speed:                Number(r.speed_kn || 0),
       heading:              Number(r.heading_deg || 0),
-      course:               Number(r.course_deg  || 0),
+      course:               Number(r.course_deg || 0),
       effective_timestamp:  r.ts?.value || String(r.ts),
       gap_minutes_from_prev: r.gap_minutes_from_prev ? Math.round(Number(r.gap_minutes_from_prev)) : 0,
     }));
