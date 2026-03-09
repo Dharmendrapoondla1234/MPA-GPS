@@ -4,7 +4,6 @@ import {
   fetchVessels,
   fetchFleetStats,
   fetchVesselTypes,
-  __clearCache,
 } from "../services/api";
 
 // Vessels change slowly — 90s refresh halves BigQuery cost vs old 300s,
