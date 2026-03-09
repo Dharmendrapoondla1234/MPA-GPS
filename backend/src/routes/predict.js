@@ -184,7 +184,7 @@ router.get("/:imo", async (req, res) => {
 
     let wps = [];
     if (top) {
-      const raw       = seaRouter.route(curLat, curLng, top.lat, top.lng, top.node);
+      const raw       = seaRouter.route(curLat, curLng, top.lat, top.lng, top.node, avgHdg);
       let totalDist   = 0;
       const cumDist   = [0];
       for (let i = 1; i < raw.length; i++) {
