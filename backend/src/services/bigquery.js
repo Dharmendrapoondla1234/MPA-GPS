@@ -27,7 +27,7 @@ const T = {
 
 // ── CACHE ─────────────────────────────────────────────────────────
 const cache = {
-  vessels: { data: null, ts: 0, ttl: 60_000 },
+  vessels: { data: null, ts: 0, ttl: 30_000 },  // FIX: 30s
   stats: { data: null, ts: 0, ttl: 180_000 },
   vesselTypes: { data: null, ts: 0, ttl: 900_000 },
   portActivity: { data: null, ts: 0, ttl: 300_000 },
