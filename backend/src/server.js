@@ -39,6 +39,56 @@ app.use("/api",         vesselRoutes);   // covers /vessels, /arrivals, /departu
 
 
 // ── DEBUG: sample raw + converted coords ─────────────────────
+// ── DEBUG: vessels endpoint — shows raw BQ vs normalized output ──────────────
+app.get("/debug/vessels", async (_req, res) => {
+  try {
+    const { bigquery, BQ_LOCATION, T } = require("./services/bigquery");
+    const [rows] = await bigquery.query({
+      query: `SELECT vessel_name, imo_number,
+                     latitude_degrees, longitude_degrees,
+                     speed, last_position_at,
+                     minutes_since_last_ping, is_stale, position_is_stale
+              FROM \`photons-377606.Photons_MPA.fct_vessel_live_tracking\`
+              WHERE latitude_degrees IS NOT NULL AND longitude_degrees IS NOT NULL
+              LIMIT 5`,
+      location: BQ_LOCATION,
+    });
+    const RAD = 180 / Math.PI;
+    const now = new Date();
+    const result = rows.map(r => {
+      const rawLat = Number(r.latitude_degrees);
+      const rawLng = Number(r.longitude_degrees);
+      const convertedLat = Math.abs(rawLat) <= 3 ? rawLat * RAD : rawLat;
+      const convertedLng = Math.abs(rawLng) <= 4 ? rawLng * RAD : rawLng;
+      const tsRaw = r.last_position_at?.value || r.last_position_at;
+      const tsDate = tsRaw ? new Date(tsRaw) : null;
+      const isFuture = tsDate && tsDate > now;
+      const correctedTs = isFuture ? new Date(tsDate.getTime() - 8*3600000) : tsDate;
+      const minsAgo = correctedTs ? Math.round((now - correctedTs) / 60000) : null;
+      return {
+        vessel_name: r.vessel_name,
+        imo: r.imo_number,
+        raw_lat: rawLat,
+        raw_lng: rawLng,
+        converted_lat: convertedLat,
+        converted_lng: convertedLng,
+        lat_in_range: convertedLat >= -90 && convertedLat <= 90,
+        lng_in_range: convertedLng >= -180 && convertedLng <= 180,
+        raw_timestamp: tsRaw,
+        timestamp_was_future: isFuture,
+        corrected_ts: correctedTs?.toISOString(),
+        minutes_ago: minsAgo,
+        dbt_mins_since_ping: r.minutes_since_last_ping,
+        dbt_is_stale: r.is_stale,
+        would_be_filtered: minsAgo > 360 || convertedLat < -90 || convertedLat > 90,
+      };
+    });
+    res.json({ now: now.toISOString(), count: rows.length, vessels: result });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/debug/coords", async (_req, res) => {
   try {
     // Init AI maritime router (learns lanes from AIS data)
