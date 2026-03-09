@@ -54,13 +54,16 @@ function normalizeVessel(v) {
   const rawTs  = bqStr(v.last_position_at) || bqStr(v.effective_timestamp);
   const effectiveTs = correctSgtTimestamp(rawTs);
 
-  // FIX: recalculate minutes_since_last_ping from corrected timestamp
-  // because the dbt value is negative (SGT stored as UTC makes it appear future)
-  let minutesSincePing = bqNum(v.minutes_since_last_ping);
+  // Always recalculate minutes_since_last_ping from the corrected timestamp.
+  // The dbt-computed value is unreliable: if SGT is stored as UTC the dbt value
+  // is negative (timestamp appears future); after correction it must be recomputed.
+  let minutesSincePing = null;
+  if (effectiveTs) {
+    minutesSincePing = Math.round((Date.now() - new Date(effectiveTs).getTime()) / 60000);
+  }
+  // Fallback to dbt value only when we have no timestamp at all
   if (minutesSincePing == null || minutesSincePing < 0) {
-    if (effectiveTs) {
-      minutesSincePing = Math.round((Date.now() - new Date(effectiveTs).getTime()) / 60000);
-    }
+    minutesSincePing = Math.max(0, bqNum(v.minutes_since_last_ping) ?? 0);
   }
 
   return {
@@ -81,10 +84,10 @@ function normalizeVessel(v) {
     effective_timestamp: effectiveTs,
     // FIX: corrected minutes (always positive, recalculated if dbt value was negative)
     minutes_since_last_ping: minutesSincePing,
-    // FIX: is_stale threshold changed to >360 min (6h) to match dbt definition
-    is_stale: v.is_stale != null ? bqBool(v.is_stale)
-            : v.position_is_stale != null ? bqBool(v.position_is_stale)
-            : (minutesSincePing || 0) > 360,
+    // is_stale: always derive from the recalculated minutesSincePing (corrected timestamp).
+    // Do NOT trust dbt's is_stale or position_is_stale — they're computed from the
+    // uncorrected SGT-as-UTC timestamp and will be wrong (mark live vessels as stale).
+    is_stale: (minutesSincePing || 0) > 360,
     speed_category:     bqStr(v.speed_category),
     speed_colour_class: bqStr(v.speed_colour_class),
     // static
@@ -184,7 +187,10 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
         const t = new Date(typeof ts === "object" && ts.value ? ts.value : ts).getTime();
         if (!isNaN(t) && t > maxTs) maxTs = t;
       }
-      const etag = `W/"v-${data.length}-${maxTs}"`;
+      // cacheSlot rotates every 30s (= backend vessel cache TTL).
+      // Prevents map freezing when vessel coords haven't changed but dbt has new data.
+      const cacheSlot = Math.floor(Date.now() / 30_000);
+      const etag = `W/"v-${data.length}-${maxTs}-${cacheSlot}"`;
       if (req.headers["if-none-match"] === etag) return res.status(304).end();
       res.set("ETag", etag);
       res.set("Cache-Control", "no-store");
