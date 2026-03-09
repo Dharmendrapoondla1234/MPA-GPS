@@ -62,7 +62,7 @@ function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
   const minsAgo = vessel.minutes_since_last_ping != null
     ? Math.abs(Number(vessel.minutes_since_last_ping))
     : 0;
-  const isStale = vessel.is_stale || minsAgo > 1920; // >32h
+  const isStale = vessel.is_stale || minsAgo > 2880; // >48h
 
   // Scale up at low zoom levels
   const zs = zoom <= 3 ? 4.0
@@ -177,7 +177,8 @@ const MapView = forwardRef(function MapView(
   const mapZoomRef     = useRef(4);   // ← live zoom without re-render lag
   const hasFitBounds   = useRef(false); // auto-fit on first vessel load
   // Hover perf: cache pre-built tooltip HTML per IMO, throttle open calls
-  const hoverCache    = useRef({});    // imo_number -> html string
+  const hoverCache    = useRef({});    // imo_number -> hover html string (pre-built)
+  const infoCache     = useRef({});    // imo_number -> infoWindow html string (pre-built)
   const hoverTimer    = useRef(null);  // debounce timer for mouseover
   const hoverOpenImo  = useRef(null);  // currently displayed hover IMO
 
@@ -397,15 +398,25 @@ const MapView = forwardRef(function MapView(
   useEffect(() => {
     if (!mapReady || !mapObj.current) return;
     const fresh    = freshVessels;
-    // Rebuild hover content cache for all active vessels (fast: no DOM, pure string)
+    // Pre-build both hover tooltip and full infoWindow HTML for every vessel.
+    // This moves the expensive string-building work out of the click/hover path
+    // so interactions feel instant (just a Map lookup, zero computation).
     const newHoverCache = {};
+    const newInfoCache  = {};
     fresh.forEach(v => {
-      const spd = parseFloat(v.speed || 0);
-      const col = getSpeedColor(spd);
-      const region = getRegionName(parseFloat(v.latitude_degrees || 0), parseFloat(v.longitude_degrees || 0));
+      const spd    = parseFloat(v.speed || 0);
+      const col    = getSpeedColor(spd);
+      const region = getRegionName(
+        parseFloat(v.latitude_degrees  || 0),
+        parseFloat(v.longitude_degrees || 0)
+      );
+      // Lightweight hover tooltip
       newHoverCache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || 'Unknown'}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${v.heading || 0}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ''}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
+      // Full infoWindow HTML (pre-built so click is instant)
+      newInfoCache[v.imo_number]  = buildInfoWindowContent(v);
     });
     hoverCache.current = newHoverCache;
+    infoCache.current  = newInfoCache;
     const activeIds = new Set(fresh.map(v => String(v.imo_number)));
     const selId     = selectedVessel?.imo_number;
 
@@ -457,10 +468,19 @@ const MapView = forwardRef(function MapView(
         });
         m._vessel = v;
         m.addListener("click", () => {
+          // Close hover immediately (sync — no cost)
           hoverWin.current.close();
-          infoWin.current.setContent(buildInfoWindowContent(v));
-          infoWin.current.open(mapObj.current, m);
+          // Fire onVesselClick immediately so the detail panel opens
+          // and the marker highlights — user sees instant feedback.
           onVesselClick(v);
+          // Use pre-built HTML from cache (zero computation on click path).
+          // Falls back to building it fresh if cache missed (e.g. vessel just appeared).
+          setTimeout(() => {
+            if (!m.getMap()) return;
+            const html = infoCache.current[v.imo_number] || buildInfoWindowContent(v);
+            infoWin.current.setContent(html);
+            infoWin.current.open(mapObj.current, m);
+          }, 0);
         });
         if (!IS_MOBILE) {
           m.addListener("mouseover", () => {

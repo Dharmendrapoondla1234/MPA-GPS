@@ -6,39 +6,36 @@ import {
   fetchVesselTypes,
 } from "../services/api";
 
-// Vessels change slowly — 90s refresh halves BigQuery cost vs old 300s,
-// while still feeling live (map animates marker movements between refreshes).
+// 90s refresh — vessels change slowly, this halves BigQuery cost
 const REFRESH_MS = parseInt(process.env.REACT_APP_REFRESH_INTERVAL) || 90_000;
 
 export function useVessels(filters = {}) {
-  const [vessels, setVessels] = useState([]);
-  const [stats, setStats] = useState(null);
+  const [vessels,     setVessels]     = useState([]);
+  const [stats,       setStats]       = useState(null);
   const [vesselTypes, setVesselTypes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [syncing,     setSyncing]     = useState(false);
+  const [error,       setError]       = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [nextRefresh, setNextRefresh] = useState(Date.now() + REFRESH_MS);
-  const filtersRef = useRef(filters);
-  const firstLoad = useRef(true);
+  const filtersRef  = useRef(filters);
+  const firstLoad   = useRef(true);
   filtersRef.current = filters;
 
   const load = useCallback(async (bg = false) => {
     if (bg) setSyncing(true);
-    else setLoading(true);
+    else    setLoading(true);
     setError(null);
     try {
-      // ── STAGGERED LOAD ─────────────────────────────────────────
-      // Fetch vessels first — show map as fast as possible.
-      // Stats and types load in parallel after, without blocking the map.
+      // bg=true → bustCache:true → bypass frontend cache so positions actually refresh
       const data = await fetchVessels(filtersRef.current, { bustCache: bg });
       if (Array.isArray(data)) setVessels(data);
-      setLoading(false); // ← map visible NOW, before stats finish
+      setLoading(false); // map visible immediately, before stats finish
 
-      // Stats + types load quietly in background
+      // Stats load quietly in the background
       fetchFleetStats()
         .then(setStats)
-        .catch((e) => console.warn("Stats fetch failed:", e.message));
+        .catch(e => console.warn("Stats fetch failed:", e.message));
 
       setLastUpdated(new Date());
       setNextRefresh(Date.now() + REFRESH_MS);
@@ -53,7 +50,6 @@ export function useVessels(filters = {}) {
 
   // Vessel types — load once, very low priority
   useEffect(() => {
-    // Delay vessel types fetch by 2s — not needed for initial render
     const t = setTimeout(() => {
       fetchVesselTypes()
         .then(setVesselTypes)
@@ -67,7 +63,7 @@ export function useVessels(filters = {}) {
     load(false);
   }, [load]);
 
-  // Filter change reload — debounced 600ms
+  // Filter change reload — debounced 400ms
   useEffect(() => {
     if (firstLoad.current) return;
     const t = setTimeout(() => load(false), 400);
@@ -80,7 +76,7 @@ export function useVessels(filters = {}) {
     load,
   ]);
 
-  // Silent background refresh
+  // Silent background refresh — bustCache:true so fresh coords come through
   useEffect(() => {
     const id = setInterval(() => load(true), REFRESH_MS);
     return () => clearInterval(id);

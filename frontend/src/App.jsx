@@ -243,27 +243,18 @@ export default function App() {
   }, [panelOpen]);
 
   const handleSelectVessel = useCallback((vessel) => {
-
     setSelectedVessel(vessel);
     setTrailData(null); setPredictRoute(null);
-
-    if (IS_MOBILE()) {
-      setPanelOpen(false);
-    }
-
-    // Notify map that its container has resized (right panel opening)
-    setTimeout(() => { mapRef.current?.triggerResize?.(); }, 50);
-
+    if (IS_MOBILE()) setPanelOpen(false);
+    // Defer resize until after the CSS slide-in transition finishes (~300ms).
+    // Running it too early causes a double layout + blank tile flash.
+    setTimeout(() => { mapRef.current?.triggerResize?.(); }, 320);
   }, []);
 
   const handleCloseDetail = useCallback(() => {
-
     setSelectedVessel(null);
     setTrailData(null); setPredictRoute(null);
-
-    // Notify map that its container has resized (right panel closing)
-    setTimeout(() => { mapRef.current?.triggerResize?.(); }, 50);
-
+    setTimeout(() => { mapRef.current?.triggerResize?.(); }, 320);
   }, []);
 
   const handleLogout = useCallback(() => {

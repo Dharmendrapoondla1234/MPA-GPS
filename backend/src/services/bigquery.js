@@ -31,7 +31,7 @@ const T = {
 
 // ── CACHE ─────────────────────────────────────────────────────────
 const cache = {
-  vessels:     { data: null, ts: 0, ttl: 60_000  },  // 60s — data ready before 90s frontend refresh
+  vessels:     { data: null, ts: 0, ttl: 80_000  },  // 80s — stays warm until 90s frontend refresh fires
   stats:       { data: null, ts: 0, ttl: 180_000 },  // 3 min
   vesselTypes: { data: null, ts: 0, ttl: 900_000 },  // 15 min — almost never changes
   portActivity:{ data: null, ts: 0, ttl: 300_000 },  // 5 min
