@@ -223,6 +223,16 @@ export default function App() {
 
   }, [vessels, filters.search]);
 
+  // Sync selectedVessel with live data on every background refresh.
+  // Without this the detail panel stays frozen at the snapshot from when
+  // the user clicked — speed, position, heading, timestamps never update.
+  useEffect(() => {
+    if (!selectedVessel) return;
+    const fresh = vessels.find(v => v.imo_number === selectedVessel.imo_number);
+    if (fresh) setSelectedVessel(fresh);
+  }, [vessels]); // eslint-disable-line react-hooks/exhaustive-deps
+
+
   // Handle resize mobile → desktop
   useEffect(() => {
 
