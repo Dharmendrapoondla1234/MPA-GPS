@@ -20,15 +20,19 @@ const RAD_TO_DEG = 180 / Math.PI;
 function toLatDeg(v) {
   const n = bqNum(v);
   if (n === null) return null;
-  // If value is clearly already in degrees (abs > 0.5 for lat or > 2 for lng typical)
-  // leave it alone — handles legacy table fallback
-  if (Math.abs(n) > 2) return n;
+  // Latitude degrees range: -90 to +90.  Radians range: -1.57 to +1.57.
+  // If |n| > 3.15 it cannot be a radian (max radian lat = π/2 ≈ 1.57) → already degrees.
+  // If |n| > 1.58 it's also safely degrees (impossible as radian lat).
+  // All other values: treat as radians and convert.
+  if (Math.abs(n) > 1.58) return n;
   return n * RAD_TO_DEG;
 }
 function toLngDeg(v) {
   const n = bqNum(v);
   if (n === null) return null;
-  if (Math.abs(n) > 4) return n;   // already degrees (lng can be up to 180)
+  // Longitude degrees range: -180 to +180.  Radians range: -π to +π (≈ -3.14 to +3.14).
+  // If |n| > 3.15 it cannot be a radian → already degrees.
+  if (Math.abs(n) > 3.15) return n;
   return n * RAD_TO_DEG;
 }
 
