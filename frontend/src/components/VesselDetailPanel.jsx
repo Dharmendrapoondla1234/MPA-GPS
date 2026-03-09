@@ -118,7 +118,10 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
   const portTimeHours   = vessel.port_time_hours ? Number(vessel.port_time_hours) : null;
   const hoursInPort     = vessel.hours_in_port_so_far ? Number(vessel.hours_in_port_so_far) : null;
   const dataQuality     = vessel.data_quality_score ? Number(vessel.data_quality_score) : null;
-  const minsSincePing   = vessel.minutes_since_last_ping ? Number(vessel.minutes_since_last_ping) : null;
+  // FIX: guard against negative values (SGT timezone bug residual) — floor at 0
+  const minsSincePing   = vessel.minutes_since_last_ping != null
+    ? Math.max(0, Number(vessel.minutes_since_last_ping))
+    : null;
   const speedCategory   = bq(vessel.speed_category);
 
   const hasArrival    = vessel.has_arrival_data;
