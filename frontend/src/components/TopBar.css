@@ -276,3 +276,18 @@
   .tb-filter-group { display: none; }
   .tb-search-wrap { max-width: 160px; }
 }
+/* Last updated timestamp */
+.tb-updated {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #00e5ff;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+.tb-updated svg {
+  color: #00e5ff;
+  flex-shrink: 0;
+}
