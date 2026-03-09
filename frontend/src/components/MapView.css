@@ -511,3 +511,128 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
 }
 .gm-style .gm-style-iw-d { overflow: hidden !important; }
 .gm-style .gm-style-iw-t::after { background: #1a0a2e !important; }
+/* ══════════════════════════════════════════════════
+   ENHANCED MAP BEAUTIFICATION v2
+══════════════════════════════════════════════════ */
+
+/* ── Enhanced Glassmorphism Controls ── */
+.mv-ctrl-cluster {
+  filter: drop-shadow(0 8px 24px rgba(0,0,0,0.5));
+}
+.mv-ctrl-btn {
+  background: linear-gradient(135deg, rgba(4,10,22,0.94) 0%, rgba(8,18,35,0.90) 100%);
+  border: 1px solid rgba(0,229,255,0.18);
+  box-shadow:
+    0 4px 20px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    inset 0 -1px 0 rgba(0,0,0,0.2);
+}
+
+/* ── Bottom HUD enhanced ── */
+.mv-bottom-hud {
+  background: linear-gradient(90deg, rgba(4,10,22,0.95) 0%, rgba(6,14,30,0.92) 100%);
+  border: 1px solid rgba(0,229,255,0.12);
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(0,229,255,0.06);
+  padding: 8px 16px;
+}
+
+/* ── Alert panel enhanced ── */
+.mv-alert-panel {
+  background: linear-gradient(180deg, rgba(16,4,4,0.97) 0%, rgba(8,2,2,0.95) 100%);
+  border: 1px solid rgba(255,34,68,0.25);
+  box-shadow: 0 8px 40px rgba(255,34,68,0.2), 0 2px 8px rgba(0,0,0,0.8);
+}
+
+/* ── Layer panel enhanced ── */
+.mv-layer-panel {
+  background: linear-gradient(180deg, rgba(4,10,22,0.97) 0%, rgba(6,14,30,0.95) 100%);
+  border: 1px solid rgba(0,229,255,0.18);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+/* ── Range legend enhanced ── */
+.mv-range-legend {
+  background: linear-gradient(135deg, rgba(4,10,22,0.92) 0%, rgba(6,14,30,0.88) 100%);
+  border: 1px solid rgba(0,180,255,0.12);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+/* ── Selected vessel glow enhancement ── */
+@keyframes mvSelectedGlow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(0,229,255,0.6)); }
+  50%       { filter: drop-shadow(0 0 18px rgba(0,229,255,0.9)); }
+}
+
+/* ── Map scanline overlay (nautical feel) ── */
+.mv-root::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 229, 255, 0.008) 2px,
+    rgba(0, 229, 255, 0.008) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+/* ── Corner accent glows ── */
+.mv-root::after {
+  content: "";
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 200px; height: 200px;
+  background: radial-gradient(circle at bottom left, rgba(0,229,255,0.06) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ── AI Badge enhanced ── */
+.mv-ai-badge {
+  background: linear-gradient(135deg, rgba(4,10,22,0.95) 0%, rgba(8,18,35,0.92) 100%);
+  border: 1px solid rgba(124,220,255,0.25);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 20px rgba(124,220,255,0.08);
+}
+
+/* ── Compass rose watermark (bottom-right decorative) ── */
+.mv-compass {
+  position: absolute;
+  bottom: 110px;
+  right: 16px;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0.18;
+  font-size: 48px;
+  line-height: 1;
+  filter: drop-shadow(0 0 8px rgba(0,229,255,0.3));
+  animation: mvCompassSpin 120s linear infinite;
+}
+@keyframes mvCompassSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Zoom buttons enhanced ── */
+.mv-zoom-btn {
+  background: linear-gradient(135deg, rgba(4,10,22,0.94) 0%, rgba(8,18,35,0.90) 100%);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
+  border: 1px solid rgba(0,229,255,0.18);
+}
+.mv-zoom-btn:hover {
+  background: rgba(0,229,255,0.1);
+  border-color: rgba(0,229,255,0.4);
+  box-shadow: 0 0 12px rgba(0,229,255,0.15);
+}
+
+/* ── Speed Legend overlay ── */
+.speed-legend-wrap {
+  background: linear-gradient(135deg, rgba(4,10,22,0.94) 0%, rgba(8,18,35,0.90) 100%);
+  border: 1px solid rgba(0,229,255,0.14);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.55);
+}
