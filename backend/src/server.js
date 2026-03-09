@@ -32,7 +32,7 @@ app.get("/",       (_req,res) => res.json({ status:"ok", message:"MPA Vessel Tra
 app.use("/api/auth",    authRoutes);
 app.use("/api/gis",     gisRoutes);
 app.use("/api/predict", predictRoutes);
-app.use("/api/ai",      aiRoutes);
+app.use("/api/ai",      aiTrajRoutes);
 app.use("/api",         vesselRoutes);   // covers /vessels, /arrivals, /departures, /port-activity, /stats
 
 
