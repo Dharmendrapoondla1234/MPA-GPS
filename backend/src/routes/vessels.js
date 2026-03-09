@@ -15,20 +15,13 @@ function bqStr(v)  { if(v==null)return null; if(typeof v==="object"&&"value"in v
 function bqNum(v)  { if(v==null)return null; const n=Number(bqStr(v)||v); return isNaN(n)?null:n; }
 function bqBool(v) { return v===true||v==="true"||v===1; }
 
-// fct_vessel_live_tracking stores lat/lng in RADIANS — convert to degrees
-const RAD_TO_DEG = 180 / Math.PI;
-function toLatDeg(v) {
-  const n = bqNum(v);
-  if (n === null) return null;
-  if (Math.abs(n) > 2) return n;   // already degrees (legacy table)
-  return n * RAD_TO_DEG;
-}
-function toLngDeg(v) {
-  const n = bqNum(v);
-  if (n === null) return null;
-  if (Math.abs(n) > 4) return n;   // already degrees (legacy table)
-  return n * RAD_TO_DEG;
-}
+// fct_vessel_positions_latest now converts radians→degrees in dbt.
+// fct_vessel_live_tracking passes degrees through unchanged.
+// The backend must NOT convert again — toLatDeg/toLngDeg pass values straight through.
+// Legacy MPA table also stores degrees, so no conversion needed for that path either.
+const RAD_TO_DEG = 180 / Math.PI;  // kept for reference, not used in normalisation
+function toLatDeg(v) { return bqNum(v); }
+function toLngDeg(v) { return bqNum(v); }
 
 // FIX: Correct SGT timestamps stored as UTC.
 // The AIS source sends Singapore local time (UTC+8) but labels it UTC.
