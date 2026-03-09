@@ -86,14 +86,30 @@ router.get("/:imo", async (req, res) => {
     const dbtCols    = "vessel_status, berth_location, shipping_agent, crew_count, passenger_count, data_quality_score";
     const legacyCols = "NULL AS vessel_status, NULL AS berth_location, NULL AS shipping_agent, NULL AS crew_count, NULL AS passenger_count, NULL AS data_quality_score";
 
+    // fct_vessel_master uses: latitude/longitude (radians), speed_kn, heading_deg, course_deg
+    // legacy MPA_Master_Vessels uses: latitude_degrees/longitude_degrees (degrees), speed, heading, course
     const [vesselRows] = await bigquery.query({
-      query: `
+      query: isDbt ? `
         SELECT vessel_name,
-               latitude_degrees  AS lat_raw,
+               latitude  AS lat_raw,
+               longitude AS lng_raw,
+               speed_kn  AS speed,
+               heading_deg AS heading,
+               course_deg  AS course,
+               flag,
+               arrived_from     AS last_port_departed,
+               next_port        AS next_port_destination,
+               ${dbtCols}
+        FROM ${masterTable}
+        WHERE CAST(imo_number AS STRING) = '${imo}'
+        LIMIT 1`
+      : `
+        SELECT vessel_name,
+               latitude_degrees AS lat_raw,
                longitude_degrees AS lng_raw,
                speed, heading, course, flag,
                last_port_departed, next_port_destination,
-               ${isDbt ? dbtCols : legacyCols}
+               ${legacyCols}
         FROM ${masterTable}
         WHERE CAST(imo_number AS INT64) = ${imo}
         LIMIT 1`,

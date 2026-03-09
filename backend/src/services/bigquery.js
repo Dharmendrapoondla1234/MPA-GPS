@@ -1,42 +1,33 @@
-// backend/src/services/bigquery.js — MPA v6 (auto-detect dbt + legacy fallback)
 "use strict";
 require("dotenv").config();
 const { BigQuery } = require("@google-cloud/bigquery");
-const logger = require("../utils/logger");
+const logger = { info:()=>{}, warn:()=>{}, error:()=>{} };
 
-const PROJECT    = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
-const BQ_LOCATION = process.env.BIGQUERY_LOCATION  || "asia-southeast1";
-
-// ── DATASET NORMALISATION ─────────────────────────────────────────
-// Render env var may still be set to "MPA" (old value).
-// The dbt models live in "Photons_MPA" — remap automatically.
-const DATASET_ENV = process.env.BIGQUERY_DATASET || "Photons_MPA";
+const PROJECT    = "photons-377606";
+const BQ_LOCATION = "asia-southeast1";
+const DATASET_ENV = "Photons_MPA";
 const DATASET     = (DATASET_ENV === "MPA") ? "Photons_MPA" : DATASET_ENV;
 
-// ── TABLE REFERENCES ──────────────────────────────────────────────
 const T = {
-  // dbt fact/staging tables (Photons_MPA)
   VESSELS:          `\`${PROJECT}.${DATASET}.fct_vessel_live_tracking\``,
   MASTER:           `\`${PROJECT}.${DATASET}.fct_vessel_master\``,
   ARRIVALS:         `\`${PROJECT}.${DATASET}.fct_vessel_arrivals\``,
   DEPARTURES:       `\`${PROJECT}.${DATASET}.fct_vessel_departures\``,
   POSITIONS_HIST:   `\`${PROJECT}.${DATASET}.stg_vessel_positions\``,
   USERS:            `\`${PROJECT}.${DATASET}.MPA_Users\``,
-  // Legacy raw tables (original MPA dataset — always available)
   LEGACY_VESSELS:   `\`${PROJECT}.MPA.MPA_Master_Vessels\``,
   LEGACY_SNAPSHOT:  `\`${PROJECT}.MPA.View_MPA_VesselPositionsSnapshot\``,
   LEGACY_ARRIVALS:  `\`${PROJECT}.MPA.MPA_VesselArrivalsbyDate\``,
   LEGACY_DEPARTURES:`\`${PROJECT}.MPA.MPA_VesselDeparturesbyDate\``,
 };
 
-// ── CACHE ─────────────────────────────────────────────────────────
 const cache = {
-  vessels:     { data: null, ts: 0, ttl: 90_000  },  // 90s — matches frontend refresh
-  stats:       { data: null, ts: 0, ttl: 180_000 },  // 3 min
-  vesselTypes: { data: null, ts: 0, ttl: 900_000 },  // 15 min — almost never changes
-  portActivity:{ data: null, ts: 0, ttl: 300_000 },  // 5 min
-  arrivals:    { data: null, ts: 0, ttl: 300_000 },  // 5 min
-  departures:  { data: null, ts: 0, ttl: 300_000 },  // 5 min
+  vessels:     { data: null, ts: 0, ttl: 90_000  },
+  stats:       { data: null, ts: 0, ttl: 180_000 },
+  vesselTypes: { data: null, ts: 0, ttl: 900_000 },
+  portActivity:{ data: null, ts: 0, ttl: 300_000 },
+  arrivals:    { data: null, ts: 0, ttl: 300_000 },
+  departures:  { data: null, ts: 0, ttl: 300_000 },
   dbtExists:   { checked: false, value: false },
 };
 function fromCache(k) {
@@ -48,28 +39,14 @@ function toCache(k, d) {
   return d;
 }
 
-// ── BIGQUERY CLIENT ───────────────────────────────────────────────
 let bigquery;
-if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-  try {
-    const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-    bigquery = new BigQuery({ credentials, projectId: credentials.project_id, location: BQ_LOCATION });
-    logger.info("✅ BigQuery: JSON credentials");
-  } catch (e) { logger.error("❌ Bad credentials:", e.message); process.exit(1); }
-} else {
-  bigquery = new BigQuery({ projectId: PROJECT, location: BQ_LOCATION });
-  logger.info("✅ BigQuery: Application Default Credentials");
-}
-
-logger.info(`[BQ] project=${PROJECT}  dataset=${DATASET}  location=${BQ_LOCATION}`);
+const RAD = 180 / Math.PI;
 
 function sanitize(str) {
   if (!str) return "";
   return String(str).replace(/['\"\\;`]/g, "").substring(0, 200);
 }
 
-// ── AUTO-DETECT: do dbt tables exist? ────────────────────────────
-// Runs once at startup, result cached forever.
 let dbtCheckPromise = null;
 async function useDbt() {
   if (cache.dbtExists.checked) return cache.dbtExists.value;
@@ -78,21 +55,16 @@ async function useDbt() {
       .query({ query: `SELECT 1 FROM ${T.VESSELS} LIMIT 1`, location: BQ_LOCATION })
       .then(() => {
         cache.dbtExists = { checked: true, value: true };
-        logger.info("✅ dbt tables found — Photons_MPA.fct_vessel_live_tracking");
         return true;
       })
       .catch((e) => {
         cache.dbtExists = { checked: true, value: false };
-        logger.warn(`⚠️  dbt tables not ready (${e.message.slice(0, 100)}) — using legacy MPA tables`);
         return false;
       });
   }
   return dbtCheckPromise;
 }
 
-// ════════════════════════════════════════════════════════════════
-//  AUTH
-// ════════════════════════════════════════════════════════════════
 async function getUserByEmail(email) {
   const em = sanitize(email.toLowerCase().trim());
   const [rows] = await bigquery.query({
@@ -124,15 +96,12 @@ async function updateLastLogin(email) {
   } catch (e) { logger.warn("[BQ] updateLastLogin:", e.message); }
 }
 
-// ════════════════════════════════════════════════════════════════
-//  VESSELS
-// ════════════════════════════════════════════════════════════════
 async function getLatestVessels({ search = "", vesselType = "", speedMin = null, speedMax = null, limit = 5000 } = {}) {
   const dbt = await useDbt();
   const isFiltered = search || vesselType || speedMin != null || speedMax != null;
   if (!isFiltered) {
     const hit = fromCache("vessels");
-    if (hit) { logger.info(`[CACHE] vessels → ${hit.length}`); return hit; }
+    if (hit) { logger.info(`[CACHE] vessels -> ${hit.length}`); return hit; }
   }
 
   const cond = [];
@@ -152,7 +121,6 @@ async function getLatestVessels({ search = "", vesselType = "", speedMin = null,
   const lim = Math.min(parseInt(limit) || 5000, 10000);
 
   if (dbt) {
-    // Filter out vessels with no position update in last 32 hours
     cond.push(`last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 32 HOUR)`);
     const where = `WHERE ${cond.join(" AND ")}`;
     query = `
@@ -162,7 +130,6 @@ async function getLatestVessels({ search = "", vesselType = "", speedMin = null,
       ORDER BY last_position_at DESC
       LIMIT ${lim}`;
   } else {
-    // Legacy MPA_Master_Vessels — add staleness filter + null-pad missing columns
     cond.push(`last_position_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)`);
     const where = `WHERE ${cond.join(" AND ")}`;
     query = `
@@ -191,22 +158,49 @@ async function getLatestVessels({ search = "", vesselType = "", speedMin = null,
 
   const t0 = Date.now();
   const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
-  logger.info(`[BQ] getLatestVessels (${dbt ? "dbt" : "legacy"}) → ${rows.length} rows in ${Date.now() - t0}ms`);
+  logger.info(`[BQ] getLatestVessels (${dbt ? "dbt" : "legacy"}) -> ${rows.length} rows in ${Date.now() - t0}ms`);
   if (!isFiltered) toCache("vessels", rows);
   return rows;
 }
 
 async function getVesselHistory(imoNumber, hours = 24) {
   if (!imoNumber || isNaN(imoNumber)) throw new Error("Invalid IMO");
-  const h     = Math.min(parseInt(hours) || 24, 168);
-  const dbt   = await useDbt();
-  const table = dbt ? T.POSITIONS_HIST : T.LEGACY_SNAPSHOT;
+  const h   = Math.min(parseInt(hours) || 24, 168);
+  const dbt = await useDbt();
+
+  if (dbt) {
+    try {
+      const [rows] = await bigquery.query({
+        query: `
+          SELECT
+            imo_number,
+            latitude  * ${RAD} AS latitude_degrees,
+            longitude * ${RAD} AS longitude_degrees,
+            speed_kn  AS speed,
+            heading_deg AS heading,
+            course_deg  AS course,
+            effective_timestamp
+          FROM ${T.POSITIONS_HIST}
+          WHERE CAST(imo_number AS STRING) = '${parseInt(imoNumber)}'
+            AND effective_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${h} HOUR)
+            AND latitude IS NOT NULL AND longitude IS NOT NULL
+          ORDER BY effective_timestamp ASC
+          LIMIT 2000`,
+        location: BQ_LOCATION,
+      });
+      if (rows.length) return rows;
+    } catch(e) {
+      logger.warn(`[BQ] stg_vessel_positions history failed: ${e.message.slice(0,100)}`);
+    }
+  }
+
   const [rows] = await bigquery.query({
     query: `
-      SELECT imo_number, latitude_degrees, longitude_degrees,
+      SELECT imo_number,
+             latitude_degrees, longitude_degrees,
              speed, heading, course, effective_timestamp
-      FROM ${table}
-      WHERE CAST(imo_number AS STRING) = '${parseInt(imoNumber)}'
+      FROM ${T.LEGACY_SNAPSHOT}
+      WHERE imo_number = '${parseInt(imoNumber)}'
         AND effective_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${h} HOUR)
         AND latitude_degrees IS NOT NULL AND longitude_degrees IS NOT NULL
       ORDER BY effective_timestamp ASC
@@ -227,16 +221,14 @@ async function getVesselDetail(imoNumber) {
     });
     return rows[0] || null;
   }
-  // fct_vessel_master already has latest arrival/departure joined in
-  // columns: latitude/longitude (radians), speed_kn, heading_deg, course_deg
   const [rows] = await bigquery.query({
     query: `
       SELECT
         m.imo_number, m.mmsi_number, m.vessel_name, m.call_sign, m.flag, m.vessel_type,
         m.gross_tonnage, m.net_tonnage, m.deadweight,
         m.vessel_length, m.vessel_breadth, m.vessel_depth, m.year_built,
-        m.latitude  AS latitude_degrees,
-        m.longitude AS longitude_degrees,
+        m.latitude  * ${RAD} AS latitude_degrees,
+        m.longitude * ${RAD} AS longitude_degrees,
         m.speed_kn  AS speed,
         m.heading_deg AS heading,
         m.course_deg  AS course,
@@ -245,19 +237,17 @@ async function getVesselDetail(imoNumber) {
         m.minutes_since_last_ping,
         m.vessel_status, m.port_time_hours, m.hours_in_port_so_far,
         m.data_quality_score,
-        m.has_live_position   AS has_arrival_data,
-        m.has_arrival_record  AS has_arrival_record,
+        m.has_live_position    AS has_arrival_data,
+        m.has_arrival_record   AS has_arrival_record,
         m.has_departure_record AS has_departure_record,
-        -- arrival info already joined in master
         m.latest_arrival_time, m.latest_arrival_date,
-        m.arrived_from    AS location_from,
+        m.arrived_from     AS location_from,
         m.arrived_at_berth AS berth_location,
         m.berth_grid, m.voyage_purpose,
-        m.arrival_agent   AS shipping_agent,
+        m.arrival_agent    AS shipping_agent,
         m.crew_count, m.passenger_count,
-        -- departure info
         m.latest_departure_time, m.latest_departure_date,
-        m.next_port       AS next_port_destination,
+        m.next_port        AS next_port_destination,
         m.departure_agent,
         m.last_updated_at
       FROM ${T.MASTER} m
@@ -268,9 +258,6 @@ async function getVesselDetail(imoNumber) {
   return rows[0] || null;
 }
 
-// ════════════════════════════════════════════════════════════════
-//  ARRIVALS
-// ════════════════════════════════════════════════════════════════
 async function getRecentArrivals(limit = 50) {
   const hit = fromCache("arrivals");
   if (hit) return hit;
@@ -290,7 +277,6 @@ async function getRecentArrivals(limit = 50) {
       logger.warn(`[BQ] fct_vessel_arrivals not ready, falling back: ${e.message.slice(0,80)}`);
     }
   }
-  // Legacy: SELECT * and normalise in normalizeArrival
   const [rows] = await bigquery.query({
     query: `SELECT * FROM ${T.LEGACY_ARRIVALS}
             WHERE TIMESTAMP(COALESCE(arrivedTime, arrived_time, arrival_time))
@@ -301,9 +287,6 @@ async function getRecentArrivals(limit = 50) {
   return toCache("arrivals", rows);
 }
 
-// ════════════════════════════════════════════════════════════════
-//  DEPARTURES
-// ════════════════════════════════════════════════════════════════
 async function getRecentDepartures(limit = 50) {
   const hit = fromCache("departures");
   if (hit) return hit;
@@ -323,7 +306,6 @@ async function getRecentDepartures(limit = 50) {
       logger.warn(`[BQ] fct_vessel_departures not ready, falling back: ${e.message.slice(0,80)}`);
     }
   }
-  // Legacy: SELECT * and normalise known column name variants in normalizeDeparture
   const [rows] = await bigquery.query({
     query: `SELECT * FROM ${T.LEGACY_DEPARTURES}
             WHERE TIMESTAMP(COALESCE(departedTime, departed_time, departure_time))
@@ -334,9 +316,6 @@ async function getRecentDepartures(limit = 50) {
   return toCache("departures", rows);
 }
 
-// ════════════════════════════════════════════════════════════════
-//  STATS
-// ════════════════════════════════════════════════════════════════
 async function getFleetStats() {
   const hit = fromCache("stats");
   if (hit) return hit;
@@ -354,7 +333,6 @@ async function getFleetStats() {
         ROUND(MAX(speed),2)                    AS max_speed,
         COUNT(DISTINCT vessel_type)            AS vessel_type_count,
         COUNT(DISTINCT flag)                   AS flag_count,
-        -- flag columns may not exist in all table versions — default to 0
         0 AS with_arrival_data,
         0 AS with_departure_data,
         0 AS with_declaration_data,
@@ -371,15 +349,11 @@ async function getFleetStats() {
   return toCache("stats", rows[0] || {});
 }
 
-// ════════════════════════════════════════════════════════════════
-//  PORT ACTIVITY
-// ════════════════════════════════════════════════════════════════
 async function getPortActivity() {
   const hit = fromCache("portActivity");
   if (hit) return hit;
   const dbt = await useDbt();
 
-  let query;
   const legacyPortQuery = `
     SELECT locationTo AS port, 'AIS_CONFIRMED' AS arrival_source,
            COUNT(*) AS arrivals,
@@ -412,9 +386,6 @@ async function getPortActivity() {
   return toCache("portActivity", rows);
 }
 
-// ════════════════════════════════════════════════════════════════
-//  VESSEL TYPES
-// ════════════════════════════════════════════════════════════════
 async function getVesselTypes() {
   const hit = fromCache("vesselTypes");
   if (hit) return hit;
@@ -427,13 +398,9 @@ async function getVesselTypes() {
   return toCache("vesselTypes", rows.map(r => r.vessel_type).filter(Boolean));
 }
 
-// ════════════════════════════════════════════════════════════════
-//  HEALTH & CACHE WARM
-// ════════════════════════════════════════════════════════════════
 async function warmCache() {
-  logger.info("🔥 Warming cache…");
+  logger.info("Warming cache...");
   const dbt = await useDbt();
-  // Run each independently so one failure doesn't block the others
   const jobs = [
     ["vessels",      getLatestVessels],
     ["stats",        getFleetStats],
@@ -446,13 +413,12 @@ async function warmCache() {
   for (const [name, fn] of jobs) {
     try {
       await fn();
-      logger.info(`  ✅ warmed: ${name}`);
       ok++;
     } catch (e) {
-      logger.warn(`  ⚠️ warm failed [${name}]: ${e.message}`);
+      logger.warn(`warm failed [${name}]: ${e.message}`);
     }
   }
-  logger.info(`🔥 Cache warm done: ${ok}/${jobs.length} (${dbt ? "Photons_MPA" : "legacy MPA"})`);
+  logger.info(`Cache warm done: ${ok}/${jobs.length}`);
 }
 
 async function healthCheck() {
