@@ -248,7 +248,9 @@ const MapView = forwardRef(function MapView(
     vessels.filter(v => {
       if (isStale(v)) return false;
       const lat = parseFloat(v.latitude_degrees), lng = parseFloat(v.longitude_degrees);
-      return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+      // Guard out-of-range coords (e.g. radian conversion errors put vessels at ~79°N)
+      return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0
+        && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
     }),
   [vessels]);
 

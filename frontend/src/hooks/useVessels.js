@@ -104,6 +104,6 @@ export function useVessels(filters = {}) {
     error,
     lastUpdated,
     nextRefresh,
-    refresh: () => load(false),
+    refresh: () => load(true),   // bust cache on manual refresh too
   };
 }
