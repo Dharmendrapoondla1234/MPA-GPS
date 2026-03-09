@@ -173,9 +173,18 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
 
     const isFiltered = search || vesselType || speedMin || speedMax;
     if (!isFiltered) {
-      const ts0 = data[0]?.effective_timestamp;
-      const tsStr = (ts0 && typeof ts0 === "object" && ts0.value) ? String(ts0.value) : String(ts0 || 0);
-      const etag = `W/"v-${data.length}-${tsStr.slice(0,19)}"`;
+      // FIX: ETag was built from data[0].effective_timestamp only.
+      // If the first vessel hadn't changed, 304 was returned even when other
+      // vessels had fresh pings — map appeared frozen.
+      // Now use MAX(last_position_at) across ALL vessels for a reliable ETag.
+      let maxTs = 0;
+      for (const v of data) {
+        const ts = v.effective_timestamp || v.last_position_at;
+        if (!ts) continue;
+        const t = new Date(typeof ts === "object" && ts.value ? ts.value : ts).getTime();
+        if (!isNaN(t) && t > maxTs) maxTs = t;
+      }
+      const etag = `W/"v-${data.length}-${maxTs}"`;
       if (req.headers["if-none-match"] === etag) return res.status(304).end();
       res.set("ETag", etag);
       res.set("Cache-Control", "no-store");

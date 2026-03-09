@@ -13,10 +13,24 @@ export default function TopBar({
   const countdown = useCountdown(nextRefresh);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Format lastUpdated as HH:MM:SS local time
-  const updatedStr = lastUpdated
-    ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
-    : null;
+  // FIX: Show "Xm ago" relative age that ticks every second — much more useful
+  // than a static clock time. "Last updated 1 ago" was because it showed HH:MM
+  // but never re-rendered as time passed.
+  const [dataAge, setDataAge] = React.useState(null);
+  React.useEffect(() => {
+    if (!lastUpdated) { setDataAge(null); return; }
+    const tick = () => {
+      const diffMs = Date.now() - new Date(lastUpdated).getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      const diffSec = Math.floor((diffMs % 60000) / 1000);
+      if (diffMin === 0) setDataAge(`${diffSec}s ago`);
+      else if (diffMin < 60) setDataAge(`${diffMin}m ${diffSec}s ago`);
+      else setDataAge(`${Math.floor(diffMin/60)}h ${diffMin%60}m ago`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lastUpdated]);
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -111,12 +125,12 @@ export default function TopBar({
           </svg>
           <span className="mono">{countdown}</span>
         </div>
-        {updatedStr && (
-          <div className="tb-updated" title="Last data refresh">
+        {dataAge && (
+          <div className="tb-updated" title="Age of most recent vessel position in data">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="20 6 9 17 4 12"/>
             </svg>
-            <span className="mono">{updatedStr}</span>
+            <span className="mono">DATA {dataAge}</span>
           </div>
         )}
         <button className={`tb-btn ${loading?"spin":""}`} onClick={onRefresh} disabled={loading} title="Refresh">

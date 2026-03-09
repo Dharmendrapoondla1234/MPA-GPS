@@ -6,8 +6,8 @@ import {
   fetchVesselTypes,
 } from "../services/api";
 
-// 90s refresh — vessels change slowly, this halves BigQuery cost
-const REFRESH_MS = parseInt(process.env.REACT_APP_REFRESH_INTERVAL) || 90_000;
+// 60s refresh — dbt runs every 30min, backend cache 30s, so new data lands within ~60s
+const REFRESH_MS = parseInt(process.env.REACT_APP_REFRESH_INTERVAL) || 60_000;
 
 export function useVessels(filters = {}) {
   const [vessels,     setVessels]     = useState([]);
@@ -29,7 +29,21 @@ export function useVessels(filters = {}) {
     try {
       // bg=true → bustCache:true → bypass frontend cache so positions actually refresh
       const data = await fetchVessels(filtersRef.current, { bustCache: bg });
-      if (Array.isArray(data)) setVessels(data);
+      if (Array.isArray(data)) {
+        setVessels(data);
+
+        // FIX: Show REAL data freshness — use the most recent last_position_at
+        // from the actual vessel data, not just "when JS made the fetch".
+        // This way "Last updated" reflects when BigQuery/dbt actually wrote data.
+        let maxDataTs = null;
+        for (const v of data) {
+          const raw = v.effective_timestamp || v.last_position_at;
+          if (!raw) continue;
+          const t = new Date(typeof raw === "object" && raw.value ? raw.value : raw);
+          if (!isNaN(t) && (!maxDataTs || t > maxDataTs)) maxDataTs = t;
+        }
+        setLastUpdated(maxDataTs || new Date());
+      }
       setLoading(false); // map visible immediately, before stats finish
 
       // Stats load quietly in the background
@@ -37,7 +51,6 @@ export function useVessels(filters = {}) {
         .then(setStats)
         .catch(e => console.warn("Stats fetch failed:", e.message));
 
-      setLastUpdated(new Date());
       setNextRefresh(Date.now() + REFRESH_MS);
       firstLoad.current = false;
     } catch (err) {
