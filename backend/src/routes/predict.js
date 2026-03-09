@@ -83,7 +83,7 @@ router.get("/:imo", async (req, res) => {
     // ── Detect which table to use ───────────────────────────────
     const { table: masterTable, isDbt } = await getMasterTable();
 
-    const dbtCols    = "vessel_status, berth_location, shipping_agent, crew_count, passenger_count, data_quality_score";
+    const dbtCols    = "vessel_status, arrived_at_berth AS berth_location, arrival_agent AS shipping_agent, crew_count, passenger_count, data_quality_score";
     const legacyCols = "NULL AS vessel_status, NULL AS berth_location, NULL AS shipping_agent, NULL AS crew_count, NULL AS passenger_count, NULL AS data_quality_score";
 
     // fct_vessel_master uses: latitude/longitude (radians), speed_kn, heading_deg, course_deg
