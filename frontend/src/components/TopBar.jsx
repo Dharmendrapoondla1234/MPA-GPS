@@ -7,11 +7,16 @@ import "./TopBar.css";
 export default function TopBar({
   filters, onFiltersChange, vesselTypes, stats,
   nextRefresh, loading, onRefresh, panelOpen, onTogglePanel,
-  user, onLogout, onSearchEnter,
+  user, onLogout, onSearchEnter, lastUpdated,
   portPanelOpen, onTogglePortPanel,
 }) {
   const countdown = useCountdown(nextRefresh);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Format lastUpdated as HH:MM:SS local time
+  const updatedStr = lastUpdated
+    ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+    : null;
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -100,12 +105,20 @@ export default function TopBar({
           <span className="tb-live-dot"/>
           {loading?"SYNC":"LIVE"}
         </div>
-        <div className="tb-timer">
+        <div className="tb-timer" title="Next auto-refresh">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
           </svg>
           <span className="mono">{countdown}</span>
         </div>
+        {updatedStr && (
+          <div className="tb-updated" title="Last data refresh">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span className="mono">{updatedStr}</span>
+          </div>
+        )}
         <button className={`tb-btn ${loading?"spin":""}`} onClick={onRefresh} disabled={loading} title="Refresh">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
