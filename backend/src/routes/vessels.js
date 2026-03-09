@@ -196,7 +196,17 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
       res.set("Cache-Control", "no-store");
     }
 
-    logger.info(`GET /api/vessels -> ${data.length}`);
+    // DEBUG: log a sample vessel so we can verify coords + timestamps in production logs
+    if (data.length > 0) {
+      const s = data[0];
+      logger.info(
+        `GET /api/vessels -> ${data.length} vessels | sample: ${s.vessel_name} ` +
+        `lat=${s.latitude_degrees} lng=${s.longitude_degrees} ` +
+        `spd=${s.speed} ts=${s.effective_timestamp} stale=${s.is_stale} mins=${s.minutes_since_last_ping}`
+      );
+    } else {
+      logger.warn('GET /api/vessels -> 0 vessels returned — check BQ filter / dbt model');
+    }
     res.json({ success:true, count:data.length, data });
   } catch(err) { next(err); }
 });
