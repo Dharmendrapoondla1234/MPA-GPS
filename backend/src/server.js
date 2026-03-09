@@ -9,9 +9,11 @@ const compression   = require("compression");
 const vesselRoutes  = require("./routes/vessels");
 const authRoutes    = require("./routes/auth");
 const gisRoutes     = require("./routes/gis_route");
-const predictRoutes = require("./routes/predict");
+const predictRoutes    = require("./routes/predict");
+const aiTrajRoutes     = require("./routes/ai_trajectory");
 const logger        = require("./utils/logger");
-const { warmCache } = require("./services/bigquery");
+const { warmCache, bigquery, BQ_LOCATION, T } = require("./services/bigquery");
+const maritimeRouter = require("./services/maritimeRouter");
 
 const app  = express();
 const PORT = process.env.PORT || 10000;
@@ -30,13 +32,20 @@ app.get("/",       (_req,res) => res.json({ status:"ok", message:"MPA Vessel Tra
 app.use("/api/auth",    authRoutes);
 app.use("/api/gis",     gisRoutes);
 app.use("/api/predict", predictRoutes);
+app.use("/api/ai",      aiRoutes);
 app.use("/api",         vesselRoutes);   // covers /vessels, /arrivals, /departures, /port-activity, /stats
 
 
 // ── DEBUG: sample raw + converted coords ─────────────────────
 app.get("/debug/coords", async (_req, res) => {
   try {
-    const { bigquery, BQ_LOCATION } = require("./services/bigquery");
+    // Init AI maritime router (learns lanes from AIS data)
+    const { bigquery, BQ_LOCATION, T } = require("./services/bigquery");
+    maritimeRouter.init(bigquery, BQ_LOCATION, T);
+    // Warm AIS lane learning in background (don't await — runs async)
+    maritimeRouter.route(1.20, 103.82, 5.35, 100.28, 315)
+      .then(() => logger.info("[STARTUP] Maritime AI lane graph ready"))
+      .catch(e => logger.warn("[STARTUP] Maritime AI lane learning:", e.message));
     const RAD = 180 / Math.PI;
     const [rows] = await bigquery.query({
       query: `SELECT vessel_name, imo_number, latitude_degrees, longitude_degrees,
@@ -64,6 +73,9 @@ app.use((err,_req,res,_next) => {
   logger.error("Unhandled error:", err.message);
   res.status(500).json({ success:false, error:err.message });
 });
+
+// ── Wire AIS+TSS intelligent router ──────────────────────────────────────────
+maritimeRouter.init(bigquery, BQ_LOCATION, T);
 
 app.listen(PORT, "0.0.0.0", () => {
   logger.info(`🚢 MPA Vessel Tracking API v6 → http://localhost:${PORT}`);
