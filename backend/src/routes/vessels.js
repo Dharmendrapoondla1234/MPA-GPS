@@ -20,34 +20,48 @@ const RAD_TO_DEG = 180 / Math.PI;
 function toLatDeg(v) {
   const n = bqNum(v);
   if (n === null) return null;
-  // Latitude degrees range: -90 to +90.  Radians range: -1.57 to +1.57.
-  // If |n| > 3.15 it cannot be a radian (max radian lat = π/2 ≈ 1.57) → already degrees.
-  // If |n| > 1.58 it's also safely degrees (impossible as radian lat).
-  // All other values: treat as radians and convert.
-  if (Math.abs(n) > 1.58) return n;
+  if (Math.abs(n) > 2) return n;   // already degrees (legacy table)
   return n * RAD_TO_DEG;
 }
 function toLngDeg(v) {
   const n = bqNum(v);
   if (n === null) return null;
-  // Longitude degrees range: -180 to +180.  Radians range: -π to +π (≈ -3.14 to +3.14).
-  // If |n| > 3.15 it cannot be a radian → already degrees.
-  if (Math.abs(n) > 3.15) return n;
+  if (Math.abs(n) > 4) return n;   // already degrees (legacy table)
   return n * RAD_TO_DEG;
 }
 
-function normalizeVessel(v) {
-  // Handles fct_vessel_live_tracking, fct_vessel_master, and legacy MPA_Master_Vessels
-  // fct_vessel_master:       latitude/longitude (radians), speed_kn, heading_deg, course_deg
-  // fct_vessel_live_tracking: latitude_degrees/longitude_degrees (radians), speed, heading, course
-  // legacy:                   latitude_degrees/longitude_degrees (degrees), speed, heading, course
+// FIX: Correct SGT timestamps stored as UTC.
+// The AIS source sends Singapore local time (UTC+8) but labels it UTC.
+// Any timestamp that is in the future relative to now has the 8h offset
+// applied — subtract it to get true UTC.
+function correctSgtTimestamp(raw) {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw;
+  // If timestamp is ahead of now, it was stored in SGT as UTC — subtract 8h
+  if (d > new Date()) return new Date(d.getTime() - 8 * 60 * 60 * 1000).toISOString();
+  return raw;
+}
 
-  // Prefer master-style columns if present, fall back to live_tracking, then legacy
+function normalizeVessel(v) {
   const rawLat = v.latitude_degrees ?? v.latitude;
   const rawLng = v.longitude_degrees ?? v.longitude;
   const rawSpd = v.speed_kn  ?? v.speed;
   const rawHdg = v.heading_deg ?? v.heading;
   const rawCrs = v.course_deg  ?? v.course;
+
+  // FIX: correct SGT → UTC on effective_timestamp before sending to frontend
+  const rawTs  = bqStr(v.last_position_at) || bqStr(v.effective_timestamp);
+  const effectiveTs = correctSgtTimestamp(rawTs);
+
+  // FIX: recalculate minutes_since_last_ping from corrected timestamp
+  // because the dbt value is negative (SGT stored as UTC makes it appear future)
+  let minutesSincePing = bqNum(v.minutes_since_last_ping);
+  if (minutesSincePing == null || minutesSincePing < 0) {
+    if (effectiveTs) {
+      minutesSincePing = Math.round((Date.now() - new Date(effectiveTs).getTime()) / 60000);
+    }
+  }
 
   return {
     // identity
@@ -63,12 +77,14 @@ function normalizeVessel(v) {
     speed:   bqNum(rawSpd) ?? 0,
     heading: bqNum(rawHdg) ?? 0,
     course:  bqNum(rawCrs) ?? 0,
-    // timestamp — master: last_position_at | live_tracking: last_position_at | legacy: effective_timestamp
-    effective_timestamp: bqStr(v.last_position_at) || bqStr(v.effective_timestamp),
-    minutes_since_last_ping: bqNum(v.minutes_since_last_ping),
+    // FIX: corrected UTC timestamp
+    effective_timestamp: effectiveTs,
+    // FIX: corrected minutes (always positive, recalculated if dbt value was negative)
+    minutes_since_last_ping: minutesSincePing,
+    // FIX: is_stale threshold changed to >360 min (6h) to match dbt definition
     is_stale: v.is_stale != null ? bqBool(v.is_stale)
             : v.position_is_stale != null ? bqBool(v.position_is_stale)
-            : (bqNum(v.minutes_since_last_ping) || 0) > 120,
+            : (minutesSincePing || 0) > 360,
     speed_category:     bqStr(v.speed_category),
     speed_colour_class: bqStr(v.speed_colour_class),
     // static
@@ -84,7 +100,7 @@ function normalizeVessel(v) {
     status_label:   bqStr(v.status_label),
     last_port_departed:    bqStr(v.last_port_departed) || bqStr(v.arrived_from),
     next_port_destination: bqStr(v.next_port_destination) || bqStr(v.next_port),
-    // arrival info (master has these joined already)
+    // arrival info
     last_arrived_time:   bqStr(v.latest_arrival_time)   || bqStr(v.last_arrived_time),
     last_departed_time:  bqStr(v.latest_departure_time) || bqStr(v.last_departed_time),
     location_from:       bqStr(v.location_from) || bqStr(v.arrived_from),
@@ -109,16 +125,13 @@ function normalizeVessel(v) {
 }
 
 function normalizeArrival(v) {
-  // Handle both dbt snake_case and legacy camelCase column names
   return {
     imo_number:     bqNum(v.imo_number    ?? v.imoNumber),
     vessel_name:    bqStr(v.vessel_name   ?? v.vesselName),
     call_sign:      bqStr(v.call_sign     ?? v.callSign),
     flag:           bqStr(v.flag),
-    // dbt: arrival_time | legacy: arrivedTime / arrived_time
     arrival_time:   bqStr(v.arrival_time  ?? v.arrivedTime   ?? v.arrived_time),
     arrival_date:   bqStr(v.arrival_date  ?? v.arrivedDate),
-    // dbt: location_from/to | legacy: locationFrom/locationTo
     location_from:  bqStr(v.location_from ?? v.locationFrom  ?? v.location_from),
     location_to:    bqStr(v.location_to   ?? v.locationTo    ?? v.location_to),
     arrival_source: bqStr(v.arrival_source ?? v.arrivalSource ?? "AIS_CONFIRMED"),
@@ -131,17 +144,14 @@ function normalizeArrival(v) {
 }
 
 function normalizeDeparture(v) {
-  // Handle both dbt snake_case and legacy camelCase column names
   return {
     imo_number:       bqNum(v.imo_number      ?? v.imoNumber),
     vessel_name:      bqStr(v.vessel_name     ?? v.vesselName),
     call_sign:        bqStr(v.call_sign       ?? v.callSign),
     flag:             bqStr(v.flag),
-    // dbt: departure_time | legacy: departedTime / departed_time
     departure_time:   bqStr(v.departure_time  ?? v.departedTime  ?? v.departed_time),
     departure_date:   bqStr(v.departure_date  ?? v.departedDate),
     departure_source: bqStr(v.departure_source ?? v.departureSource ?? "AIS_CONFIRMED"),
-    // dbt: next_port | legacy: nextPort / destinationPort
     next_port:        bqStr(v.next_port       ?? v.nextPort       ?? v.destinationPort),
     shipping_agent:   bqStr(v.shipping_agent  ?? v.shippingAgent),
     crew_count:       bqNum(v.crew_count      ?? v.crewCount),
@@ -161,10 +171,8 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
     });
     const data = raw.map(normalizeVessel);
 
-    // ETag — skip re-serialising + re-parsing if client already has this version
     const isFiltered = search || vesselType || speedMin || speedMax;
     if (!isFiltered) {
-      // Unwrap BigQuery timestamp object { value: "..." } before hashing
       const ts0 = data[0]?.effective_timestamp;
       const tsStr = (ts0 && typeof ts0 === "object" && ts0.value) ? String(ts0.value) : String(ts0 || 0);
       const etag = `W/"v-${data.length}-${tsStr.slice(0,19)}"`;
@@ -197,7 +205,6 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
     const hours = parseInt(req.query.hours) || 24;
     const raw   = await getVesselHistory(imo, hours);
 
-    // Normalise raw AIS points
     const aisPoints = raw.map(v => ({
       imo_number:        bqNum(v.imo_number),
       latitude_degrees:  bqNum(v.latitude_degrees),
@@ -205,11 +212,10 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
       speed:             bqNum(v.speed)   ?? 0,
       heading:           bqNum(v.heading) ?? 0,
       course:            bqNum(v.course)  ?? 0,
-      effective_timestamp: bqStr(v.effective_timestamp),
+      // FIX: correct SGT timestamp on history points too
+      effective_timestamp: correctSgtTimestamp(bqStr(v.effective_timestamp)),
     })).filter(p => p.latitude_degrees && p.longitude_degrees);
 
-    // ── AIS + TSS trail densification ──────────────────────────────────────
-    // For gaps >15nm, use AIS-learned+TSS+DWR lanes to inject waypoints.
     const { distNM }                                = require("../services/maritimeRouter");
     const { learnLanes, nearestLaneCell, dijkstraLane } = require("../services/aisLaneExtractor");
     const { TSS_LANES, DEEP_WATER_ROUTES }          = require("../services/tssData");
@@ -275,9 +281,7 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
       }
     }
 
-    // Sort by timestamp to keep chronological order
     data.sort((a, b) => new Date(a.effective_timestamp) - new Date(b.effective_timestamp));
-
     res.json({ success:true, count:data.length, hours, data });
   } catch(err) { next(err); }
 });
