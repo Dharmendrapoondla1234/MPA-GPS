@@ -535,6 +535,14 @@ function PredictTab({ prediction, predLoading, predError, predRouteOn, onLoad, o
               <div className="pred-conf-bar"><div className="pred-conf-fill" style={{width:`${pred.confidence}%`,background:`linear-gradient(90deg,${confColor(pred.confidence)}66,${confColor(pred.confidence)})`}}/></div>
             </div>
             <div className="pred-method"><span className="pred-method-icon">🔬</span>{pred.method}</div>
+            {pred.route_method && (
+              <div className="pred-lane-legend">
+                <span className="pred-lane-title">ROUTE TYPE</span>
+                <span className="pred-lane-tag pred-lane-tss">■ TSS</span>
+                <span className="pred-lane-tag pred-lane-ais">■ AIS Lane</span>
+                <span className="pred-lane-tag pred-lane-dwr">■ Deep Water</span>
+              </div>
+            )}
             <button className={`pred-route-btn ${predRouteOn?"on":""}`} onClick={onToggleRoute}>
               {predRouteOn?"🗺️  Hide Route on Map":"🗺️  Show Route on Map"}
             </button>

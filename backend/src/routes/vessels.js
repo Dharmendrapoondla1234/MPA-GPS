@@ -192,15 +192,88 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
     if (!imo || isNaN(imo)) return res.status(400).json({ success:false, error:"Invalid IMO" });
     const hours = parseInt(req.query.hours) || 24;
     const raw   = await getVesselHistory(imo, hours);
-    const data  = raw.map(v => ({
+
+    // Normalise raw AIS points
+    const aisPoints = raw.map(v => ({
       imo_number:        bqNum(v.imo_number),
-      latitude_degrees:  bqNum(v.latitude_degrees),   // already converted in SQL
-      longitude_degrees: bqNum(v.longitude_degrees),  // already converted in SQL
-      speed:             bqNum(v.speed) ?? 0,
+      latitude_degrees:  bqNum(v.latitude_degrees),
+      longitude_degrees: bqNum(v.longitude_degrees),
+      speed:             bqNum(v.speed)   ?? 0,
       heading:           bqNum(v.heading) ?? 0,
-      course:            bqNum(v.course) ?? 0,
+      course:            bqNum(v.course)  ?? 0,
       effective_timestamp: bqStr(v.effective_timestamp),
-    }));
+    })).filter(p => p.latitude_degrees && p.longitude_degrees);
+
+    // ── AIS + TSS trail densification ──────────────────────────────────────
+    // For gaps >15nm, use AIS-learned+TSS+DWR lanes to inject waypoints.
+    const { distNM }                                = require("../services/maritimeRouter");
+    const { learnLanes, nearestLaneCell, dijkstraLane } = require("../services/aisLaneExtractor");
+    const { TSS_LANES, DEEP_WATER_ROUTES }          = require("../services/tssData");
+    const { bigquery: bq2, BQ_LOCATION: bloc2, T: bqT2 } = require("../services/bigquery");
+
+    const DENSIFY_THRESHOLD_NM = 15;
+    const data = [];
+
+    let laneGraph = null;
+    try { laneGraph = await learnLanes(bq2, bloc2, bqT2); } catch (_) {}
+
+    function tssInterp(a, b) {
+      const allPts = [
+        ...Object.values(TSS_LANES).flatMap(l => l.points.map(([la,lo])=>({lat:la,lng:lo}))),
+        ...DEEP_WATER_ROUTES.flatMap(r => r.points.map(([la,lo])=>({lat:la,lng:lo}))),
+      ];
+      const dT = distNM(a.latitude_degrees, a.longitude_degrees, b.latitude_degrees, b.longitude_degrees);
+      return allPts
+        .filter(p => {
+          const d1 = distNM(a.latitude_degrees, a.longitude_degrees, p.lat, p.lng);
+          const d2 = distNM(b.latitude_degrees, b.longitude_degrees, p.lat, p.lng);
+          return d1+d2 < dT*1.4 && d1>5 && d2>5;
+        })
+        .sort((x,y) => distNM(a.latitude_degrees,a.longitude_degrees,x.lat,x.lng)
+                     - distNM(a.latitude_degrees,a.longitude_degrees,y.lat,y.lng));
+    }
+
+    for (let i = 0; i < aisPoints.length; i++) {
+      data.push(aisPoints[i]);
+      if (i < aisPoints.length - 1) {
+        const a = aisPoints[i], b = aisPoints[i + 1];
+        const gap = distNM(a.latitude_degrees, a.longitude_degrees, b.latitude_degrees, b.longitude_degrees);
+        if (gap > DENSIFY_THRESHOLD_NM) {
+          try {
+            let inner = [];
+            if (laneGraph && laneGraph.laneCells.size > 20) {
+              const sk = nearestLaneCell(a.latitude_degrees, a.longitude_degrees, laneGraph.laneCells, a.heading);
+              const ek = nearestLaneCell(b.latitude_degrees, b.longitude_degrees, laneGraph.laneCells);
+              if (sk && ek) {
+                const path = dijkstraLane(laneGraph.graph, laneGraph.laneCells, sk, ek);
+                if (path && path.length > 2)
+                  inner = path.slice(1,-1).map(k => { const c=laneGraph.laneCells.get(k); return{lat:c.lat,lng:c.lng}; });
+              }
+            }
+            if (!inner.length) inner = tssInterp(a, b);
+            const tA = new Date(a.effective_timestamp).getTime();
+            const tB = new Date(b.effective_timestamp).getTime();
+            inner.forEach((wp, idx) => {
+              const frac = (idx+1)/(inner.length+1);
+              data.push({
+                imo_number:          a.imo_number,
+                latitude_degrees:    wp.lat,
+                longitude_degrees:   wp.lng,
+                speed:               a.speed,
+                heading:             a.heading,
+                course:              a.course,
+                effective_timestamp: new Date(tA + frac*(tB-tA)).toISOString(),
+                sea_routed:          true,
+              });
+            });
+          } catch (_) { /* skip on error */ }
+        }
+      }
+    }
+
+    // Sort by timestamp to keep chronological order
+    data.sort((a, b) => new Date(a.effective_timestamp) - new Date(b.effective_timestamp));
+
     res.json({ success:true, count:data.length, hours, data });
   } catch(err) { next(err); }
 });

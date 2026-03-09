@@ -491,7 +491,7 @@ const MapView = forwardRef(function MapView(
     for (let i=0; i<raw.length-1; i+=step) {
       const end=Math.min(i+step+1,raw.length), prog=i/(raw.length-1);
       const r=Math.round(prog*100), g=Math.round(150+prog*105), b=Math.round(200+prog*55);
-      trailObjs.current.push(new window.google.maps.Polyline({path:raw.slice(i,end).map(p=>({lat:p.latitude_degrees,lng:p.longitude_degrees})),geodesic:true,strokeColor:`rgb(${r},${g},${b})`,strokeOpacity:0.25+prog*0.75,strokeWeight:1.5+prog*3.5,map:mapObj.current,zIndex:3}));
+      trailObjs.current.push(new window.google.maps.Polyline({path:raw.slice(i,end).map(p=>({lat:p.latitude_degrees,lng:p.longitude_degrees})),geodesic:true,strokeColor:`rgb(${r},${g},${b})`,strokeOpacity:0.35+prog*0.55,strokeWeight:1+prog*2,map:mapObj.current,zIndex:3}));
     }
 
     if (layers.aiTrajectory && aiCount > 0) {
@@ -526,10 +526,68 @@ const MapView = forwardRef(function MapView(
     const path = wps.map(wp => ({ lat: wp.lat, lng: wp.lng }));
     const dest = wps[wps.length-1], start = wps[0], pred = predictRoute?.prediction;
 
-    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#7c3aed",strokeOpacity:0.18,strokeWeight:14,zIndex:6,map:mapObj.current}));
-    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#a78bfa",strokeOpacity:0.7,strokeWeight:3,zIndex:8,map:mapObj.current}));
-    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#c4b5fd",strokeOpacity:0,strokeWeight:0,zIndex:9,map:mapObj.current,icons:[{icon:{path:"M 0,-1 0,1",strokeOpacity:1,strokeColor:"#e0d4ff",scale:2.5},offset:"0",repeat:"20px"}]}));
-    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:10,map:mapObj.current,icons:["15%","35%","55%","75%","90%"].map(offset=>({icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:3.5,strokeColor:"#a78bfa",strokeWeight:2,fillColor:"#c4b5fd",fillOpacity:0.9,strokeOpacity:1},offset}))}));
+    // ── AIS-Learned Maritime Route Rendering ─────────────────────────────
+    // Color-code segments by lane type: TSS=blue, AIS-lane=cyan, DWR=teal
+    const segmentsByType = [];
+    let curSeg = [], curType = null;
+    for (const wp of wps) {
+      const t = wp.lane_type || wp.type || "waypoint";
+      const segType = t === "TSS" ? "TSS" : t === "DWR" ? "DWR" : "AIS";
+      if (segType !== curType) {
+        if (curSeg.length > 0) { segmentsByType.push({ pts: curSeg, type: curType }); curSeg = [curSeg[curSeg.length-1]]; }
+        curType = segType;
+      }
+      curSeg.push({ lat: wp.lat, lng: wp.lng });
+    }
+    if (curSeg.length > 1) segmentsByType.push({ pts: curSeg, type: curType });
+
+    const typeColors = {
+      TSS:  { outer:"#1d4ed8", inner:"#3b82f6", glow:"#93c5fd" }, // IMO TSS = blue
+      DWR:  { outer:"#0f766e", inner:"#14b8a6", glow:"#99f6e4" }, // deep water = teal
+      AIS:  { outer:"#6d28d9", inner:"#8b5cf6", glow:"#c4b5fd" }, // AIS-learned = purple
+    };
+
+    // Full-path outer glow
+    predRouteObjs.current.push(new window.google.maps.Polyline({
+      path, geodesic:true, strokeColor:"#1e1b4b", strokeOpacity:0.10, strokeWeight:24,
+      zIndex:5, map:mapObj.current
+    }));
+
+    // Per-segment colored lines
+    for (const seg of segmentsByType) {
+      const c = typeColors[seg.type] || typeColors.AIS;
+      // Halo
+      predRouteObjs.current.push(new window.google.maps.Polyline({
+        path:seg.pts, geodesic:true, strokeColor:c.outer, strokeOpacity:0.22, strokeWeight:12,
+        zIndex:6, map:mapObj.current
+      }));
+      // Main line
+      predRouteObjs.current.push(new window.google.maps.Polyline({
+        path:seg.pts, geodesic:true, strokeColor:c.inner, strokeOpacity:0.92, strokeWeight:4,
+        zIndex:8, map:mapObj.current
+      }));
+      // Centreline shimmer
+      predRouteObjs.current.push(new window.google.maps.Polyline({
+        path:seg.pts, geodesic:true, strokeColor:c.glow, strokeOpacity:0.55, strokeWeight:1.5,
+        zIndex:9, map:mapObj.current
+      }));
+    }
+
+    // Animated flow dashes (full path)
+    predRouteObjs.current.push(new window.google.maps.Polyline({
+      path, geodesic:true, strokeOpacity:0, strokeWeight:0, zIndex:10, map:mapObj.current,
+      icons:[{icon:{path:"M 0,-1 0,1",strokeOpacity:0.85,strokeColor:"#e0e7ff",scale:2.2},offset:"0",repeat:"16px"}]
+    }));
+    // Directional arrows
+    predRouteObjs.current.push(new window.google.maps.Polyline({
+      path, geodesic:true, strokeOpacity:0, strokeWeight:0, zIndex:11, map:mapObj.current,
+      icons:["6%","16%","26%","36%","46%","56%","66%","76%","86%","96%"].map(offset=>({
+        icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          scale:2.8, strokeColor:"#312e81", strokeWeight:1,
+          fillColor:"#818cf8", fillOpacity:1, strokeOpacity:1},
+        offset
+      }))
+    }));
 
     wps.slice(1,-1).forEach((wp,i) => {
       const dot=new window.google.maps.Marker({position:{lat:wp.lat,lng:wp.lng},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#7c3aed",fillOpacity:1,strokeColor:"#e0d4ff",strokeWeight:2},title:wp.label||`Waypoint ${i+1}`,zIndex:10});

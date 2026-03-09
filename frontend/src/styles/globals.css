@@ -111,3 +111,17 @@ body::after {
 /* Utilities */
 .mono { font-family: var(--font-mono); }
 .orb  { font-family: var(--font-display); }
+/* ── Prediction lane type legend ──────────────────────────── */
+.pred-lane-legend {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; margin: 4px 0 6px;
+  background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 6px; font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.pred-lane-title { color: #94a3b8; letter-spacing:.08em; margin-right:4px; }
+.pred-lane-tag { font-weight: 700; letter-spacing:.05em; }
+.pred-lane-tss { color: #60a5fa; }   /* IMO TSS = blue */
+.pred-lane-ais { color: #a78bfa; }   /* AIS-learned = purple */
+.pred-lane-dwr { color: #2dd4bf; }   /* Deep water = teal */
