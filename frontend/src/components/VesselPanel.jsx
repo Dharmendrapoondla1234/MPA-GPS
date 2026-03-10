@@ -1,215 +1,329 @@
-// src/components/VesselPanel.jsx — Redesigned v3: cleaner, mobile-first
-import React, { useMemo, useState, useRef, useEffect, useCallback } from "react";
-import {   getFlagEmoji } from "../utils/vesselUtils";
-import "./VesselPanel.css";
+// src/components/WeatherPanel.jsx — MPA Live Weather Overlay v1
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import "./WeatherPanel.css";
 
-function speedLabel(s) {
-  if (s <= 0.3) return { label: "STOP", color: "#90a4ae" };
-  if (s < 5)    return { label: "SLOW", color: "#26de81" };
-  if (s < 12)   return { label: "MED",  color: "#fd9644" };
-  return             { label: "FAST", color: "#fc5c65" };
+const BASE_URL = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.com/api";
+const REFRESH_MS = 3 * 60 * 1000; // 3 min — matches backend cache
+
+// ── Wind speed to colour (Beaufort-based) ──────────────────────
+function windColor(ms) {
+  if (ms < 3.4)  return "#00e5ff";   // calm/light  — cyan
+  if (ms < 8.0)  return "#00ff9d";   // gentle/mod  — green
+  if (ms < 13.9) return "#ffcc00";   // fresh/strong — amber
+  if (ms < 20.8) return "#ff8800";   // gale        — orange
+  return "#ff2244";                   // storm+      — red
+}
+function beaufortBg(scale) {
+  if (scale <= 2) return "rgba(0,229,255,0.10)";
+  if (scale <= 4) return "rgba(0,255,157,0.10)";
+  if (scale <= 6) return "rgba(255,204,0,0.10)";
+  if (scale <= 8) return "rgba(255,136,0,0.10)";
+  return "rgba(255,34,68,0.14)";
+}
+function windArrow(deg) {
+  if (deg == null) return "–";
+  // Unicode arrow: rotate with CSS or just use cardinal
+  const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return dirs[Math.round(deg / 22.5) % 16];
 }
 
-export default function VesselPanel({ vessels, selectedId, onSelect, loading, stats, onMinimize, panelOpen = true }) {
-  const [sort,   setSort]   = useState("speed_desc");
-  const [search, setSearch] = useState("");
+// ── Forecast code → background gradient ──────────────────────
+function forecastGrad(code) {
+  const c = (code || "").toUpperCase();
+  if (c.includes("TL") || c.includes("TH")) return "linear-gradient(135deg,#1a0a2e,#2c1a00)";
+  if (c.includes("HR") || c.includes("SH")) return "linear-gradient(135deg,#031828,#002838)";
+  if (c.includes("LR") || c.includes("RN")) return "linear-gradient(135deg,#051e28,#041428)";
+  if (c.includes("CL") || c.includes("OC")) return "linear-gradient(135deg,#0d0d1a,#101820)";
+  if (c.includes("PC") || c.includes("FG")) return "linear-gradient(135deg,#071428,#0a1820)";
+  return "linear-gradient(135deg,#071428,#081820)";
+}
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return vessels;
-    const q = search.trim().toLowerCase();
-    const isNum = /^\d+$/.test(search.trim());
-    const out = vessels.filter(v =>
-      (v.vessel_name || "").toLowerCase().includes(q) ||
-      String(v.imo_number  || "").includes(search.trim()) ||
-      String(v.mmsi_number || "").includes(search.trim()) ||
-      (v.flag || "").toLowerCase().includes(q)
-    );
-    if (isNum) out.sort((a, b) => {
-      const ae = String(a.imo_number) === search.trim() || String(a.mmsi_number) === search.trim();
-      const be = String(b.imo_number) === search.trim() || String(b.mmsi_number) === search.trim();
-      return (be ? 1 : 0) - (ae ? 1 : 0);
-    });
-    return out;
-  }, [vessels, search]);
+/* ══════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+══════════════════════════════════════════════════════════════ */
+export default function WeatherPanel({ onStationHover, onStationLeave, expanded: expandedProp, onClose, onDataLoad }) {
+  const [data,      setData]      = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState(null);
+  const [expanded,  setExpanded]  = useState(expandedProp || false);
+  const [tab,       setTab]       = useState("live");   // live | 24h | 4day
+  const [lastUpdate,setLastUpdate]= useState(null);
+  const timerRef = useRef(null);
 
-  const sorted = useMemo(() => {
-    const arr = [...filtered];
-    switch (sort) {
-      case "name":       return arr.sort((a, b) => (a.vessel_name || "").localeCompare(b.vessel_name || ""));
-      case "speed_desc": return arr.sort((a, b) => (parseFloat(b.speed) || 0) - (parseFloat(a.speed) || 0));
-      case "speed_asc":  return arr.sort((a, b) => (parseFloat(a.speed) || 0) - (parseFloat(b.speed) || 0));
-      case "dw_desc":    return arr.sort((a, b) => (parseFloat(b.deadweight) || 0) - (parseFloat(a.deadweight) || 0));
-      default: return arr;
+  // Sync with parent-controlled expanded state
+  useEffect(() => {
+    if (expandedProp !== undefined) setExpanded(expandedProp);
+  }, [expandedProp]);
+
+  const fetchWeather = useCallback(async () => {
+    try {
+      const r = await fetch(`${BASE_URL}/weather`, { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) throw new Error(`Server error (HTTP ${r.status})`);
+      const j = await r.json();
+      if (j?.data) {
+        setData(j.data);
+        onDataLoad?.(j.data);
+        setLastUpdate(new Date());
+        setError(null);
+      } else {
+        throw new Error("No weather data in response");
+      }
+    } catch (e) {
+      if (e.name === "TimeoutError") setError("Connection timed out — retrying…");
+      else if (e.message.includes("Failed to fetch")) setError("Cannot reach weather server");
+      else setError(e.message);
+    } finally {
+      setLoading(false);
     }
-  }, [filtered, sort]);
-
-  // Counts
-  const counts = useMemo(() => {
-    const underway = vessels.filter(v => (parseFloat(v.speed) || 0) > 0.3).length;
-    const stopped  = vessels.filter(v => (parseFloat(v.speed) || 0) <= 0.3).length;
-    const flags    = new Set(vessels.map(v => v.flag).filter(Boolean)).size;
-    return { underway, stopped, flags };
-  }, [vessels]);
-
-  const total = vessels.length || 1;
-  const bands = useMemo(() => ({
-    stopped: vessels.filter(v => (parseFloat(v.speed)||0) <= 0.3).length / total,
-    slow:    vessels.filter(v => { const s=parseFloat(v.speed)||0; return s>0.3&&s<5; }).length / total,
-    med:     vessels.filter(v => { const s=parseFloat(v.speed)||0; return s>=5&&s<12; }).length / total,
-    fast:    vessels.filter(v => (parseFloat(v.speed)||0) >= 12).length / total,
-  }), [vessels, total]);
-
-  return (
-    <div className="vp-root">
-      {/* ── Header ── */}
-      <div className="vp-header">
-        <div className="vp-title-row">
-          <div className="vp-fleet-info">
-            <span className="vp-fleet-num">{loading ? "…" : vessels.length.toLocaleString()}</span>
-            <span className="vp-fleet-lbl">VESSELS LIVE</span>
-          </div>
-          <button className="vp-collapse-btn" onClick={() => onMinimize?.()} title="Hide panel">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="15 18 9 12 15 6"/>
-            </svg>
-          </button>
-        </div>
-
-        {/* Stats chips */}
-        <div className="vp-stats-row">
-          <div className="vp-stat-chip vp-stat-underway">
-            <span className="vp-stat-dot" style={{ background:"#26de81" }}/>
-            <span className="vp-stat-val">{counts.underway}</span>
-            <span className="vp-stat-lbl">UNDERWAY</span>
-          </div>
-          <div className="vp-stat-chip vp-stat-stopped">
-            <span className="vp-stat-dot" style={{ background:"#90a4ae" }}/>
-            <span className="vp-stat-val">{counts.stopped}</span>
-            <span className="vp-stat-lbl">AT REST</span>
-          </div>
-          <div className="vp-stat-chip">
-            <span className="vp-stat-val">{counts.flags}</span>
-            <span className="vp-stat-lbl">FLAGS</span>
-          </div>
-        </div>
-
-        {/* Speed distribution bar */}
-        <div className="vp-speed-bar" title="Speed distribution">
-          {[
-            { w: bands.stopped, c: "#90a4ae" },
-            { w: bands.slow,    c: "#26de81" },
-            { w: bands.med,     c: "#fd9644" },
-            { w: bands.fast,    c: "#fc5c65" },
-          ].map((s, i) => s.w > 0 && (
-            <div key={i} style={{ width: `${s.w*100}%`, background: s.c, height: "100%", borderRadius: "2px", transition: "width 0.8s" }}/>
-          ))}
-        </div>
-
-        {/* Search */}
-        <div className="vp-search">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-          <input
-            className="vp-search-input"
-            placeholder="Search vessel, IMO, flag…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          {search && <button className="vp-search-clear" onClick={() => setSearch("")}>✕</button>}
-        </div>
-
-        {/* Sort */}
-        <div className="vp-sort-row">
-          <select className="vp-sort" value={sort} onChange={e => setSort(e.target.value)}>
-            <option value="speed_desc">Speed ↓</option>
-            <option value="speed_asc">Speed ↑</option>
-            <option value="name">Name A–Z</option>
-            <option value="dw_desc">Deadweight ↓</option>
-          </select>
-          <span className="vp-count-lbl">{filtered.length !== vessels.length ? `${filtered.length} / ` : ""}{vessels.length}</span>
-        </div>
-      </div>
-
-      {/* ── List ── */}
-      {panelOpen && (
-        loading && vessels.length === 0 ? (
-          <div className="vp-skels">
-            {[...Array(6)].map((_, i) => <div key={i} className="vp-skel" style={{ animationDelay: i*0.08+"s" }}/>)}
-          </div>
-        ) : sorted.length === 0 ? (
-          <div className="vp-empty">
-            <span className="vp-empty-icon">⚓</span>
-            <span>{search ? "No matches found" : "No vessels"}</span>
-          </div>
-        ) : (
-          <VirtualList items={sorted} selectedId={selectedId} onSelect={onSelect} />
-        )
-      )}
-    </div>
-  );
-}
-
-// ── Virtual list ─────────────────────────────────────────────────────────────
-const ITEM_H = 56;
-const OVERSCAN = 6;
-
-function VirtualList({ items, selectedId, onSelect }) {
-  const containerRef = useRef(null);
-  const [scrollTop, setScrollTop] = useState(0);
+  }, [onDataLoad]);
 
   useEffect(() => {
-    if (!selectedId || !containerRef.current) return;
-    const idx = items.findIndex(v => v.imo_number === selectedId);
-    if (idx < 0) return;
-    const top = idx * ITEM_H;
-    const bot = top + ITEM_H;
-    const { scrollTop: st, clientHeight } = containerRef.current;
-    if (top < st || bot > st + clientHeight) {
-      containerRef.current.scrollTop = top - clientHeight / 2 + ITEM_H / 2;
-    }
-  }, [selectedId, items]);
+    fetchWeather();
+    timerRef.current = setInterval(fetchWeather, REFRESH_MS);
+    return () => clearInterval(timerRef.current);
+  }, [fetchWeather]);
 
-  const handleScroll = useCallback(e => setScrollTop(e.currentTarget.scrollTop), []);
-  const viewH = 600;
-  const startIdx = Math.max(0, Math.floor(scrollTop / ITEM_H) - OVERSCAN);
-  const endIdx   = Math.min(items.length, Math.ceil((scrollTop + viewH) / ITEM_H) + OVERSCAN);
-  const visible  = items.slice(startIdx, endIdx);
+  /* ── Derived values ──────────────────────────────────────── */
+  const stations   = data?.live?.stations || [];
+  const twoHr      = data?.live?.twoHr    || [];
+  const fourDay    = data?.forecast?.fourDay     || [];
+  const twentyFour = data?.forecast?.twentyFour  || [];
 
+  // Pick "headline" station — highest wind speed (Marina Bay area preferred)
+  const headline = stations.length
+    ? [...stations].sort((a,b) => b.wind_speed_ms - a.wind_speed_ms)[0]
+    : null;
+
+  // Overall Beaufort alert level
+  const maxBeaufort = stations.reduce((m, s) => Math.max(m, s.beaufort?.scale || 0), 0);
+  const hasAlert    = stations.some(s => s.alert);
+  const hasDanger   = stations.some(s => s.alert === "danger");
+
+  // Rainfall: find any station reporting rain
+  const rainingStations = stations.filter(s => s.rainfall_mm != null && s.rainfall_mm > 0);
+
+  /* ── Collapsed: render nothing — strip button handles toggle ── */
+  if (!expanded) return null;
+
+  /* ── Expanded panel ────────────────────────────────────── */
   return (
-    <div ref={containerRef} className="vp-list" onScroll={handleScroll}
-      style={{ overflowY:"auto", height:"100%", contain:"strict" }}>
-      {startIdx > 0 && <div style={{ height: startIdx * ITEM_H }}/>}
-      {visible.map(v => <VesselItem key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect}/>)}
-      {endIdx < items.length && <div style={{ height: (items.length - endIdx) * ITEM_H }}/>}
+    <div className="wp-panel" onClick={e => e.stopPropagation()}>
+
+      {/* HEADER */}
+      <div className="wp-header">
+        <div className="wp-header-left">
+          <span className="wp-icon">🌊</span>
+          <div>
+            <div className="wp-title">LIVE WEATHER</div>
+            <div className="wp-subtitle">
+              {lastUpdate
+                ? `Updated ${lastUpdate.toLocaleTimeString("en-SG",{hour:"2-digit",minute:"2-digit"})}`
+                : "Loading…"}
+            </div>
+          </div>
+        </div>
+        <div className="wp-header-right">
+          <button className="wp-refresh" onClick={fetchWeather} title="Refresh">↻</button>
+          <button className="wp-close"   onClick={() => { setExpanded(false); onClose?.(); }}>✕</button>
+        </div>
+      </div>
+
+      {/* WEATHER ALERT BANNER */}
+      {hasDanger && (
+        <div className="wp-alert wp-alert-danger">
+          ⚠️ STRONG WIND ADVISORY — Beaufort {maxBeaufort}
+        </div>
+      )}
+      {!hasDanger && hasAlert && (
+        <div className="wp-alert wp-alert-warn">
+          💨 ELEVATED WIND — Beaufort {maxBeaufort}
+        </div>
+      )}
+
+      {/* HEADLINE WEATHER CARD */}
+      {headline && !loading && (
+        <div className="wp-hero" style={{ background: beaufortBg(headline.beaufort?.scale) }}>
+          <div className="wp-hero-left">
+            <div className="wp-hero-speed" style={{ color: windColor(headline.wind_speed_ms) }}>
+              {headline.wind_speed_kn}
+              <span className="wp-hero-unit"> kn</span>
+            </div>
+            <div className="wp-hero-ms">{headline.wind_speed_ms.toFixed(1)} m/s</div>
+            <div className="wp-hero-beaufort" style={{ color: windColor(headline.wind_speed_ms) }}>
+              BFT {headline.beaufort?.scale} · {headline.beaufort?.label}
+            </div>
+          </div>
+          <div className="wp-hero-right">
+            <div className="wp-hero-dir">
+              {headline.wind_direction != null
+                ? <><span className="wp-hero-arrow">↑</span> {windArrow(headline.wind_direction)}</>
+                : "–"
+              }
+            </div>
+            {rainingStations.length > 0 && (
+              <div className="wp-hero-rain">
+                🌧️ {rainingStations[0].rainfall_mm?.toFixed(1)} mm
+              </div>
+            )}
+            <div className="wp-hero-station">{headline.station_name}</div>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="wp-loading">
+          <div className="wp-spin" />
+          <span>Fetching live data…</span>
+        </div>
+      )}
+      {error && (
+        <div className="wp-error">⚠️ {error}</div>
+      )}
+
+      {/* TABS */}
+      {!loading && !error && (
+        <>
+          <div className="wp-tabs">
+            {[["live","📡 STATIONS"],["24h","🕐 24HR"],["4day","📅 4-DAY"]].map(([k,l]) => (
+              <button key={k} className={`wp-tab ${tab === k ? "wp-tab-active" : ""}`} onClick={() => setTab(k)}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* ── TAB: LIVE STATIONS ── */}
+          {tab === "live" && (
+            <div className="wp-station-list">
+              {stations.length === 0 && <div className="wp-empty">No live station data</div>}
+              {stations.map(s => (
+                <div
+                  key={s.station_id}
+                  className={`wp-station ${s.alert === "danger" ? "wp-station-danger" : s.alert === "warning" ? "wp-station-warn" : ""}`}
+                  onMouseEnter={() => onStationHover?.(s)}
+                  onMouseLeave={() => onStationLeave?.()}
+                >
+                  <div className="wp-st-left">
+                    <div className="wp-st-name">{s.station_name}</div>
+                    <div className="wp-st-id">{s.station_id}</div>
+                  </div>
+                  <div className="wp-st-right">
+                    <span className="wp-st-speed" style={{ color: windColor(s.wind_speed_ms) }}>
+                      {s.wind_speed_kn} kn
+                    </span>
+                    {s.wind_direction != null && (
+                      <span className="wp-st-dir">{windArrow(s.wind_direction)}</span>
+                    )}
+                    {s.rainfall_mm != null && s.rainfall_mm > 0 && (
+                      <span className="wp-st-rain">🌧️{s.rainfall_mm.toFixed(1)}</span>
+                    )}
+                    {s.alert && (
+                      <span className={`wp-st-alert ${s.alert === "danger" ? "wp-st-alert-d" : "wp-st-alert-w"}`}>
+                        {s.alert === "danger" ? "⚠️" : "〰️"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {twoHr.length > 0 && (
+                <>
+                  <div className="wp-section-label">2-HOUR AREA FORECAST</div>
+                  <div className="wp-twhr-grid">
+                    {twoHr.slice(0, 9).map((a, i) => (
+                      <div key={i} className="wp-twhr-cell" title={a.forecast}>
+                        <span className="wp-twhr-icon">{a.icon}</span>
+                        <span className="wp-twhr-area">{a.area?.split(" ")[0]}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {twoHr[0] && (
+                    <div className="wp-twhr-period">⏱ {twoHr[0].period_text}</div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB: 24HR FORECAST ── */}
+          {tab === "24h" && (
+            <div className="wp-forecast-list">
+              {twentyFour.length === 0 && <div className="wp-empty">No 24hr forecast</div>}
+              {twentyFour.map((p, i) => (
+                <div key={i} className="wp-period-card" style={{ background: forecastGrad(p.code) }}>
+                  <div className="wp-pc-header">
+                    <span className="wp-pc-icon">{p.icon}</span>
+                    <div>
+                      <div className="wp-pc-period">{p.period}</div>
+                      <div className="wp-pc-text">{p.text}</div>
+                    </div>
+                  </div>
+                  <div className="wp-pc-grid">
+                    <div className="wp-pc-cell">
+                      <span className="wp-pc-label">TEMP</span>
+                      <span className="wp-pc-val">{p.temp.low}–{p.temp.high}°C</span>
+                    </div>
+                    <div className="wp-pc-cell">
+                      <span className="wp-pc-label">HUMID</span>
+                      <span className="wp-pc-val">{p.humidity.low}–{p.humidity.high}%</span>
+                    </div>
+                    <div className="wp-pc-cell">
+                      <span className="wp-pc-label">WIND</span>
+                      <span className="wp-pc-val">{p.wind.low}–{p.wind.high} {p.wind.direction}</span>
+                    </div>
+                  </div>
+                  {p.regions && Object.keys(p.regions).length > 0 && (
+                    <div className="wp-pc-regions">
+                      {Object.entries(p.regions).map(([region, rf]) => (
+                        <span key={region} className="wp-pc-region" title={rf.text}>
+                          {rf.icon} {region}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── TAB: 4-DAY FORECAST ── */}
+          {tab === "4day" && (
+            <div className="wp-fourday">
+              {fourDay.length === 0 && <div className="wp-empty">No forecast data</div>}
+              {fourDay.map((d, i) => (
+                <div key={i} className="wp-day-card" style={{ background: forecastGrad(d.code) }}>
+                  <div className="wp-day-top">
+                    <span className="wp-day-icon">{d.icon}</span>
+                    <div className="wp-day-meta">
+                      <div className="wp-day-name">{d.day}</div>
+                      <div className="wp-day-summary">{d.summary}</div>
+                    </div>
+                  </div>
+                  <div className="wp-day-stats">
+                    <div className="wp-day-stat">
+                      <span className="wp-ds-label">🌡️</span>
+                      <span className="wp-ds-val">{d.temp.low}–{d.temp.high}°C</span>
+                    </div>
+                    <div className="wp-day-stat">
+                      <span className="wp-ds-label">💧</span>
+                      <span className="wp-ds-val">{d.humidity.low}–{d.humidity.high}%</span>
+                    </div>
+                    <div className="wp-day-stat">
+                      <span className="wp-ds-label">💨</span>
+                      <span className="wp-ds-val">{d.wind.low}–{d.wind.high} km/h {d.wind.direction}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* FOOTER */}
+      <div className="wp-footer">
+        <span>MPA WEATHER · {stations.length} STATIONS</span>
+        <span className="wp-footer-dot">·</span>
+        <span>NEA DATA</span>
+      </div>
     </div>
   );
 }
-
-const VesselItem = React.memo(function VesselItem({ v, selected, onSelect }) {
-  const speed = parseFloat(v.speed || 0);
-  const spd   = speedLabel(speed);
-  const pct   = Math.min((speed / 25) * 100, 100);
-  return (
-    <div className={"vp-item" + (selected ? " vp-item--sel" : "")} onClick={() => onSelect(v)}>
-      {selected && <div className="vp-sel-bar"/>}
-      <div className="vp-item-main">
-        <span className="vp-item-flag">{getFlagEmoji(v.flag)}</span>
-        <div className="vp-item-text">
-          <div className="vp-item-name">{v.vessel_name || "Unknown Vessel"}</div>
-          <div className="vp-item-meta">
-            <span className="vp-item-imo">{v.imo_number || "—"}</span>
-            {v.vessel_type && <span className="vp-item-type">{v.vessel_type}</span>}
-          </div>
-        </div>
-        <div className="vp-item-spd" style={{ color: spd.color, borderColor: spd.color+"33", background: spd.color+"0d" }}>
-          <span className="vp-item-spd-val">{speed.toFixed(1)}</span>
-          <span className="vp-item-spd-unit">kn</span>
-        </div>
-      </div>
-      <div className="vp-item-bar">
-        <div className="vp-item-fill" style={{ width: pct+"%", background: `linear-gradient(90deg, ${spd.color}66, ${spd.color})` }}/>
-      </div>
-    </div>
-  );
-});

@@ -22,97 +22,142 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
 .gm-style .gm-style-iw-tc::after { background: rgba(0,229,255,0.15) !important; }
 
 /* ── TOP-RIGHT CONTROL CLUSTER ── */
-.mv-ctrl-cluster {
+/* ── RIGHT-CENTER ICON STRIP ─────────────────────────────────────
+   PORT · WEATHER · SATELLITE · LAYERS · ZOOM
+   Anchored to vertical center of map, right edge
+────────────────────────────────────────────────────────────────── */
+.mv-icon-strip {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 20;
   display: flex;
   flex-direction: column;
   gap: 6px;
   align-items: stretch;
+  /* Prevent strip from overflowing the map vertically */
+  max-height: calc(100% - 120px);
 }
 
-.mv-ctrl-btn {
+.mv-strip-btn {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 8px 13px;
-  background: rgba(4, 10, 22, 0.88);
-  border: 1px solid rgba(0, 229, 255, 0.2);
-  border-radius: 10px;
-  color: #8ab4d0;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  justify-content: center;
+  gap: 3px;
+  width: 68px;
+  padding: 11px 8px 9px;
+  background: rgba(4, 10, 22, 0.90);
+  border: 1px solid rgba(0, 229, 255, 0.15);
+  border-radius: 12px;
+  color: #7aaacc;
   cursor: pointer;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04);
-  transition: all 0.18s ease;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04);
+  transition: all 0.18s cubic-bezier(0.4,0,0.2,1);
   user-select: none;
-  white-space: nowrap;
+  position: relative;
 }
-.mv-ctrl-btn:hover {
-  border-color: rgba(0,229,255,0.5);
+.mv-strip-btn:hover {
+  border-color: rgba(0,229,255,0.45);
   color: #00e5ff;
-  background: rgba(0,10,28,0.92);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.6), 0 0 16px rgba(0,229,255,0.12);
+  background: rgba(0,14,32,0.94);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.65), 0 0 18px rgba(0,229,255,0.1);
   transform: translateX(-2px);
 }
-.mv-ctrl-btn.mv-ctrl-active {
-  border-color: rgba(0,229,255,0.55);
+.mv-strip-btn.mv-strip-active {
+  border-color: rgba(0,229,255,0.5);
   color: #00e5ff;
-  background: rgba(0,229,255,0.08);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 20px rgba(0,229,255,0.15);
+  background: rgba(0,229,255,0.07);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.55), 0 0 22px rgba(0,229,255,0.14);
 }
-.mv-ctrl-txt {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.mv-strip-btn.mv-strip-port.mv-strip-active {
+  border-color: rgba(255,170,0,0.5);
+  color: #ffaa00;
+  background: rgba(255,170,0,0.07);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 20px rgba(255,170,0,0.12);
 }
-.mv-ctrl-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
+.mv-strip-btn.mv-strip-weather.mv-strip-active {
+  border-color: rgba(0,229,255,0.45);
+  color: #7cdcff;
+  background: rgba(0,180,255,0.07);
+}
+.mv-strip-btn.mv-strip-alert {
+  border-color: rgba(255,50,80,0.5) !important;
+  animation: mvStripAlertPulse 2.2s ease-in-out infinite;
+}
+@keyframes mvStripAlertPulse {
+  0%,100% { box-shadow: 0 4px 20px rgba(0,0,0,0.55), 0 0 0 0 rgba(255,50,80,0.3); }
+  50%      { box-shadow: 0 4px 20px rgba(0,0,0,0.55), 0 0 0 6px rgba(255,50,80,0); }
+}
+
+.mv-strip-icon { font-size: 20px; line-height: 1; }
+.mv-strip-lbl {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: inherit;
+  opacity: 0.7;
+}
+.mv-strip-wind {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 800;
+  color: #00ff9d;
+  line-height: 1;
+}
+.mv-strip-ping {
+  position: absolute;
+  top: 7px; right: 7px;
+  width: 7px; height: 7px;
+  background: #ff3355;
+  border-radius: 50%;
+  animation: mvStripAlertPulse 1.8s ease-in-out infinite;
+}
+.mv-strip-dot {
+  position: absolute;
+  top: 7px; right: 7px;
+  width: 6px; height: 6px;
   background: #00e5ff;
   border-radius: 50%;
   animation: mvBlink 1.2s infinite;
-  margin-left: 2px;
 }
 
-/* Zoom group */
-.mv-zoom-group {
+/* Zoom pair at bottom of strip */
+.mv-strip-zoom {
   display: flex;
   gap: 3px;
 }
-.mv-zoom-btn {
+.mv-strip-zoom-btn {
   flex: 1;
-  padding: 8px 0;
-  background: rgba(4, 10, 22, 0.88);
-  border: 1px solid rgba(0, 229, 255, 0.2);
-  border-radius: 8px;
-  color: #8ab4d0;
-  font-size: 16px;
+  padding: 9px 0;
+  background: rgba(4, 10, 22, 0.90);
+  border: 1px solid rgba(0, 229, 255, 0.15);
+  border-radius: 10px;
+  color: #7aaacc;
+  font-size: 18px;
   font-weight: 700;
   cursor: pointer;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   transition: all 0.15s ease;
   line-height: 1;
 }
-.mv-zoom-btn:hover {
-  border-color: rgba(0,229,255,0.5);
+.mv-strip-zoom-btn:hover {
+  border-color: rgba(0,229,255,0.45);
   color: #00e5ff;
-  background: rgba(0,229,255,0.08);
+  background: rgba(0,229,255,0.07);
 }
 
 /* ── LAYER PANEL ── */
 .mv-layer-panel {
   position: absolute;
-  top: 14px;
-  right: 140px;
+  top: 50%;
+  right: 92px;
+  transform: translateY(-50%);
   z-index: 30;
   width: 230px;
   background: rgba(4, 10, 22, 0.97);
