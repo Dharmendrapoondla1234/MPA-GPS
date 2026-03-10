@@ -564,8 +564,8 @@ function PredictTab({ prediction, predLoading, predError, predRouteOn, onLoad, o
                       <div className="pred-alt-meta">{a.distance_nm} NM · {a.eta_label}</div>
                     </div>
                     <div className="pred-alt-right">
-                      <div className={`pred-alt-conf ${confClass(a.confidence)}`}>{a.confidence}%</div>
-                      <div className="pred-alt-eta">{a.heading_alignment}% align</div>
+                      <div className={`pred-alt-conf ${confClass(a.confidence||0)}`}>{a.confidence||0}%</div>
+                      <div className="pred-alt-eta">{a.bearing_deg != null ? `${a.bearing_deg}° bearing` : a.eta_label}</div>
                     </div>
                   </div>
                 ))}

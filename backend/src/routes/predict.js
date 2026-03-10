@@ -155,6 +155,7 @@ router.get("/:imo", async (req, res) => {
         eta_label:   etaH ? fmtETA(etaH) : "Unknown",
         is_declared: isDecl,
         confidence:  Math.min(Math.round(total*16), 97),
+        heading_alignment: Math.round(Math.max(0, 1 - Math.min(Math.abs(brng - avgHdg) > 180 ? 360 - Math.abs(brng - avgHdg) : Math.abs(brng - avgHdg), 90) / 90) * 100),
       };
     }).filter(p => p.distance_nm > 3).sort((a,b) => b.score - a.score);
 

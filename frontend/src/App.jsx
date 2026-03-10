@@ -6,7 +6,7 @@ import VesselDetailPanel from "./components/VesselDetailPanel";
 import MapView from "./components/MapView";
 import SpeedLegend from "./components/SpeedLegend";
 import ErrorBanner from "./components/ErrorBanner";
-import PortActivityPanel, { PortActivityTrigger } from "./components/PortActivityPanel";
+import PortActivityPanel from "./components/PortActivityPanel";
 import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import "./styles/App.css";
@@ -176,6 +176,8 @@ export default function App() {
         user={user}
         onLogout={handleLogout}
         onSearchEnter={handleSearchEnter}
+        portPanelOpen={portPanelOpen}
+        onTogglePortPanel={() => setPortPanelOpen(p => !p)}
       />
 
       <ErrorBanner
@@ -210,16 +212,6 @@ export default function App() {
 
         {/* MAP */}
         <div className="app-map-area">
-
-          {/* PORT ACTIVITY FLOATING TRIGGER — center right */}
-          <div style={{ position:"absolute", top:"50%", right:"12px", transform:"translateY(-50%)", zIndex:100 }}>
-            <PortActivityTrigger
-              onClick={() => setPortPanelOpen(p => !p)}
-              isOpen={portPanelOpen}
-              arrivals={0}
-              departures={0}
-            />
-          </div>
 
           {/* PORT ACTIVITY FLOATING PANEL */}
           <PortActivityPanel
