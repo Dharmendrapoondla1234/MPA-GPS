@@ -230,16 +230,18 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
           <div className="dp-speed-km" style={{color:`${color}cc`}}>{(speed*1.852).toFixed(1)} km/h</div>
           {speedCategory&&<div className="dp-spd-cat" style={{color}}>{speedCategory}</div>}
         </div>
-        <svg width="84" height="84" viewBox="0 0 84 84">
-          <circle cx="42" cy="42" r="34" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="6"/>
-          <circle cx="42" cy="42" r="34" fill="none" stroke={color} strokeWidth="6"
+        <svg width="90" height="90" viewBox="0 0 90 90">
+          <circle cx="45" cy="45" r="36" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="7"/>
+          <circle cx="45" cy="45" r="36" fill="none" stroke={color} strokeWidth="7"
             strokeLinecap="round"
-            strokeDasharray={`${2*Math.PI*34}`}
-            strokeDashoffset={`${2*Math.PI*34*(1-pct/100)}`}
-            transform="rotate(-90 42 42)"
-            style={{filter:`drop-shadow(0 0 5px ${color})`,transition:"stroke-dashoffset 1s ease"}}/>
-          <text x="42" y="46" textAnchor="middle" fill={color} fontSize="10"
-            fontFamily="'JetBrains Mono',monospace" fontWeight="700">{pct.toFixed(0)}%</text>
+            strokeDasharray={`${2*Math.PI*36}`}
+            strokeDashoffset={`${2*Math.PI*36*(1-pct/100)}`}
+            transform="rotate(-90 45 45)"
+            style={{filter:`drop-shadow(0 0 8px ${color})`,transition:"stroke-dashoffset 1s ease"}}/>
+          <text x="45" y="41" textAnchor="middle" fill={color} fontSize="14"
+            fontFamily="'Barlow Condensed','Rajdhani',sans-serif" fontWeight="900">{pct.toFixed(0)}</text>
+          <text x="45" y="52" textAnchor="middle" fill={color} fontSize="7"
+            fontFamily="'JetBrains Mono',monospace" fontWeight="700" opacity="0.7">%MAX</text>
         </svg>
         <div className="dp-metrics">
           <M label="HDG" v={`${heading}°`}/>
