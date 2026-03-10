@@ -329,7 +329,7 @@ const MapView = forwardRef(function MapView(
   const [aiStats,         setAiStats]         = useState(null);
   const [weatherData,     setWeatherData]     = useState(null);
   const [weatherExpanded, setWeatherExpanded] = useState(false);
-  const [showSeaRoutes,   setShowSeaRoutes]   = useState(true);
+  
 
   const _wxStations  = weatherData?.live?.stations || [];
   const _wxHeadline  = _wxStations.length ? [..._wxStations].sort((a,b)=>b.wind_speed_ms-a.wind_speed_ms)[0] : null;
