@@ -28,7 +28,7 @@ export function PortActivityTrigger({ onClick, arrivals, departures, isOpen }) {
   );
 }
 
-export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen, onClose }) {
+export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen, onClose, vessels = [] }) {
   const [tab,        setTab]        = useState("ARRIVALS");
   const [arrivals,   setArrivals]   = useState([]);
   const [departures, setDepartures] = useState([]);
@@ -36,6 +36,13 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
   const [loading,    setLoading]    = useState(true);
   const [lastRefresh,setLastRefresh]= useState(null);
   const panelRef = useRef(null);
+
+  // Look up live position from vessels array, fall back to record fields
+  const selectWithNav = useCallback((record) => {
+    if (!onSelectVessel || !record?.imo_number) return;
+    const live = vessels.find(v => String(v.imo_number) === String(record.imo_number));
+    onSelectVessel(live || record);
+  }, [vessels, onSelectVessel]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,7 +126,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
             {arrivals.map((v, i) => (
               <div key={v.imo_number + "-" + i}
                 className={"pa-item" + (selectedImo === v.imo_number ? " pa-item--sel" : "")}
-                onClick={() => v.imo_number && onSelectVessel?.({ imo_number:v.imo_number, vessel_name:v.vessel_name, flag:v.flag })}>
+                onClick={() => selectWithNav(v)}>
                 <div className="pa-item-row">
                   <span className="pa-item-flag">{getFlagEmoji(bq(v.flag))}</span>
                   <div className="pa-item-info">
@@ -151,10 +158,15 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
           loading && departures.length === 0 ? <PASkeleton /> :
           departures.length === 0 ? <PAEmpty msg="No recent departures" /> :
           <div className="pa-list">
-            {departures.map((v, i) => (
+            {[...departures].sort((a,b) => {
+              // Upcoming first, then sort by departure_time ascending
+              if (a.is_upcoming && !b.is_upcoming) return -1;
+              if (!a.is_upcoming && b.is_upcoming) return 1;
+              return new Date(bq(a.departure_time)||0) - new Date(bq(b.departure_time)||0);
+            }).map((v, i) => (
               <div key={v.imo_number + "-" + i}
                 className={"pa-item" + (selectedImo === v.imo_number ? " pa-item--sel" : "")}
-                onClick={() => v.imo_number && onSelectVessel?.({ imo_number:v.imo_number, vessel_name:v.vessel_name, flag:v.flag })}>
+                onClick={() => selectWithNav(v)}>
                 <div className="pa-item-row">
                   <span className="pa-item-flag">{getFlagEmoji(bq(v.flag))}</span>
                   <div className="pa-item-info">
@@ -162,6 +174,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
                     <div className="pa-item-imo">IMO {v.imo_number || "—"}</div>
                   </div>
                   {srcBadge(bq(v.departure_source))}
+                  {v.is_upcoming && <span className="pa-upcoming-badge">UPCOMING</span>}
                 </div>
                 {bq(v.next_port) && (
                   <div className="pa-route">
