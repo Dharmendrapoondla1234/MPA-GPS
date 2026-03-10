@@ -399,3 +399,39 @@
     top: 60px;
   }
 }
+
+/* ── Upcoming departure badge ────────────────────────────────────── */
+.pa-upcoming-badge {
+  font-family: 'Orbitron', monospace;
+  font-size: 6.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.08em;
+  background: rgba(253,150,68,0.12);
+  border: 1px solid rgba(253,150,68,0.35);
+  color: #fd9644;
+  animation: pa-upcoming-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes pa-upcoming-pulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+.pa-item--upcoming {
+  border-color: rgba(253,150,68,0.18);
+  background: rgba(253,150,68,0.03);
+}
+.pa-item--upcoming:hover {
+  border-color: rgba(253,150,68,0.3);
+  background: rgba(253,150,68,0.06);
+}
+
+/* ── Trigger centered vertically ────────────────────────────────── */
+.pa-trigger-wrap {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  z-index: 100;
+}

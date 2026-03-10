@@ -397,9 +397,12 @@ async function getRecentDepartures(limit = 50) {
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
-        query: `SELECT * FROM ${T.DEPARTURES}
-                WHERE departure_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-                ORDER BY departure_time DESC LIMIT ${lim}`,
+        query: `SELECT *,
+                  CASE WHEN departure_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
+                FROM ${T.DEPARTURES}
+                WHERE departure_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+                   OR departure_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
+                ORDER BY departure_time ASC LIMIT ${lim}`,
         location: BQ_LOCATION,
       });
       return toCache("departures", rows);

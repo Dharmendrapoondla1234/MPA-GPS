@@ -99,10 +99,15 @@ export default function App() {
     setSelectedVessel(vessel);
     setTrailData(null); setPredictRoute(null);
     if (IS_MOBILE()) setPanelOpen(false);
-    // Defer resize until after the CSS slide-in transition finishes (~300ms).
-    // Running it too early causes a double layout + blank tile flash.
-    setTimeout(() => { mapRef.current?.triggerResize?.(); }, 320);
-  }, []);
+    // Pan to vessel position — look up live coords from vessels array
+    // (arrival/departure records only have imo_number, not coordinates)
+    setTimeout(() => {
+      const live = vessels.find(v => v.imo_number === vessel?.imo_number);
+      const target = (live?.latitude_degrees && live?.longitude_degrees) ? live : vessel;
+      if (mapRef.current?.panToVessel) mapRef.current.panToVessel(target);
+      mapRef.current?.triggerResize?.();
+    }, 320);
+  }, [vessels]);
 
   const handleCloseDetail = useCallback(() => {
     setSelectedVessel(null);
@@ -206,8 +211,8 @@ export default function App() {
         {/* MAP */}
         <div className="app-map-area">
 
-          {/* PORT ACTIVITY FLOATING TRIGGER */}
-          <div style={{ position:"absolute", bottom:"90px", right:"12px", zIndex:100 }}>
+          {/* PORT ACTIVITY FLOATING TRIGGER — center right */}
+          <div style={{ position:"absolute", top:"50%", right:"12px", transform:"translateY(-50%)", zIndex:100 }}>
             <PortActivityTrigger
               onClick={() => setPortPanelOpen(p => !p)}
               isOpen={portPanelOpen}
@@ -222,6 +227,7 @@ export default function App() {
             onClose={() => setPortPanelOpen(false)}
             onSelectVessel={handleSelectVessel}
             selectedImo={selectedVessel?.imo_number}
+            vessels={vessels}
           />
 
           <MapView
