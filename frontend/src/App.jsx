@@ -24,34 +24,46 @@ function getFreeRemaining() {
     return Math.max(0, FREE_SECONDS - Math.floor((Date.now() - start) / 1000));
   } catch { return FREE_SECONDS; }
 }
-function markFreeStart() {
+
+function initFreeState() {
+  // If no timer stored yet, this is a fresh visit — start fresh (map open)
   try {
-    if (!localStorage.getItem(STORAGE_KEY)) {
+    const start = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
+    if (!start) {
+      // First visit — set start time NOW so countdown begins immediately
       localStorage.setItem(STORAGE_KEY, String(Date.now()));
+      return { secsLeft: FREE_SECONDS, expired: false };
     }
-  } catch {}
+    const remaining = Math.max(0, FREE_SECONDS - Math.floor((Date.now() - start) / 1000));
+    return { secsLeft: remaining, expired: remaining === 0 };
+  } catch {
+    return { secsLeft: FREE_SECONDS, expired: false };
+  }
 }
 
 export default function App() {
 
   const [user, setUser] = useState(() => getCurrentUser());
 
-  // Free-streaming state (only matters when not logged in)
-  const [freeSecsLeft, setFreeSecsLeft] = useState(() => getFreeRemaining());
-  const [freeExpired,  setFreeExpired]  = useState(() => getFreeRemaining() === 0);
+  // Free-streaming state — initialized synchronously so map is always open on first load
+  const [freeSecsLeft, setFreeSecsLeft] = useState(() => initFreeState().secsLeft);
+  const [freeExpired,  setFreeExpired]  = useState(() => initFreeState().expired);
   const freeTimerRef = useRef(null);
 
   useEffect(() => {
     if (user) return; // logged in — no countdown needed
-    markFreeStart();
-    if (freeExpired) return;
+    if (freeExpired) return; // already expired from a previous session
+    // Tick every second
     freeTimerRef.current = setInterval(() => {
       const rem = getFreeRemaining();
       setFreeSecsLeft(rem);
-      if (rem <= 0) { setFreeExpired(true); clearInterval(freeTimerRef.current); }
+      if (rem <= 0) {
+        setFreeExpired(true);
+        clearInterval(freeTimerRef.current);
+      }
     }, 1000);
     return () => clearInterval(freeTimerRef.current);
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, freeExpired]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [filters, setFilters] = useState({
     search: "", vesselType: "", speedRange: "", speedMin: null, speedMax: null
@@ -104,8 +116,11 @@ export default function App() {
 
   const handleLogout = useCallback(() => {
     logoutUser(); setUser(null);
+    // Reset free timer — user gets a fresh 5 minutes after logging out
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
-    setFreeSecsLeft(FREE_SECONDS); setFreeExpired(false);
+    try { localStorage.setItem(STORAGE_KEY, String(Date.now())); } catch {}
+    setFreeSecsLeft(FREE_SECONDS);
+    setFreeExpired(false);
   }, []);
 
   const handleSearchEnter = useCallback(() => {
@@ -181,11 +196,13 @@ export default function App() {
 
           {/* ── FREE STREAMING COUNTDOWN BADGE ── */}
           {!user && !freeExpired && (
-            <div className="free-timer-badge">
+            <div className="free-timer-badge" data-urgent={freeSecsLeft <= 60 ? "true" : "false"}>
               <span className="free-timer-dot" />
               <div className="free-timer-info">
                 <span className="free-timer-label">FREE STREAMING</span>
-                <span className="free-timer-count">{freeMin}:{freeSec}</span>
+                <span className="free-timer-count" style={freeSecsLeft <= 60 ? {color:"#ff4466"} : {}}>
+                  {freeMin}:{freeSec}
+                </span>
               </div>
               <button className="free-timer-signin" onClick={() => setFreeExpired(true)}>
                 SIGN IN
