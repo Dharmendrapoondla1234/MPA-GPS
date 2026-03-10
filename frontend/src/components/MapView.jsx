@@ -153,7 +153,8 @@ function interpolateTrajectory(points, gapThresholdMinutes = 30) {
    COMPONENT
 ══════════════════════════════════════════════════════════ */
 const MapView = forwardRef(function MapView(
-  { vessels, selectedVessel, onVesselClick, trailData, predictRoute }, ref
+  { vessels, selectedVessel, onVesselClick, trailData, predictRoute,
+    portPanelOpen, onTogglePortPanel }, ref
 ) {
   const mapRef        = useRef(null);
   const mapObj        = useRef(null);
@@ -188,6 +189,14 @@ const MapView = forwardRef(function MapView(
   const [loadingGIS,     setLoadingGIS]     = useState(true);
   const [aiStats,        setAiStats]        = useState(null);
   const [weatherData,    setWeatherData]    = useState(null);
+  const [weatherExpanded, setWeatherExpanded] = useState(false);
+
+  // Derived weather values for the strip button
+  const _wxStations  = weatherData?.live?.stations || [];
+  const _wxHeadline  = _wxStations.length ? [..._wxStations].sort((a,b)=>b.wind_speed_ms-a.wind_speed_ms)[0] : null;
+  const weatherIcon  = weatherData?.forecast?.fourDay?.[0]?.icon || null;
+  const weatherWindKn= _wxHeadline ? _wxHeadline.wind_speed_kn + " kn" : null;
+  const hasDangerWind= _wxStations.some(s => s.alert === "danger");
   const [layers, setLayers] = useState({
     dangers: true, depths: true, regulated: true, tracks: true,
     aids: true, seabed: false, ports: true, tides: false, cultural: true,
@@ -264,7 +273,7 @@ const MapView = forwardRef(function MapView(
       if (mapObj.current) return;
       const map = new window.google.maps.Map(mapRef.current, {
         center: MAP_CENTER,
-        zoom: 4,                         // wide overview
+        zoom: 11,                        // Singapore city view
         mapTypeId: "hybrid",
         styles: [],                      // satellite hybrid from first paint
         zoomControl: false, streetViewControl: false, mapTypeControl: false,
@@ -742,20 +751,58 @@ const MapView = forwardRef(function MapView(
     <div className="mv-root">
       <div ref={mapRef} className="mv-map" />
 
-      {/* TOP-RIGHT CONTROLS */}
-      <div className="mv-ctrl-cluster">
-        <button className="mv-ctrl-btn" onClick={cycleStyle} title="Map style">
-          <span>{STYLE_ICON[mapStyle]}</span>
-          <span className="mv-ctrl-txt">{mapStyle.toUpperCase()}</span>
+      {/* RIGHT-CENTER ICON STRIP — PORT · WEATHER · SATELLITE · LAYERS */}
+      <div className="mv-icon-strip">
+        {/* PORT ACTIVITY — controlled from TopBar, we just show the state indicator */}
+        <button
+          className={"mv-strip-btn" + (portPanelOpen ? " mv-strip-active mv-strip-port" : "")}
+          onClick={onTogglePortPanel}
+          title="Port Activity"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+          <span className="mv-strip-lbl">PORT</span>
         </button>
-        <button className={`mv-ctrl-btn ${showLayerPanel ? "mv-ctrl-active" : ""}`}
-          onClick={e => { e.stopPropagation(); setShowLayerPanel(p => !p); }}>
-          <span>🗺️</span>
-          <span className="mv-ctrl-txt">LAYERS{loadingGIS && <span className="mv-ctrl-dot" />}</span>
+
+        {/* WEATHER */}
+        <button
+          className={"mv-strip-btn" + (weatherExpanded ? " mv-strip-active mv-strip-weather" : "") + (hasDangerWind ? " mv-strip-alert" : "")}
+          onClick={() => setWeatherExpanded(p => !p)}
+          title="Live Weather"
+        >
+          <span className="mv-strip-icon">{weatherIcon || "🌤️"}</span>
+          {weatherWindKn && <span className="mv-strip-wind">{weatherWindKn}</span>}
+          {hasDangerWind && <span className="mv-strip-ping"/>}
+          <span className="mv-strip-lbl">WEATHER</span>
         </button>
-        <div className="mv-zoom-group">
-          <button className="mv-zoom-btn" onClick={() => mapObj.current?.setZoom((mapObj.current.getZoom()||10)+1)}>+</button>
-          <button className="mv-zoom-btn" onClick={() => mapObj.current?.setZoom((mapObj.current.getZoom()||10)-1)}>−</button>
+
+        {/* SATELLITE / MAP STYLE */}
+        <button className={"mv-strip-btn"} onClick={cycleStyle} title="Map style">
+          <span className="mv-strip-icon">{STYLE_ICON[mapStyle]}</span>
+          <span className="mv-strip-lbl">{mapStyle.toUpperCase()}</span>
+        </button>
+
+        {/* LAYERS */}
+        <button
+          className={"mv-strip-btn" + (showLayerPanel ? " mv-strip-active" : "")}
+          onClick={e => { e.stopPropagation(); setShowLayerPanel(p => !p); }}
+          title="Nautical Layers"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+            <polyline points="2 17 12 22 22 17"/>
+            <polyline points="2 12 12 17 22 12"/>
+          </svg>
+          {loadingGIS && <span className="mv-strip-dot"/>}
+          <span className="mv-strip-lbl">LAYERS</span>
+        </button>
+
+        {/* ZOOM */}
+        <div className="mv-strip-zoom">
+          <button className="mv-strip-zoom-btn" onClick={() => mapObj.current?.setZoom((mapObj.current.getZoom()||10)+1)} title="Zoom in">+</button>
+          <button className="mv-strip-zoom-btn" onClick={() => mapObj.current?.setZoom((mapObj.current.getZoom()||10)-1)} title="Zoom out">−</button>
         </div>
       </div>
 
@@ -890,8 +937,11 @@ const MapView = forwardRef(function MapView(
       {/* COMPASS ROSE DECORATION */}
       <div className="mv-compass" aria-hidden="true">🧭</div>
 
-      {/* WEATHER OVERLAY */}
+      {/* WEATHER PANEL — always mounted so data stays fresh; renders nothing when collapsed */}
       <WeatherPanel
+        expanded={weatherExpanded}
+        onClose={() => setWeatherExpanded(false)}
+        onDataLoad={d => setWeatherData(d)}
         onStationHover={s => {
           if (!mapObj.current || !s?.lat || !s?.lng) return;
           const z = mapObj.current.getZoom() || 10;

@@ -229,6 +229,8 @@ export default function App() {
             onVesselClick={handleSelectVessel}
             trailData={trailData}
             predictRoute={predictRoute}
+            portPanelOpen={portPanelOpen}
+            onTogglePortPanel={() => setPortPanelOpen(p => !p)}
           />
 
           <div className="map-legend-overlay">
