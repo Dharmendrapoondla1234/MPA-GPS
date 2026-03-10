@@ -153,3 +153,76 @@ html, body, #root {
     transform: translateX(0);
   }
 }
+/* ── FREE STREAMING COUNTDOWN BADGE ─────────────────────────── */
+.free-timer-badge {
+  position: absolute;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(4, 10, 22, 0.92);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 40px;
+  padding: 8px 16px 8px 12px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.6), 0 0 20px rgba(0,229,255,0.1);
+  animation: ftSlideUp 0.5s cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes ftSlideUp {
+  from { opacity:0; transform: translateX(-50%) translateY(16px); }
+  to   { opacity:1; transform: translateX(-50%) translateY(0); }
+}
+.free-timer-dot {
+  width: 8px; height: 8px;
+  background: #00e5ff;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: ftPulse 1.5s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(0,229,255,0.8);
+}
+@keyframes ftPulse {
+  0%,100% { transform: scale(1); opacity:1; }
+  50%      { transform: scale(1.5); opacity:0.6; }
+}
+.free-timer-info { display: flex; flex-direction: column; gap: 1px; }
+.free-timer-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7px; font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #3d6a8a;
+  text-transform: uppercase;
+}
+.free-timer-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px; font-weight: 800;
+  color: #00e5ff;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  /* Turns red in final 60 seconds */
+  transition: color 0.5s;
+}
+.free-timer-badge[data-urgent="true"] .free-timer-count { color: #ff4466; }
+.free-timer-badge[data-urgent="true"] { border-color: rgba(255,50,80,0.4); }
+.free-timer-badge[data-urgent="true"] .free-timer-dot { background: #ff4466; box-shadow: 0 0 8px rgba(255,50,80,0.8); }
+.free-timer-signin {
+  background: linear-gradient(135deg, #0097b2, #00e5ff);
+  border: none;
+  border-radius: 20px;
+  color: #030a14;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.18s;
+  white-space: nowrap;
+}
+.free-timer-signin:hover {
+  background: linear-gradient(135deg, #00b4d8, #7cdcff);
+  transform: scale(1.04);
+  box-shadow: 0 4px 14px rgba(0,229,255,0.35);
+}
