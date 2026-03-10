@@ -136,10 +136,14 @@ function normalizeArrival(v) {
     shipping_agent: bqStr(v.shipping_agent ?? v.shippingAgent),
     crew_count:     bqNum(v.crew_count    ?? v.crewCount),
     passenger_count:bqNum(v.passenger_count ?? v.passengerCount),
+    is_upcoming:    v.is_upcoming === true || v.is_upcoming === "true",
   };
 }
 
 function normalizeDeparture(v) {
+  // Recompute is_upcoming at normalize time so it's never stale from cache
+  const depTime = v.departure_time ?? v.departedTime ?? v.departed_time;
+  const isUpcoming = depTime ? new Date(typeof depTime === "object" && "value" in depTime ? depTime.value : depTime) > new Date() : false;
   return {
     imo_number:       bqNum(v.imo_number      ?? v.imoNumber),
     vessel_name:      bqStr(v.vessel_name     ?? v.vesselName),
@@ -152,6 +156,7 @@ function normalizeDeparture(v) {
     shipping_agent:   bqStr(v.shipping_agent  ?? v.shippingAgent),
     crew_count:       bqNum(v.crew_count      ?? v.crewCount),
     passenger_count:  bqNum(v.passenger_count ?? v.passengerCount),
+    is_upcoming:      isUpcoming,
   };
 }
 

@@ -30,9 +30,9 @@ const cache = {
   vessels: { data: null, ts: 0, ttl: 30_000 },  // FIX: 30s
   stats: { data: null, ts: 0, ttl: 180_000 },
   vesselTypes: { data: null, ts: 0, ttl: 900_000 },
-  portActivity: { data: null, ts: 0, ttl: 300_000 },
-  arrivals: { data: null, ts: 0, ttl: 300_000 },
-  departures: { data: null, ts: 0, ttl: 300_000 },
+  portActivity: { data: null, ts: 0, ttl: 120_000 },
+  arrivals: { data: null, ts: 0, ttl: 60_000 },
+  departures: { data: null, ts: 0, ttl: 60_000 },
   dbtExists: { checked: false, value: false },
 };
 function fromCache(k) {
@@ -364,8 +364,11 @@ async function getRecentArrivals(limit = 50) {
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
-        query: `SELECT * FROM ${T.ARRIVALS}
-                WHERE arrival_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
+        query: `SELECT *,
+                  CASE WHEN arrival_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
+                FROM ${T.ARRIVALS}
+                WHERE arrival_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+                   OR arrival_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 3 DAY)
                 ORDER BY arrival_time DESC LIMIT ${lim}`,
         location: BQ_LOCATION,
       });
@@ -401,7 +404,7 @@ async function getRecentDepartures(limit = 50) {
                   CASE WHEN departure_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
                 FROM ${T.DEPARTURES}
                 WHERE departure_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
-                   OR departure_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
+                  AND departure_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
                 ORDER BY departure_time ASC LIMIT ${lim}`,
         location: BQ_LOCATION,
       });
@@ -462,23 +465,26 @@ async function getPortActivity() {
   const legacyPortQuery = `
     SELECT locationTo AS port, 'AIS_CONFIRMED' AS arrival_source,
            COUNT(*) AS arrivals,
-           MIN(arrivedTime) AS first_arrival, MAX(arrivedTime) AS last_arrival
+           MIN(arrivedTime) AS first_arrival, MAX(arrivedTime) AS last_arrival,
+           COUNTIF(arrivedTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)) AS arrivals_24h
     FROM ${T.LEGACY_ARRIVALS}
-    WHERE arrivedTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+    WHERE arrivedTime >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
       AND locationTo IS NOT NULL
-    GROUP BY locationTo ORDER BY arrivals DESC LIMIT 30`;
+    GROUP BY locationTo ORDER BY arrivals_24h DESC, arrivals DESC LIMIT 30`;
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
         query: `
           SELECT location_to AS port, arrival_source,
                  COUNT(*) AS arrivals,
-                 MIN(arrival_time) AS first_arrival, MAX(arrival_time) AS last_arrival
+                 MIN(arrival_time) AS first_arrival,
+                 MAX(arrival_time) AS last_arrival,
+                 COUNTIF(arrival_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)) AS arrivals_24h
           FROM ${T.ARRIVALS}
-          WHERE arrival_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+          WHERE arrival_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY)
             AND location_to IS NOT NULL
           GROUP BY location_to, arrival_source
-          ORDER BY arrivals DESC LIMIT 30`,
+          ORDER BY arrivals_24h DESC, arrivals DESC LIMIT 30`,
         location: BQ_LOCATION,
       });
       return toCache("portActivity", rows);
