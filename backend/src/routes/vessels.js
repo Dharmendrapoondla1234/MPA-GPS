@@ -80,7 +80,7 @@ function normalizeVessel(v) {
     // is_stale: always derive from the recalculated minutesSincePing (corrected timestamp).
     // Do NOT trust dbt's is_stale or position_is_stale — they're computed from the
     // uncorrected SGT-as-UTC timestamp and will be wrong (mark live vessels as stale).
-    is_stale: (minutesSincePing || 0) > 360,
+    is_stale: (minutesSincePing || 0) > 120, // LIVE ONLY: stale after 2h (was 6h)
     speed_category:     bqStr(v.speed_category),
     speed_colour_class: bqStr(v.speed_colour_class),
     // static
