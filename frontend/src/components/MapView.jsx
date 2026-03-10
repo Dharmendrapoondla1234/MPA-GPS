@@ -128,165 +128,7 @@ function interpolateTrajectory(points, gapThresholdMinutes = 30) {
   return result;
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   SINGAPORE STRAIT MAJOR SHIPPING LANES
-   Based on IMO Traffic Separation Schemes (TSS) and real AIS data.
-   Coordinates carefully matched to real Singapore Strait TSS routes.
-───────────────────────────────────────────────────────────────── */
-const SEA_ROUTES = [
-  // === SINGAPORE STRAIT TSS — WESTBOUND MAIN LANE ===
-  {
-    name: "Singapore Strait — Westbound TSS",
-    type: "TSS_WB",
-    color: "#1e7fff",
-    weight: 3,
-    opacity: 0.75,
-    coords: [
-      { lat: 1.205, lng: 104.20 },  // Eastern entry
-      { lat: 1.208, lng: 104.00 },
-      { lat: 1.212, lng: 103.85 },
-      { lat: 1.218, lng: 103.72 },
-      { lat: 1.224, lng: 103.60 },
-      { lat: 1.230, lng: 103.50 },
-      { lat: 1.240, lng: 103.36 },  // Western exit near Horsburgh
-      { lat: 1.252, lng: 103.24 },
-    ]
-  },
-  // === SINGAPORE STRAIT TSS — EASTBOUND MAIN LANE ===
-  {
-    name: "Singapore Strait — Eastbound TSS",
-    type: "TSS_EB",
-    color: "#00ccff",
-    weight: 3,
-    opacity: 0.75,
-    coords: [
-      { lat: 1.252, lng: 103.24 },
-      { lat: 1.236, lng: 103.36 },
-      { lat: 1.225, lng: 103.50 },
-      { lat: 1.218, lng: 103.60 },
-      { lat: 1.212, lng: 103.72 },
-      { lat: 1.205, lng: 103.85 },
-      { lat: 1.198, lng: 104.00 },
-      { lat: 1.193, lng: 104.20 },  // Eastern entry Horsburgh
-    ]
-  },
-  // === DEEP WATER ROUTE — EASTBOUND (S. of TSS) ===
-  {
-    name: "Deep Water Route — Eastbound",
-    type: "DWR",
-    color: "#00e5aa",
-    weight: 2.5,
-    opacity: 0.65,
-    coords: [
-      { lat: 1.148, lng: 103.20 },
-      { lat: 1.155, lng: 103.40 },
-      { lat: 1.160, lng: 103.60 },
-      { lat: 1.162, lng: 103.80 },
-      { lat: 1.163, lng: 104.00 },
-      { lat: 1.162, lng: 104.15 },
-    ]
-  },
-  // === MALACCA STRAIT FEEDER (NW to Singapore) ===
-  {
-    name: "Malacca Strait Approach",
-    type: "FEEDER",
-    color: "#9b5cf6",
-    weight: 2,
-    opacity: 0.55,
-    coords: [
-      { lat: 1.260, lng: 103.24 },
-      { lat: 1.310, lng: 103.10 },
-      { lat: 1.410, lng: 102.85 },
-      { lat: 1.520, lng: 102.60 },
-      { lat: 1.640, lng: 102.30 },
-      { lat: 1.820, lng: 101.90 },
-    ]
-  },
-  // === SOUTH CHINA SEA ROUTE (NE from Singapore) ===
-  {
-    name: "South China Sea Route",
-    type: "FEEDER",
-    color: "#9b5cf6",
-    weight: 2,
-    opacity: 0.55,
-    coords: [
-      { lat: 1.193, lng: 104.20 },
-      { lat: 1.200, lng: 104.50 },
-      { lat: 1.220, lng: 104.80 },
-      { lat: 1.300, lng: 105.20 },
-      { lat: 1.500, lng: 105.80 },
-    ]
-  },
-  // === INDONESIAN WATERS ROUTE (S of Batam) ===
-  {
-    name: "Batam — Indonesian Route",
-    type: "FEEDER",
-    color: "#9b5cf6",
-    weight: 1.5,
-    opacity: 0.45,
-    coords: [
-      { lat: 1.148, lng: 103.95 },
-      { lat: 1.070, lng: 104.10 },
-      { lat: 0.970, lng: 104.25 },
-      { lat: 0.820, lng: 104.50 },
-    ]
-  },
-  // === PORT OF SINGAPORE APPROACH — WESTERN ===
-  {
-    name: "W. Port Approach — Jurong",
-    type: "PORT_APPROACH",
-    color: "#ffaa00",
-    weight: 1.8,
-    opacity: 0.60,
-    coords: [
-      { lat: 1.212, lng: 103.72 },
-      { lat: 1.254, lng: 103.70 },
-      { lat: 1.280, lng: 103.68 },
-      { lat: 1.295, lng: 103.66 },  // Jurong Port
-    ]
-  },
-  // === PORT OF SINGAPORE APPROACH — EASTERN (Keppel/PSA) ===
-  {
-    name: "E. Port Approach — Keppel",
-    type: "PORT_APPROACH",
-    color: "#ffaa00",
-    weight: 1.8,
-    opacity: 0.60,
-    coords: [
-      { lat: 1.212, lng: 103.85 },
-      { lat: 1.242, lng: 103.84 },
-      { lat: 1.262, lng: 103.83 },
-      { lat: 1.270, lng: 103.81 },  // Keppel Harbour
-    ]
-  },
-  // === PRECAUTIONARY AREA — RAFFLES LIGHTHOUSE ===
-  {
-    name: "Raffles Lighthouse Precautionary",
-    type: "PRECAUTIONARY",
-    color: "#ff6600",
-    weight: 1.5,
-    opacity: 0.50,
-    coords: [
-      { lat: 1.240, lng: 103.36 },
-      { lat: 1.235, lng: 103.42 },
-      { lat: 1.224, lng: 103.50 },
-      { lat: 1.218, lng: 103.58 },
-      { lat: 1.215, lng: 103.55 },
-      { lat: 1.222, lng: 103.46 },
-      { lat: 1.228, lng: 103.37 },
-      { lat: 1.240, lng: 103.36 },
-    ]
-  },
-];
 
-const SEA_ROUTE_COLORS = {
-  TSS_WB:          { line: "#1e7fff", glow: "#1e7fff33", label: "TSS Westbound" },
-  TSS_EB:          { line: "#00ccff", glow: "#00ccff33", label: "TSS Eastbound" },
-  DWR:             { line: "#00e5aa", glow: "#00e5aa33", label: "Deep Water Route" },
-  FEEDER:          { line: "#9b5cf6", glow: "#9b5cf633", label: "Feeder Route" },
-  PORT_APPROACH:   { line: "#ffaa00", glow: "#ffaa0033", label: "Port Approach" },
-  PRECAUTIONARY:   { line: "#ff6600", glow: "#ff660033", label: "Precautionary Area" },
-};
 
 /* ══════════════════════════════════════════════════════════════
    COMPONENT
@@ -309,7 +151,7 @@ const MapView = forwardRef(function MapView(
   const aiObjs         = useRef([]);
   const predRouteObjs  = useRef([]);
   const weatherObjs    = useRef([]);
-  const seaRouteObjs   = useRef([]);   // ← sea route polylines
+  const nauticalTileRef = useRef(null); // ← OpenSeaMap nautical tile overlay
   const mapZoomRef     = useRef(11);
   const hasFitBounds   = useRef(false);
   const hoverCache     = useRef({});
@@ -329,7 +171,7 @@ const MapView = forwardRef(function MapView(
   const [aiStats,         setAiStats]         = useState(null);
   const [weatherData,     setWeatherData]     = useState(null);
   const [weatherExpanded, setWeatherExpanded] = useState(false);
-  
+
 
   const _wxStations  = weatherData?.live?.stations || [];
   const _wxHeadline  = _wxStations.length ? [..._wxStations].sort((a,b)=>b.wind_speed_ms-a.wind_speed_ms)[0] : null;
@@ -341,7 +183,8 @@ const MapView = forwardRef(function MapView(
     dangers: true, depths: true, regulated: true, tracks: true,
     aids: true, seabed: false, ports: true, tides: false, cultural: true,
     vesselProximity: false, aiTrajectory: true, weatherStations: true,
-    seaRoutes: true,
+    nauticalChart: true,   // OpenSeaMap tile overlay
+
   });
 
   useImperativeHandle(ref, () => ({
@@ -475,77 +318,44 @@ const MapView = forwardRef(function MapView(
     });
   }, []);
 
-  /* ── Sea Route Lanes ────────────────────────────────────────
-     Draw Singapore Strait shipping lanes as styled polylines.
-     Drawn with glow + main line + direction arrows.
-  ─────────────────────────────────────────────────────────── */
+  /* ── OpenSeaMap Nautical Chart Tile Overlay ─────────────────────
+     Uses the free OpenSeaMap tile server which renders real nautical
+     chart data: TSS zones, traffic separation lanes, depth contours,
+     buoys, wrecks, anchorages, restricted areas — all built-in.
+     Tile URL: https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png
+  ────────────────────────────────────────────────────────────── */
   useEffect(() => {
-    seaRouteObjs.current.forEach(o => { try { o.setMap(null); } catch(_) {} });
-    seaRouteObjs.current = [];
-    if (!mapReady || !mapObj.current || !layers.seaRoutes) return;
-    const map = mapObj.current;
-
-    SEA_ROUTES.forEach(route => {
-      const cfg = SEA_ROUTE_COLORS[route.type] || SEA_ROUTE_COLORS.FEEDER;
-      // Glow / halo
-      const glow = new window.google.maps.Polyline({
-        path: route.coords, geodesic: true,
-        strokeColor: cfg.line,
-        strokeOpacity: 0.12,
-        strokeWeight: route.weight * 5,
-        zIndex: 1,
-        clickable: false,
-        map,
-      });
-      // Main lane line
-      const lane = new window.google.maps.Polyline({
-        path: route.coords, geodesic: true,
-        strokeColor: cfg.line,
-        strokeOpacity: route.opacity,
-        strokeWeight: route.weight,
-        zIndex: 2,
-        map,
-      });
-      // Direction arrows for TSS/DWR
-      if (route.type.startsWith("TSS") || route.type === "DWR") {
-        const arrows = new window.google.maps.Polyline({
-          path: route.coords, geodesic: true,
-          strokeOpacity: 0,
-          strokeWeight: 0,
-          zIndex: 3,
-          map,
-          icons: [{
-            icon: {
-              path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-              scale: 2.5,
-              fillColor: cfg.line,
-              fillOpacity: 0.85,
-              strokeColor: "#ffffff",
-              strokeWeight: 0.5,
-              strokeOpacity: 0.6,
-            },
-            offset: "50%",
-            repeat: "120px",
-          }],
-        });
-        seaRouteObjs.current.push(arrows);
-        // Click on route name
-        lane.addListener("click", () => {
-          infoWin.current.setContent(
-            `<div style="font-family:'JetBrains Mono',monospace;background:#040e1c;border:1px solid ${cfg.line}66;border-radius:10px;padding:12px 16px;color:#fff;min-width:200px">
-              <div style="color:${cfg.line};font-weight:700;font-size:11px">🚢 ${cfg.label.toUpperCase()}</div>
-              <div style="font-size:11px;margin-top:6px;color:#7aaacc">${route.name}</div>
-              <div style="font-size:9px;margin-top:4px;color:#3d6a8a">IMO Traffic Separation Scheme</div>
-            </div>`
-          );
-          const mid = route.coords[Math.floor(route.coords.length / 2)];
-          infoWin.current.setPosition(mid);
-          infoWin.current.open(map);
-        });
-      }
-      seaRouteObjs.current.push(glow, lane);
+    if (!mapReady || !mapObj.current) return;
+    // Remove existing tile overlay first
+    if (nauticalTileRef.current) {
+      nauticalTileRef.current.setMap(null);
+      nauticalTileRef.current = null;
+    }
+    if (!layers.nauticalChart) return;
+    // ImageMapType renders external tile URLs as a transparent overlay on top of the base map
+    const nauticalOverlay = new window.google.maps.ImageMapType({
+      getTileUrl: (coord, zoom) =>
+        `https://tiles.openseamap.org/seamark/${zoom}/${coord.x}/${coord.y}.png`,
+      tileSize: new window.google.maps.Size(256, 256),
+      minZoom: 4,
+      maxZoom: 17,
+      opacity: 0.85,
+      name: "OpenSeaMap",
+      alt:  "Nautical Chart — OpenSeaMap",
     });
-  }, [mapReady, layers.seaRoutes]);
+    mapObj.current.overlayMapTypes.push(nauticalOverlay);
+    nauticalTileRef.current = nauticalOverlay;
+    // Cleanup: remove from overlayMapTypes array on unmount/toggle
+    return () => {
+      if (!mapObj.current) return;
+      const types = mapObj.current.overlayMapTypes;
+      const idx = types.getArray().indexOf(nauticalOverlay);
+      if (idx !== -1) types.removeAt(idx);
+      nauticalTileRef.current = null;
+    };
+  }, [mapReady, layers.nauticalChart]);
+
+
 
   /* ── GIS layers ─────────────────────────────────────────── */
   useEffect(() => {
@@ -984,7 +794,7 @@ const MapView = forwardRef(function MapView(
             <button className="mv-lp-close" onClick={() => setShowLayerPanel(false)}>✕</button>
           </div>
           {[
-            { key:"seaRoutes",       label:"Sea Route Lanes",    icon:"🚢", col:"#1e7fff" },
+            { key:"nauticalChart",   label:"Nautical Chart",     icon:"🗺️", col:"#1e7fff" },
             { key:"dangers",         label:"Dangers & Hazards",  icon:"⛔", col:"#ff2244" },
             { key:"depths",          label:"Depth Contours",     icon:"🌊", col:"#0055aa" },
             { key:"regulated",       label:"Regulated Areas",    icon:"⚠️", col:"#ffcc00" },
@@ -1009,16 +819,8 @@ const MapView = forwardRef(function MapView(
         </div>
       )}
 
-      {/* SEA ROUTE LEGEND CHIP */}
-      {layers.seaRoutes && (
-        <div className="mv-sea-legend">
-          <span className="mv-sea-legend-title">SEA LANES</span>
-          <div className="mv-sl-row"><span style={{background:"#1e7fff"}} />TSS Westbound</div>
-          <div className="mv-sl-row"><span style={{background:"#00ccff"}} />TSS Eastbound</div>
-          <div className="mv-sl-row"><span style={{background:"#00e5aa"}} />Deep Water</div>
-          <div className="mv-sl-row"><span style={{background:"#9b5cf6"}} />Feeder / Approach</div>
-        </div>
-      )}
+
+
 
       {/* ALERT PANEL */}
       {alerts.length > 0 && showAlerts && (
