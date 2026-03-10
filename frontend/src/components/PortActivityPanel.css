@@ -435,3 +435,36 @@
   transform: translateY(-50%);
   z-index: 100;
 }
+/* ── 24h activity badge in ports tab ────────────────────────── */
+.pa-port-counts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pa-port-count-24h {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 800;
+  color: #00ff9d;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.pa-port-24h-label {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgba(0,255,157,0.6);
+}
+.pa-port-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 3px;
+}
+.pa-port-src {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7px;
+  color: rgba(0,229,255,0.4);
+  letter-spacing: 0.1em;
+}

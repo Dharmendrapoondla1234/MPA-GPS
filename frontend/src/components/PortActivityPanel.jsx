@@ -48,7 +48,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
     setLoading(true);
     try {
       const [arr, dep, ports] = await Promise.all([
-        fetchArrivals(60), fetchDepartures(60), fetchPortActivity(),
+        fetchArrivals(100), fetchDepartures(100), fetchPortActivity(),
       ]);
       if (Array.isArray(arr))   setArrivals(arr);
       if (Array.isArray(dep))   setDepartures(dep);
@@ -58,7 +58,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); const t = setInterval(load, 300_000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { load(); const t = setInterval(load, 90_000); return () => clearInterval(t); }, [load]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -198,17 +198,24 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
           portStats.length === 0 ? <PAEmpty msg="No port data" /> :
           <div className="pa-ports-list">
             {portStats.slice(0, 20).map((p, i) => {
-              const count = Number(p.arrivals) || 0;
-              const pct   = Math.round((count / (Number(portStats[0]?.arrivals) || 1)) * 100);
+              const count    = Number(p.arrivals)    || 0;
+              const count24h = Number(p.arrivals_24h) || 0;
+              const pct      = Math.round((count24h > 0 ? count24h : count) / Math.max(Number(portStats[0]?.arrivals_24h || portStats[0]?.arrivals) || 1, 1) * 100);
               return (
                 <div key={i} className="pa-port-item">
                   <div className="pa-port-row">
                     <span className="pa-port-rank">#{i + 1}</span>
                     <span className="pa-port-name">{bq(p.port) || "Unknown"}</span>
-                    <span className="pa-port-count">{count}</span>
+                    <div className="pa-port-counts">
+                      {count24h > 0 && <span className="pa-port-count-24h">{count24h} <span className="pa-port-24h-label">24H</span></span>}
+                      <span className="pa-port-count">{count}</span>
+                    </div>
                   </div>
                   <div className="pa-port-bar"><div className="pa-port-fill" style={{ width: pct + "%" }}/></div>
-                  <div className="pa-port-last">Last: {formatTimestamp(bq(p.last_arrival))}</div>
+                  <div className="pa-port-meta">
+                    <span className="pa-port-last">Last: {formatTimestamp(bq(p.last_arrival))}</span>
+                    <span className="pa-port-src">{bq(p.arrival_source) || "AIS"}</span>
+                  </div>
                 </div>
               );
             })}
