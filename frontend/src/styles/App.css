@@ -205,9 +205,22 @@ html, body, #root {
   /* Turns red in final 60 seconds */
   transition: color 0.5s;
 }
-.free-timer-badge[data-urgent="true"] .free-timer-count { color: #ff4466; }
-.free-timer-badge[data-urgent="true"] { border-color: rgba(255,50,80,0.4); }
-.free-timer-badge[data-urgent="true"] .free-timer-dot { background: #ff4466; box-shadow: 0 0 8px rgba(255,50,80,0.8); }
+.free-timer-badge[data-urgent="true"] .free-timer-count,
+.free-timer-badge.urgent .free-timer-count { color: #ff4466; }
+
+.free-timer-badge[data-urgent="true"],
+.free-timer-badge.urgent {
+  border-color: rgba(255,50,80,0.4);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.6), 0 0 20px rgba(255,50,80,0.15);
+  animation: ftSlideUp 0.5s cubic-bezier(0.4,0,0.2,1) both, ftUrgentPulse 1.4s ease-in-out infinite;
+}
+.free-timer-badge[data-urgent="true"] .free-timer-dot,
+.free-timer-badge.urgent .free-timer-dot { background: #ff4466; box-shadow: 0 0 8px rgba(255,50,80,0.8); }
+
+@keyframes ftUrgentPulse {
+  0%,100% { box-shadow: 0 4px 24px rgba(0,0,0,0.6), 0 0 0 0 rgba(255,50,80,0.3); }
+  50%      { box-shadow: 0 4px 24px rgba(0,0,0,0.6), 0 0 0 8px rgba(255,50,80,0); }
+}
 .free-timer-signin {
   background: linear-gradient(135deg, #0097b2, #00e5ff);
   border: none;

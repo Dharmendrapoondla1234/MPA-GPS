@@ -13,60 +13,94 @@ import "./styles/App.css";
 
 const IS_MOBILE = () => window.innerWidth <= 768;
 
-// ── Free-streaming: 5 minutes (300 s) before auth wall ──────────
+/* ═══════════════════════════════════════════════════════════════
+   FREE STREAMING — 5 minutes of free access before auth wall
+   ─────────────────────────────────────────────────────────────
+   Logic:
+   • On FIRST open: record start time in sessionStorage, show map
+   • Each second: calculate remaining = 300 - (now - start)
+   • At 0: show AuthPage wall
+   • On login: clear session, never show wall again
+   • On logout: reset so user gets another free session
+   • Uses sessionStorage (not localStorage) so each browser tab
+     gets its own fresh 5-minute session
+═══════════════════════════════════════════════════════════════ */
 const FREE_SECONDS = 300;
-const STORAGE_KEY  = "mpa_free_start";
+const FREE_KEY = "mpa_free_start";
 
-function getFreeRemaining() {
+function getFreeSecsRemaining() {
   try {
-    const start = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
-    if (!start) return FREE_SECONDS;
-    return Math.max(0, FREE_SECONDS - Math.floor((Date.now() - start) / 1000));
-  } catch { return FREE_SECONDS; }
-}
-
-function initFreeState() {
-  // If no timer stored yet, this is a fresh visit — start fresh (map open)
-  try {
-    const start = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
-    if (!start) {
-      // First visit — set start time NOW so countdown begins immediately
-      localStorage.setItem(STORAGE_KEY, String(Date.now()));
-      return { secsLeft: FREE_SECONDS, expired: false };
-    }
-    const remaining = Math.max(0, FREE_SECONDS - Math.floor((Date.now() - start) / 1000));
-    return { secsLeft: remaining, expired: remaining === 0 };
+    const raw = sessionStorage.getItem(FREE_KEY);
+    if (!raw) return FREE_SECONDS; // no timer set yet
+    const elapsed = Math.floor((Date.now() - parseInt(raw, 10)) / 1000);
+    return Math.max(0, FREE_SECONDS - elapsed);
   } catch {
-    return { secsLeft: FREE_SECONDS, expired: false };
+    return FREE_SECONDS;
   }
 }
+
+function startFreeTimer() {
+  try {
+    if (!sessionStorage.getItem(FREE_KEY)) {
+      sessionStorage.setItem(FREE_KEY, String(Date.now()));
+    }
+  } catch {}
+}
+
+function resetFreeTimer() {
+  try {
+    sessionStorage.removeItem(FREE_KEY);
+    sessionStorage.setItem(FREE_KEY, String(Date.now()));
+  } catch {}
+}
+
+/* ═══════════════════════════════════════════════════════════════ */
 
 export default function App() {
 
   const [user, setUser] = useState(() => getCurrentUser());
 
-  // Free-streaming state — initialized synchronously so map is always open on first load
-  const [freeSecsLeft, setFreeSecsLeft] = useState(() => initFreeState().secsLeft);
-  const [freeExpired,  setFreeExpired]  = useState(() => initFreeState().expired);
-  const freeTimerRef = useRef(null);
+  // ── Free streaming ──────────────────────────────────────────
+  // Always start with map visible. Timer starts on mount.
+  const [freeSecsLeft, setFreeSecsLeft] = useState(FREE_SECONDS);
+  const [freeExpired,  setFreeExpired]  = useState(false);
+  const freeIntervalRef = useRef(null);
 
+  // Start the free timer on first mount (or when user logs out)
   useEffect(() => {
-    if (user) return; // logged in — no countdown needed
-    if (freeExpired) return; // already expired from a previous session
+    // If already logged in, no timer needed at all
+    if (user) {
+      clearInterval(freeIntervalRef.current);
+      return;
+    }
+
+    // Stamp the start time (no-op if already stamped this session)
+    startFreeTimer();
+
+    // Check immediately in case page was loaded mid-session
+    const initialRem = getFreeSecsRemaining();
+    setFreeSecsLeft(initialRem);
+    if (initialRem <= 0) {
+      setFreeExpired(true);
+      return;
+    }
+
     // Tick every second
-    freeTimerRef.current = setInterval(() => {
-      const rem = getFreeRemaining();
+    freeIntervalRef.current = setInterval(() => {
+      const rem = getFreeSecsRemaining();
       setFreeSecsLeft(rem);
       if (rem <= 0) {
         setFreeExpired(true);
-        clearInterval(freeTimerRef.current);
+        clearInterval(freeIntervalRef.current);
       }
     }, 1000);
-    return () => clearInterval(freeTimerRef.current);
-  }, [user, freeExpired]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => clearInterval(freeIntervalRef.current);
+  }, [user]); // re-runs when user logs in or out
+  // ────────────────────────────────────────────────────────────
 
   const [filters, setFilters] = useState({
-    search: "", vesselType: "", speedRange: "", speedMin: null, speedMax: null
+    search: "", vesselType: "", speedRange: "", speedMin: null, speedMax: null,
   });
   const [selectedVessel, setSelectedVessel] = useState(null);
   const [trailData,       setTrailData]      = useState(null);
@@ -75,8 +109,10 @@ export default function App() {
   const [portPanelOpen,   setPortPanelOpen]  = useState(false);
   const mapRef = useRef(null);
 
-  const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
+  const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } =
+    useVessels(filters);
 
+  // Auto-locate on exact search match
   useEffect(() => {
     if (!filters.search || filters.search.length < 2) return;
     if (vessels.length === 1) {
@@ -86,12 +122,14 @@ export default function App() {
     }
   }, [vessels, filters.search]);
 
+  // Keep selected vessel in sync with live refreshes
   useEffect(() => {
     if (!selectedVessel) return;
     const fresh = vessels.find(v => v.imo_number === selectedVessel.imo_number);
     if (fresh) setSelectedVessel(fresh);
   }, [vessels]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reopen left panel on desktop resize
   useEffect(() => {
     const handler = () => { if (!IS_MOBILE() && !panelOpen) setPanelOpen(true); };
     window.addEventListener("resize", handler);
@@ -115,10 +153,10 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(() => {
-    logoutUser(); setUser(null);
-    // Reset free timer — user gets a fresh 5 minutes after logging out
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
-    try { localStorage.setItem(STORAGE_KEY, String(Date.now())); } catch {}
+    logoutUser();
+    setUser(null);
+    // Give the user another free session after logout
+    resetFreeTimer();
     setFreeSecsLeft(FREE_SECONDS);
     setFreeExpired(false);
   }, []);
@@ -132,23 +170,32 @@ export default function App() {
     }
   }, [vessels]);
 
-  const handleBackdropClick = useCallback(() => { setPanelOpen(false); setSelectedVessel(null); }, []);
-
-  const handleAuth = useCallback((u) => {
-    setUser(u); clearInterval(freeTimerRef.current);
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  const handleBackdropClick = useCallback(() => {
+    setPanelOpen(false); setSelectedVessel(null);
   }, []);
 
-  // Show auth wall when free time expires and user not logged in
-  if (!user && freeExpired) return <AuthPage onAuth={handleAuth} />;
+  // Called when user successfully signs in or registers
+  const handleAuth = useCallback((u) => {
+    setUser(u);
+    clearInterval(freeIntervalRef.current);
+    try { sessionStorage.removeItem(FREE_KEY); } catch {}
+    setFreeExpired(false);
+  }, []);
+
+  /* ── Auth wall: only shown AFTER free time runs out ─────── */
+  if (!user && freeExpired) {
+    return <AuthPage onAuth={handleAuth} />;
+  }
 
   const showLeftBackdrop  = IS_MOBILE() && panelOpen;
   const showRightBackdrop = IS_MOBILE() && !!selectedVessel;
   const freeMin = Math.floor(freeSecsLeft / 60);
   const freeSec = String(freeSecsLeft % 60).padStart(2, "0");
+  const isUrgent = freeSecsLeft <= 60;
 
   return (
     <div className="app-root">
+
       <TopBar
         filters={filters} onFiltersChange={setFilters}
         vesselTypes={vesselTypes} stats={stats}
@@ -158,10 +205,12 @@ export default function App() {
         onSearchEnter={handleSearchEnter}
         portPanelOpen={portPanelOpen} onTogglePortPanel={() => setPortPanelOpen(p => !p)}
       />
+
       <ErrorBanner message={error} onRetry={refresh} />
 
       <div className="app-body">
 
+        {/* LEFT PANEL */}
         <div className={`app-left-panel ${panelOpen ? "open" : "closed"}`}>
           <VesselPanel
             vessels={vessels} selectedId={selectedVessel?.imo_number}
@@ -170,9 +219,13 @@ export default function App() {
           />
         </div>
 
-        {showLeftBackdrop && <div className="app-mobile-backdrop" onClick={handleBackdropClick} />}
+        {showLeftBackdrop && (
+          <div className="app-mobile-backdrop" onClick={handleBackdropClick} />
+        )}
 
+        {/* MAP AREA */}
         <div className="app-map-area">
+
           <PortActivityPanel
             isOpen={portPanelOpen} onClose={() => setPortPanelOpen(false)}
             onSelectVessel={handleSelectVessel} selectedImo={selectedVessel?.imo_number}
@@ -190,37 +243,49 @@ export default function App() {
 
           {loading && (
             <div className="map-loading-overlay">
-              <div className="map-loading-spinner" /><span>FETCHING AIS DATA</span>
+              <div className="map-loading-spinner" />
+              <span>FETCHING AIS DATA</span>
             </div>
           )}
 
-          {/* ── FREE STREAMING COUNTDOWN BADGE ── */}
+          {/* ── FREE STREAMING COUNTDOWN BADGE ─────────────────
+              Shown only when NOT logged in and timer still running.
+              Disappears forever once user signs in.
+          ─────────────────────────────────────────────────────── */}
           {!user && !freeExpired && (
-            <div className="free-timer-badge" data-urgent={freeSecsLeft <= 60 ? "true" : "false"}>
+            <div className={`free-timer-badge${isUrgent ? " urgent" : ""}`}>
               <span className="free-timer-dot" />
               <div className="free-timer-info">
                 <span className="free-timer-label">FREE STREAMING</span>
-                <span className="free-timer-count" style={freeSecsLeft <= 60 ? {color:"#ff4466"} : {}}>
-                  {freeMin}:{freeSec}
-                </span>
+                <span className="free-timer-count">{freeMin}:{freeSec}</span>
               </div>
-              <button className="free-timer-signin" onClick={() => setFreeExpired(true)}>
+              <button
+                className="free-timer-signin"
+                onClick={() => setFreeExpired(true)}
+              >
                 SIGN IN
               </button>
             </div>
           )}
+
         </div>
 
         {showRightBackdrop && (
-          <div className="app-mobile-backdrop" onClick={handleCloseDetail} style={{ zIndex: 45 }} />
+          <div
+            className="app-mobile-backdrop"
+            onClick={handleCloseDetail}
+            style={{ zIndex: 45 }}
+          />
         )}
 
+        {/* RIGHT DETAIL PANEL */}
         <div className={`app-right-panel ${selectedVessel ? "open" : "closed"}`}>
           <VesselDetailPanel
             vessel={selectedVessel} onClose={handleCloseDetail}
             onShowTrail={setTrailData} onShowPredictRoute={setPredictRoute}
           />
         </div>
+
       </div>
     </div>
   );
