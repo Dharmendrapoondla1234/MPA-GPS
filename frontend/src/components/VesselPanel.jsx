@@ -1,255 +1,215 @@
-// src/components/VesselPanel.jsx
+// src/components/VesselPanel.jsx — Redesigned v3: cleaner, mobile-first
 import React, { useMemo, useState, useRef, useEffect, useCallback } from "react";
-import { getVesselStatus, getFlagEmoji, getVesselTypeLabel } from "../utils/vesselUtils";
+import {   getFlagEmoji } from "../utils/vesselUtils";
 import "./VesselPanel.css";
 
+function speedLabel(s) {
+  if (s <= 0.3) return { label: "STOP", color: "#90a4ae" };
+  if (s < 5)    return { label: "SLOW", color: "#26de81" };
+  if (s < 12)   return { label: "MED",  color: "#fd9644" };
+  return             { label: "FAST", color: "#fc5c65" };
+}
+
 export default function VesselPanel({ vessels, selectedId, onSelect, loading, stats, onMinimize, panelOpen = true }) {
-  const [sort,      setSort]      = useState("speed_desc");
-  const [compact,   setCompact]   = useState(false);
-  const [search,    setSearch]    = useState("");
+  const [sort,   setSort]   = useState("speed_desc");
+  const [search, setSearch] = useState("");
 
   const filtered = useMemo(() => {
-    if (!search) return vessels;
-    const q    = search.trim();
-    const qLow = q.toLowerCase();
-    const isNum = /^\d+$/.test(q);
-
-    const matches = vessels.filter(v =>
-      (v.vessel_name||"").toLowerCase().includes(qLow) ||
-      String(v.imo_number||"").includes(q) ||
-      String(v.mmsi_number||"").includes(q) ||
-      (v.flag||"").toLowerCase().includes(qLow) ||
-      (v.call_sign||"").toLowerCase().includes(qLow)
+    if (!search.trim()) return vessels;
+    const q = search.trim().toLowerCase();
+    const isNum = /^\d+$/.test(search.trim());
+    const out = vessels.filter(v =>
+      (v.vessel_name || "").toLowerCase().includes(q) ||
+      String(v.imo_number  || "").includes(search.trim()) ||
+      String(v.mmsi_number || "").includes(search.trim()) ||
+      (v.flag || "").toLowerCase().includes(q)
     );
-
-    // Exact IMO/MMSI matches float to top
-    if (isNum) {
-      matches.sort((a, b) => {
-        const aExact = String(a.imo_number) === q || String(a.mmsi_number) === q;
-        const bExact = String(b.imo_number) === q || String(b.mmsi_number) === q;
-        return (bExact ? 1 : 0) - (aExact ? 1 : 0);
-      });
-    }
-    return matches;
+    if (isNum) out.sort((a, b) => {
+      const ae = String(a.imo_number) === search.trim() || String(a.mmsi_number) === search.trim();
+      const be = String(b.imo_number) === search.trim() || String(b.mmsi_number) === search.trim();
+      return (be ? 1 : 0) - (ae ? 1 : 0);
+    });
+    return out;
   }, [vessels, search]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
     switch (sort) {
-      case "name":       return arr.sort((a,b)=>(a.vessel_name||"").localeCompare(b.vessel_name||""));
-      case "speed_desc": return arr.sort((a,b)=>(parseFloat(b.speed)||0)-(parseFloat(a.speed)||0));
-      case "speed_asc":  return arr.sort((a,b)=>(parseFloat(a.speed)||0)-(parseFloat(b.speed)||0));
-      case "dw_desc":    return arr.sort((a,b)=>(parseFloat(b.deadweight)||0)-(parseFloat(a.deadweight)||0));
-      case "type":       return arr.sort((a,b)=>(a.vessel_type||"").localeCompare(b.vessel_type||""));
+      case "name":       return arr.sort((a, b) => (a.vessel_name || "").localeCompare(b.vessel_name || ""));
+      case "speed_desc": return arr.sort((a, b) => (parseFloat(b.speed) || 0) - (parseFloat(a.speed) || 0));
+      case "speed_asc":  return arr.sort((a, b) => (parseFloat(a.speed) || 0) - (parseFloat(b.speed) || 0));
+      case "dw_desc":    return arr.sort((a, b) => (parseFloat(b.deadweight) || 0) - (parseFloat(a.deadweight) || 0));
       default: return arr;
     }
   }, [filtered, sort]);
 
-  // Speed band counts
-  const bands = useMemo(() => {
-    const stopped = vessels.filter(v=>(parseFloat(v.speed)||0)<=0.3).length;
-    const slow    = vessels.filter(v=>{const s=parseFloat(v.speed)||0;return s>0.3&&s<5;}).length;
-    const medium  = vessels.filter(v=>{const s=parseFloat(v.speed)||0;return s>=5&&s<12;}).length;
-    const fast    = vessels.filter(v=>(parseFloat(v.speed)||0)>=12).length;
-    return { stopped, slow, medium, fast };
+  // Counts
+  const counts = useMemo(() => {
+    const underway = vessels.filter(v => (parseFloat(v.speed) || 0) > 0.3).length;
+    const stopped  = vessels.filter(v => (parseFloat(v.speed) || 0) <= 0.3).length;
+    const flags    = new Set(vessels.map(v => v.flag).filter(Boolean)).size;
+    return { underway, stopped, flags };
   }, [vessels]);
 
   const total = vessels.length || 1;
-
-  // Distinct counts
-  const distinctIMO  = useMemo(()=>new Set(vessels.map(v=>v.imo_number).filter(Boolean)).size, [vessels]);
-  const distinctMMSI = useMemo(()=>new Set(vessels.map(v=>v.mmsi_number).filter(Boolean)).size, [vessels]);
+  const bands = useMemo(() => ({
+    stopped: vessels.filter(v => (parseFloat(v.speed)||0) <= 0.3).length / total,
+    slow:    vessels.filter(v => { const s=parseFloat(v.speed)||0; return s>0.3&&s<5; }).length / total,
+    med:     vessels.filter(v => { const s=parseFloat(v.speed)||0; return s>=5&&s<12; }).length / total,
+    fast:    vessels.filter(v => (parseFloat(v.speed)||0) >= 12).length / total,
+  }), [vessels, total]);
 
   return (
     <div className="vp-root">
+      {/* ── Header ── */}
       <div className="vp-header">
         <div className="vp-title-row">
-          <span className="vp-label">FLEET</span>
-          <span className="vp-count mono">{loading?"…":distinctIMO.toLocaleString()}</span>
-          <div className="vp-view-btns">
-            <button className={`vp-view-btn ${!compact?"active":""}`} onClick={()=>setCompact(false)} title="List">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-                <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-              </svg>
-            </button>
-            <button className={`vp-view-btn ${compact?"active":""}`} onClick={()=>setCompact(true)} title="Compact">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-              </svg>
-            </button>
-            <button className="vp-view-btn vp-minimize-btn" onClick={()=>onMinimize?.()} title={!panelOpen?"Show vessel list":"Hide vessel list"}>
-              <span style={{fontSize:"14px",fontWeight:"700",lineHeight:1,fontFamily:"sans-serif"}}>
-                {!panelOpen ? "›" : "‹"}
-              </span>
-            </button>
+          <div className="vp-fleet-info">
+            <span className="vp-fleet-num">{loading ? "…" : vessels.length.toLocaleString()}</span>
+            <span className="vp-fleet-lbl">VESSELS LIVE</span>
+          </div>
+          <button className="vp-collapse-btn" onClick={() => onMinimize?.()} title="Hide panel">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Stats chips */}
+        <div className="vp-stats-row">
+          <div className="vp-stat-chip vp-stat-underway">
+            <span className="vp-stat-dot" style={{ background:"#26de81" }}/>
+            <span className="vp-stat-val">{counts.underway}</span>
+            <span className="vp-stat-lbl">UNDERWAY</span>
+          </div>
+          <div className="vp-stat-chip vp-stat-stopped">
+            <span className="vp-stat-dot" style={{ background:"#90a4ae" }}/>
+            <span className="vp-stat-val">{counts.stopped}</span>
+            <span className="vp-stat-lbl">AT REST</span>
+          </div>
+          <div className="vp-stat-chip">
+            <span className="vp-stat-val">{counts.flags}</span>
+            <span className="vp-stat-lbl">FLAGS</span>
           </div>
         </div>
 
-        {/* Distinct counts row */}
-        <div className="vp-distinct-row">
-          <span className="vp-dist-chip">IMO: <b>{distinctIMO.toLocaleString()}</b></span>
-          <span className="vp-dist-chip">MMSI: <b>{distinctMMSI.toLocaleString()}</b></span>
-          {stats?.flag_count && <span className="vp-dist-chip">Flags: <b>{Number(stats.flag_count)}</b></span>}
+        {/* Speed distribution bar */}
+        <div className="vp-speed-bar" title="Speed distribution">
+          {[
+            { w: bands.stopped, c: "#90a4ae" },
+            { w: bands.slow,    c: "#26de81" },
+            { w: bands.med,     c: "#fd9644" },
+            { w: bands.fast,    c: "#fc5c65" },
+          ].map((s, i) => s.w > 0 && (
+            <div key={i} style={{ width: `${s.w*100}%`, background: s.c, height: "100%", borderRadius: "2px", transition: "width 0.8s" }}/>
+          ))}
         </div>
 
-        {/* Speed bar */}
-        <div className="vp-dist" title={`Stopped:${bands.stopped} Slow:${bands.slow} Medium:${bands.medium} Fast:${bands.fast}`}>
-          {[{w:bands.stopped/total,c:"#90a4ae"},{w:bands.slow/total,c:"#26de81"},{w:bands.medium/total,c:"#fd9644"},{w:bands.fast/total,c:"#fc5c65"}]
-            .map((s,i)=>s.w>0&&<div key={i} style={{width:`${s.w*100}%`,background:s.c,height:"100%",borderRadius:"2px",transition:"width 0.8s ease"}}/>)}
-        </div>
-
-        {/* Search within panel */}
-        <div className="vp-panel-search">
+        {/* Search */}
+        <div className="vp-search">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
-          <input className="vp-panel-input" placeholder="Filter by name, IMO, MMSI, flag…"
-            value={search} onChange={e=>setSearch(e.target.value)}/>
-          {search && <button className="vp-panel-clear" onClick={()=>setSearch("")}>✕</button>}
+          <input
+            className="vp-search-input"
+            placeholder="Search vessel, IMO, flag…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search && <button className="vp-search-clear" onClick={() => setSearch("")}>✕</button>}
         </div>
 
         {/* Sort */}
         <div className="vp-sort-row">
-          <select className="vp-sort" value={sort} onChange={e=>setSort(e.target.value)}>
+          <select className="vp-sort" value={sort} onChange={e => setSort(e.target.value)}>
             <option value="speed_desc">Speed ↓</option>
             <option value="speed_asc">Speed ↑</option>
             <option value="name">Name A–Z</option>
-            <option value="dw_desc">Dead Weight ↓</option>
-            <option value="type">Type</option>
+            <option value="dw_desc">Deadweight ↓</option>
           </select>
-          <span className="vp-band-legends">
-            {[["#90a4ae","Stop"],["#26de81","Slow"],["#fd9644","Med"],["#fc5c65","Fast"]]
-              .map(([c,l])=>(
-                <span key={l} className="vp-band-badge" style={{color:c,borderColor:`${c}44`,background:`${c}0d`}}>{l}</span>
-              ))}
-          </span>
+          <span className="vp-count-lbl">{filtered.length !== vessels.length ? `${filtered.length} / ` : ""}{vessels.length}</span>
         </div>
       </div>
 
-      {/* Body */}
+      {/* ── List ── */}
       {panelOpen && (
-        loading && vessels.length===0 ? (
-          <div className="vp-loading">
-            <div className="vp-spinner"/>
-            {[...Array(5)].map((_,i)=><div key={i} className="vp-skel" style={{animationDelay:`${i*0.1}s`}}/>)}
+        loading && vessels.length === 0 ? (
+          <div className="vp-skels">
+            {[...Array(6)].map((_, i) => <div key={i} className="vp-skel" style={{ animationDelay: i*0.08+"s" }}/>)}
           </div>
-        ) : sorted.length===0 ? (
+        ) : sorted.length === 0 ? (
           <div className="vp-empty">
-            <div className="vp-empty-icon">⚓</div>
-            <div className="vp-empty-title">{search?"No matches":"No vessels found"}</div>
-            <div className="vp-empty-sub">{search?"Try different search terms":"Adjust filters or refresh"}</div>
+            <span className="vp-empty-icon">⚓</span>
+            <span>{search ? "No matches found" : "No vessels"}</span>
           </div>
         ) : (
-          <VirtualList
-            items={sorted}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            compact={compact}
-          />
+          <VirtualList items={sorted} selectedId={selectedId} onSelect={onSelect} />
         )
       )}
     </div>
   );
 }
 
-// ── VIRTUAL LIST — only renders visible rows ──────────────────────
-// Renders ~20 items at a time regardless of total count.
-// Eliminates the main render bottleneck with 3000+ vessels.
-const ITEM_H_FULL    = 88;   // px — must match .vp-item height in CSS
-const ITEM_H_COMPACT = 32;   // px — must match .vp-compact height in CSS
-const OVERSCAN       = 5;    // extra rows above/below viewport
+// ── Virtual list ─────────────────────────────────────────────────────────────
+const ITEM_H = 56;
+const OVERSCAN = 6;
 
-function VirtualList({ items, selectedId, onSelect, compact }) {
+function VirtualList({ items, selectedId, onSelect }) {
   const containerRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
-  const itemH = compact ? ITEM_H_COMPACT : ITEM_H_FULL;
 
-  // Scroll selected item into view
   useEffect(() => {
     if (!selectedId || !containerRef.current) return;
     const idx = items.findIndex(v => v.imo_number === selectedId);
     if (idx < 0) return;
-    const top = idx * itemH;
-    const bot = top + itemH;
+    const top = idx * ITEM_H;
+    const bot = top + ITEM_H;
     const { scrollTop: st, clientHeight } = containerRef.current;
     if (top < st || bot > st + clientHeight) {
-      containerRef.current.scrollTop = top - clientHeight / 2 + itemH / 2;
+      containerRef.current.scrollTop = top - clientHeight / 2 + ITEM_H / 2;
     }
-  }, [selectedId, items, itemH]);
+  }, [selectedId, items]);
 
   const handleScroll = useCallback(e => setScrollTop(e.currentTarget.scrollTop), []);
-
-  const viewH     = 500; // approximate — actual clamp happens via CSS
-  const startIdx  = Math.max(0, Math.floor(scrollTop / itemH) - OVERSCAN);
-  const endIdx    = Math.min(items.length, Math.ceil((scrollTop + viewH) / itemH) + OVERSCAN);
-  const visible   = items.slice(startIdx, endIdx);
-  const paddingTop    = startIdx * itemH;
-  const paddingBottom = (items.length - endIdx) * itemH;
+  const viewH = 600;
+  const startIdx = Math.max(0, Math.floor(scrollTop / ITEM_H) - OVERSCAN);
+  const endIdx   = Math.min(items.length, Math.ceil((scrollTop + viewH) / ITEM_H) + OVERSCAN);
+  const visible  = items.slice(startIdx, endIdx);
 
   return (
-    <div
-      ref={containerRef}
-      className={`vp-list ${compact ? "compact" : ""} vp-virtual`}
-      onScroll={handleScroll}
-      style={{ overflowY: "auto", height: "100%", contain: "strict" }}
-    >
-      {paddingTop > 0 && <div style={{ height: paddingTop }} />}
-      {visible.map((v) => compact
-        ? <CompactItem key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect} idx={0} />
-        : <FullItem    key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect} idx={0} />
-      )}
-      {paddingBottom > 0 && <div style={{ height: paddingBottom }} />}
+    <div ref={containerRef} className="vp-list" onScroll={handleScroll}
+      style={{ overflowY:"auto", height:"100%", contain:"strict" }}>
+      {startIdx > 0 && <div style={{ height: startIdx * ITEM_H }}/>}
+      {visible.map(v => <VesselItem key={v.imo_number} v={v} selected={v.imo_number === selectedId} onSelect={onSelect}/>)}
+      {endIdx < items.length && <div style={{ height: (items.length - endIdx) * ITEM_H }}/>}
     </div>
   );
 }
 
-
-const FullItem = React.memo(function FullItem({ v, selected, onSelect, idx }) {
-  const st    = getVesselStatus(v.speed);
-  const speed = parseFloat(v.speed||0);
-  const pct   = Math.min((speed/25)*100,100);
-  const flag  = getFlagEmoji(v.flag);
+const VesselItem = React.memo(function VesselItem({ v, selected, onSelect }) {
+  const speed = parseFloat(v.speed || 0);
+  const spd   = speedLabel(speed);
+  const pct   = Math.min((speed / 25) * 100, 100);
   return (
-    <div className={`vp-item ${selected?"selected":""}`} onClick={()=>onSelect(v)} style={{animationDelay:`${Math.min(idx*15,300)}ms`}}>
+    <div className={"vp-item" + (selected ? " vp-item--sel" : "")} onClick={() => onSelect(v)}>
       {selected && <div className="vp-sel-bar"/>}
-      <div className="vpi-top">
-        <span className="vpi-flag">{flag}</span>
-        <div className="vpi-info">
-          <div className="vpi-name">{v.vessel_name||"Unknown Vessel"}</div>
-          <div className="vpi-sub mono">IMO {v.imo_number||"—"} · {v.mmsi_number||"—"}</div>
-          {v.call_sign && <div className="vpi-sub mono" style={{fontSize:8}}>CS: {v.call_sign}</div>}
+      <div className="vp-item-main">
+        <span className="vp-item-flag">{getFlagEmoji(v.flag)}</span>
+        <div className="vp-item-text">
+          <div className="vp-item-name">{v.vessel_name || "Unknown Vessel"}</div>
+          <div className="vp-item-meta">
+            <span className="vp-item-imo">{v.imo_number || "—"}</span>
+            {v.vessel_type && <span className="vp-item-type">{v.vessel_type}</span>}
+          </div>
         </div>
-        <div className="vpi-spd" style={{color:st.color,borderColor:`${st.color}33`,background:`${st.color}0d`}}>
-          {speed.toFixed(1)} kn
+        <div className="vp-item-spd" style={{ color: spd.color, borderColor: spd.color+"33", background: spd.color+"0d" }}>
+          <span className="vp-item-spd-val">{speed.toFixed(1)}</span>
+          <span className="vp-item-spd-unit">kn</span>
         </div>
       </div>
-      <div className="vpi-mid">
-        {v.vessel_type && <span className="vpi-type">{getVesselTypeLabel(v.vessel_type)}</span>}
-        <span className="vpi-status" style={{color:st.color}}>
-          <span className="vpi-dot" style={{background:st.color}}/>{st.label}
-        </span>
+      <div className="vp-item-bar">
+        <div className="vp-item-fill" style={{ width: pct+"%", background: `linear-gradient(90deg, ${spd.color}66, ${spd.color})` }}/>
       </div>
-      <div className="vpi-data-row">
-        {v.deadweight && <span className="vpi-data-chip">⚖ {Number(v.deadweight).toLocaleString()} DWT</span>}
-        {v.flag       && <span className="vpi-data-chip">{flag} {v.flag}</span>}
-      </div>
-      <div className="vpi-bar">
-        <div className="vpi-fill" style={{width:`${pct}%`,background:`linear-gradient(90deg,${st.color}88,${st.color})`}}/>
-      </div>
-    </div>
-  );
-});
-
-const CompactItem = React.memo(function CompactItem({ v, selected, onSelect, idx }) {
-  const st = getVesselStatus(v.speed);
-  return (
-    <div className={`vp-compact ${selected?"selected":""}`} onClick={()=>onSelect(v)} style={{animationDelay:`${Math.min(idx*10,200)}ms`}}>
-      <span className="vpi-flag">{getFlagEmoji(v.flag)}</span>
-      <span className="vp-compact-name">{v.vessel_name||"Unknown"}</span>
-      <span className="vp-compact-imo mono" style={{fontSize:8,color:"#3d6a8a"}}>{v.imo_number||"—"}</span>
-      <span className="vp-compact-spd" style={{color:st.color}}>{parseFloat(v.speed||0).toFixed(1)} kn</span>
-      <span className="vp-compact-dot" style={{background:st.color}}/>
     </div>
   );
 });
