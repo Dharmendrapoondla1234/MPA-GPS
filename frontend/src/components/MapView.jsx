@@ -159,7 +159,7 @@ const MapView = forwardRef(function MapView(
   const hoverOpenImo   = useRef(null);
 
   const [coords,          setCoords]          = useState(null);
-  const [mapStyle,        setMapStyle]        = useState("satellite");
+  const [mapStyle,        setMapStyle]        = useState("sea");    // sea = roadmap with maritime style
   const [mapReady,        setMapReady]        = useState(false);
   const [mapZoom,         setMapZoom]         = useState(11);
   const [gisData,         setGisData]         = useState(null);
@@ -180,11 +180,11 @@ const MapView = forwardRef(function MapView(
   const hasDangerWind= _wxStations.some(s => s.alert === "danger");
 
   const [layers, setLayers] = useState({
-    dangers: true, depths: true, regulated: true, tracks: true,
+    dangers: true, depths: true, regulated: true,
+    tracks: false,        // off by default — GIS track lines duplicate Google's built-in sea routes
     aids: true, seabed: false, ports: true, tides: false, cultural: true,
     vesselProximity: false, aiTrajectory: true, weatherStations: true,
-    nauticalChart: true,   // OpenSeaMap tile overlay
-
+    nauticalChart: false,
   });
 
   useImperativeHandle(ref, () => ({
@@ -259,14 +259,13 @@ const MapView = forwardRef(function MapView(
       const map = new window.google.maps.Map(mapRef.current, {
         center: MAP_CENTER,
         zoom: 11,
-        minZoom: MIN_ZOOM,   // ← prevent over-zoom-out
-        maxZoom: MAX_ZOOM,   // ← prevent over-zoom-in
-        mapTypeId: "hybrid",
-        styles: [],
+        minZoom: MIN_ZOOM,
+        maxZoom: MAX_ZOOM,
+        mapTypeId: "roadmap",  // roadmap shows Google's built-in sea/ferry routes
+        styles: [],            // MUST be empty — any style override hides the sea route layer
         zoomControl: false, streetViewControl: false, mapTypeControl: false,
         fullscreenControl: false, rotateControl: false,
         gestureHandling: "greedy", clickableIcons: false,
-        // Performance: disable 45° imagery and map tilt
         tilt: 0, heading: 0,
       });
       mapObj.current   = map;
@@ -707,11 +706,20 @@ const MapView = forwardRef(function MapView(
   /* ── Map style cycle ────────────────────────────────────── */
   const cycleStyle = useCallback(() => {
     if (!mapObj.current) return;
-    const order = ["satellite", "nautical", "map"];
+    const order = ["sea", "satellite", "dark"];
     const next  = order[(order.indexOf(mapStyle) + 1) % order.length];
-    if (next === "satellite") { mapObj.current.setMapTypeId("hybrid");  mapObj.current.setOptions({ styles: [] }); }
-    else if (next === "nautical") { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({ styles: DARK_NAUTICAL_STYLE }); }
-    else                          { mapObj.current.setMapTypeId("roadmap"); mapObj.current.setOptions({ styles: CLEAN_MAP_STYLE }); }
+    if (next === "sea") {
+      // Plain roadmap, NO style overrides → Google sea/ferry routes visible
+      mapObj.current.setMapTypeId("roadmap");
+      mapObj.current.setOptions({ styles: [] });
+    } else if (next === "satellite") {
+      mapObj.current.setMapTypeId("hybrid");
+      mapObj.current.setOptions({ styles: [] });
+    } else {
+      // Dark nautical (hides sea route lines but looks dramatic)
+      mapObj.current.setMapTypeId("roadmap");
+      mapObj.current.setOptions({ styles: DARK_NAUTICAL_STYLE });
+    }
     setMapStyle(next);
   }, [mapStyle]);
 
@@ -731,7 +739,7 @@ const MapView = forwardRef(function MapView(
   const dangerCount = alerts.filter(a => a.level === "danger").length;
   const warnCount   = alerts.filter(a => a.level === "warning").length;
   const toggleLayer = key => setLayers(prev => ({ ...prev, [key]: !prev[key] }));
-  const STYLE_ICON  = { satellite:"🛰️", nautical:"🌊", map:"🗺️" };
+  const STYLE_ICON  = { sea:"🌊", satellite:"🛰️", dark:"🗺️" };
 
   /* ── JSX ────────────────────────────────────────────────── */
   return (
@@ -762,8 +770,8 @@ const MapView = forwardRef(function MapView(
         </button>
 
         <button className="mv-strip-btn" onClick={cycleStyle} title="Map style">
-          <span className="mv-strip-icon">{STYLE_ICON[mapStyle]}</span>
-          <span className="mv-strip-lbl">{mapStyle.toUpperCase()}</span>
+          <span className="mv-strip-icon">{STYLE_ICON[mapStyle] || "🌊"}</span>
+          <span className="mv-strip-lbl">{mapStyle === "sea" ? "SEA" : mapStyle === "satellite" ? "SAT" : "DARK"}</span>
         </button>
 
         <button
@@ -941,13 +949,10 @@ function dangerInfoContent(f) {
 }
 
 /* ─── map style themes ───────────────────────────────────── */
-const CLEAN_MAP_STYLE = [
-  { elementType:"geometry", stylers:[{ color:"#e8e8e8" }] },
-  { featureType:"water", elementType:"geometry", stylers:[{ color:"#b0c8d8" }] },
-  { featureType:"poi", stylers:[{ visibility:"off" }] },
-  { featureType:"transit", stylers:[{ visibility:"off" }] },
-  { elementType:"labels.icon", stylers:[{ visibility:"off" }] },
-];
+// NOTE: "sea" mode uses styles:[] (no overrides) intentionally.
+// Google Maps only shows its built-in sea/ferry route lines when
+// mapTypeId="roadmap" AND styles is empty or omitted entirely.
+// Any non-empty styles array suppresses the transit/ferry layer.
 
 const DARK_NAUTICAL_STYLE = [
   { elementType:"geometry",              stylers:[{ color:"#0d1a28" }] },
