@@ -41,11 +41,16 @@ function forecastGrad(code) {
 /* ══════════════════════════════════════════════════════════════
    MAIN COMPONENT
 ══════════════════════════════════════════════════════════════ */
-export default function WeatherPanel({ onStationHover, onStationLeave }) {
+export default function WeatherPanel({ onStationHover, onStationLeave, expanded: expandedProp, onExpandedChange }) {
   const [data,      setData]      = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
-  const [expanded,  setExpanded]  = useState(false);
+  const [_expanded,  setExpanded]  = useState(false);
+  const expanded = expandedProp !== undefined ? expandedProp : _expanded;
+  const setExpandedAll = (v) => {
+    setExpanded(v);
+    if (onExpandedChange) onExpandedChange(v);
+  };
   const [tab,       setTab]       = useState("live");   // live | 24h | 4day
   const [lastUpdate,setLastUpdate]= useState(null);
   const timerRef = useRef(null);
@@ -94,10 +99,12 @@ export default function WeatherPanel({ onStationHover, onStationLeave }) {
 
   /* ── Collapsed button ──────────────────────────────────── */
   if (!expanded) {
+    // When controlled externally by icon strip, hide the bubble
+    if (expandedProp !== undefined) return null;
     return (
       <button
         className={`wp-bubble ${hasDanger ? "wp-bubble-danger" : hasAlert ? "wp-bubble-warn" : "wp-bubble-ok"}`}
-        onClick={() => setExpanded(true)}
+        onClick={() => setExpandedAll(true)}
         title="Live Weather"
       >
         <span className="wp-bubble-icon">{fourDay[0]?.icon || "🌤️"}</span>
@@ -131,7 +138,7 @@ export default function WeatherPanel({ onStationHover, onStationLeave }) {
         </div>
         <div className="wp-header-right">
           <button className="wp-refresh" onClick={fetchWeather} title="Refresh">↻</button>
-          <button className="wp-close"   onClick={() => setExpanded(false)}>✕</button>
+          <button className="wp-close"   onClick={() => setExpandedAll(false)}>✕</button>
         </div>
       </div>
 

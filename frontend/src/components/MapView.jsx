@@ -171,6 +171,7 @@ const MapView = forwardRef(function MapView(
   const [loadingGIS,      setLoadingGIS]      = useState(true);
   const [aiStats,         setAiStats]         = useState(null);
   const [weatherData,     setWeatherData]     = useState(null);
+  const [showWeatherPanel, setShowWeatherPanel] = useState(false);
 
 
   const [layers, setLayers] = useState({
@@ -657,8 +658,9 @@ const MapView = forwardRef(function MapView(
     const SEG=Math.min(raw.length-1,50), step=Math.max(1,Math.floor((raw.length-1)/SEG));
     for (let i=0; i<raw.length-1; i+=step) {
       const end=Math.min(i+step+1,raw.length), prog=i/(raw.length-1);
-      const r=Math.round(prog*100), g=Math.round(150+prog*105), b=Math.round(200+prog*55);
-      trailObjs.current.push(new window.google.maps.Polyline({path:raw.slice(i,end).map(p=>({lat:p.latitude_degrees,lng:p.longitude_degrees})),geodesic:true,strokeColor:`rgb(${r},${g},${b})`,strokeOpacity:0.35+prog*0.55,strokeWeight:1+prog*2,map:mapObj.current,zIndex:3}));
+      // Trail: vivid orange (start) → bright yellow-green (end) — high contrast on sea/dark maps
+      const r=Math.round(255), g=Math.round(100+prog*155), b=Math.round(0+prog*20);
+      trailObjs.current.push(new window.google.maps.Polyline({path:raw.slice(i,end).map(p=>({lat:p.latitude_degrees,lng:p.longitude_degrees})),geodesic:true,strokeColor:`rgb(${r},${g},${b})`,strokeOpacity:0.45+prog*0.50,strokeWeight:1.5+prog*2.5,map:mapObj.current,zIndex:3}));
     }
 
     if (layers.aiTrajectory && aiCount > 0) {
@@ -707,32 +709,32 @@ const MapView = forwardRef(function MapView(
     if (curSeg.length > 1) segmentsByType.push({ pts: curSeg, type: curType });
 
     const typeColors = {
-      TSS:  { outer:"#1d4ed8", inner:"#3b82f6", glow:"#93c5fd" },
-      DWR:  { outer:"#0f766e", inner:"#14b8a6", glow:"#99f6e4" },
-      AIS:  { outer:"#6d28d9", inner:"#8b5cf6", glow:"#c4b5fd" },
+      TSS:  { outer:"#c0392b", inner:"#ff4d4d", glow:"#ffaaaa" },   // vivid red
+      DWR:  { outer:"#b8860b", inner:"#ffcc00", glow:"#fff176" },   // vivid amber/gold
+      AIS:  { outer:"#7b0e87", inner:"#e040fb", glow:"#f5a9ff" },   // vivid magenta/purple
     };
 
-    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#1e1b4b",strokeOpacity:0.10,strokeWeight:24,zIndex:5,map:mapObj.current}));
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#1a0020",strokeOpacity:0.15,strokeWeight:24,zIndex:5,map:mapObj.current}));
     for (const seg of segmentsByType) {
       const c = typeColors[seg.type] || typeColors.AIS;
       predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.outer,strokeOpacity:0.22,strokeWeight:12,zIndex:6,map:mapObj.current}));
       predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.inner,strokeOpacity:0.92,strokeWeight:4,zIndex:8,map:mapObj.current}));
       predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.glow,strokeOpacity:0.55,strokeWeight:1.5,zIndex:9,map:mapObj.current}));
     }
-    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:10,map:mapObj.current,icons:[{icon:{path:"M 0,-1 0,1",strokeOpacity:0.85,strokeColor:"#e0e7ff",scale:2.2},offset:"0",repeat:"16px"}]}));
-    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:11,map:mapObj.current,icons:["6%","16%","26%","36%","46%","56%","66%","76%","86%","96%"].map(offset=>({icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:2.8,strokeColor:"#312e81",strokeWeight:1,fillColor:"#818cf8",fillOpacity:1,strokeOpacity:1},offset}))}));
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:10,map:mapObj.current,icons:[{icon:{path:"M 0,-1 0,1",strokeOpacity:0.90,strokeColor:"#ffe0ff",scale:2.2},offset:"0",repeat:"16px"}]}));
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:11,map:mapObj.current,icons:["6%","16%","26%","36%","46%","56%","66%","76%","86%","96%"].map(offset=>({icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:2.8,strokeColor:"#7b0e87",strokeWeight:1,fillColor:"#e040fb",fillOpacity:1,strokeOpacity:1},offset}))}));
 
     wps.slice(1,-1).forEach((wp,i) => {
-      const dot=new window.google.maps.Marker({position:{lat:wp.lat,lng:wp.lng},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#7c3aed",fillOpacity:1,strokeColor:"#e0d4ff",strokeWeight:2},title:wp.label||`Waypoint ${i+1}`,zIndex:10});
+      const dot=new window.google.maps.Marker({position:{lat:wp.lat,lng:wp.lng},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#e040fb",fillOpacity:1,strokeColor:"#ffe0ff",strokeWeight:2},title:wp.label||`Waypoint ${i+1}`,zIndex:10});
       dot.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#12082a,#1e0f40);border:1px solid #7c3aed88;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#a78bfa;font-weight:700;font-size:10px">⚓ WAYPOINT</div><div style="font-size:13px;font-weight:700;color:#ede9fe;margin:4px 0">${wp.label||"Waypoint"}</div>${wp.eta_hours_from_now?`<div style="font-size:9px;color:#c4b5fd">ETA: ~${wp.eta_hours_from_now}h</div>`:""}</div>`);infoWin.current.setPosition({lat:wp.lat,lng:wp.lng});infoWin.current.open(mapObj.current);});
       predRouteObjs.current.push(dot);
     });
     predRouteObjs.current.push(new window.google.maps.Marker({position:{lat:start.lat,lng:start.lng},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:8,fillColor:"#00e5ff",fillOpacity:1,strokeColor:"#fff",strokeWeight:2},title:"Current Position",zIndex:12}));
     predRouteObjs.current.push(new window.google.maps.Circle({center:{lat:start.lat,lng:start.lng},radius:8000,map:mapObj.current,fillColor:"#00e5ff",fillOpacity:0.06,strokeColor:"#00e5ff",strokeWeight:1.5,strokeOpacity:0.4,zIndex:6}));
-    const destMarker=new window.google.maps.Marker({position:{lat:dest.lat,lng:dest.lng},map:mapObj.current,icon:{path:"M -1 -10 L -1 4 M -1 -10 L 8 -6 L -1 -2",strokeColor:"#a78bfa",strokeWeight:2.5,strokeOpacity:1,fillColor:"#7c3aed",fillOpacity:0.8,scale:1.8},title:`🏁 ${dest.label}`,zIndex:15});
+    const destMarker=new window.google.maps.Marker({position:{lat:dest.lat,lng:dest.lng},map:mapObj.current,icon:{path:"M -1 -10 L -1 4 M -1 -10 L 8 -6 L -1 -2",strokeColor:"#f5a9ff",strokeWeight:2.5,strokeOpacity:1,fillColor:"#e040fb",fillOpacity:0.9,scale:1.8},title:`🏁 ${dest.label}`,zIndex:15});
     destMarker.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#1a0a2e,#2d1b4e);border:1px solid #a78bfa88;border-radius:10px;padding:14px 18px;color:#fff;min-width:220px"><div style="color:#a78bfa;font-weight:700;font-size:10px">🎯 PREDICTED DESTINATION</div><div style="font-size:18px;font-weight:700;color:#ede9fe;margin:7px 0 5px">${dest.label}</div>${pred?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px"><div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px"><div style="font-size:8px;color:#a78bfa">ETA</div><div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.eta_label}</div></div><div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px"><div style="font-size:8px;color:#a78bfa">DISTANCE</div><div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.distance_nm} NM</div></div></div>`:""}</div>`);infoWin.current.setPosition({lat:dest.lat,lng:dest.lng});infoWin.current.open(mapObj.current);});
     predRouteObjs.current.push(destMarker);
-    predRouteObjs.current.push(new window.google.maps.Circle({center:{lat:dest.lat,lng:dest.lng},radius:15000,map:mapObj.current,fillColor:"#7c3aed",fillOpacity:0.06,strokeColor:"#a78bfa",strokeWeight:1.5,strokeOpacity:0.45,zIndex:6}));
+    predRouteObjs.current.push(new window.google.maps.Circle({center:{lat:dest.lat,lng:dest.lng},radius:15000,map:mapObj.current,fillColor:"#e040fb",fillOpacity:0.06,strokeColor:"#f5a9ff",strokeWeight:1.5,strokeOpacity:0.45,zIndex:6}));
   }, [predictRoute]);
 
   /* ── Weather station markers ──────────────────────────── */
@@ -843,6 +845,14 @@ const MapView = forwardRef(function MapView(
         <button className="mv-strip-btn" onClick={cycleStyle} title="Map style">
           <span className="mv-strip-icon">{STYLE_ICON[mapStyle] || "🌊"}</span>
           <span className="mv-strip-lbl">{mapStyle === "sea" ? "SEA" : mapStyle === "satellite" ? "SAT" : "DARK"}</span>
+        </button>
+
+        <button
+          className={"mv-strip-btn mv-strip-weather-btn" + (showWeatherPanel ? " mv-strip-active mv-strip-weather" : "")}
+          onClick={e => { e.stopPropagation(); setShowWeatherPanel(p => !p); }} title="Weather"
+        >
+          <span className="mv-strip-icon">🌤️</span>
+          <span className="mv-strip-lbl">WEATHER</span>
         </button>
 
         <button
@@ -998,6 +1008,8 @@ const MapView = forwardRef(function MapView(
       <div className="mv-compass" aria-hidden="true">🧭</div>
 
       <WeatherPanel
+        expanded={showWeatherPanel}
+        onExpandedChange={setShowWeatherPanel}
         onDataLoad={d => setWeatherData(d)}
         onStationHover={s => {
           if (!mapObj.current || !s?.lat || !s?.lng) return;

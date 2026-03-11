@@ -553,6 +553,20 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
   .mv-ai-badge { bottom: 100px; left: 14px; }
   .mv-range-legend { bottom: 14px; left: 14px; }
   .mv-bottom-hud { bottom: 10px; }
+
+  /* Icon strip — more compact on mobile */
+  .mv-icon-strip {
+    right: 8px;
+    top: calc(50% - 60px);
+    gap: 4px;
+  }
+  .mv-strip-btn {
+    width: 54px;
+    padding: 8px 6px 7px;
+  }
+  .mv-strip-icon { font-size: 16px; }
+  .mv-strip-lbl { font-size: 6.5px; }
+  .mv-strip-zoom-btn { padding: 7px 0; font-size: 15px; }
 }
 
 /* ── Predicted Route Info Window ───────────────────────── */
