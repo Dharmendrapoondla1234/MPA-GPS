@@ -163,7 +163,6 @@ const MapView = forwardRef(function MapView(
   const [coords,          setCoords]          = useState(null);
   const [mapStyle,        setMapStyle]        = useState("sea");    // sea = roadmap with maritime style
   const [mapReady,        setMapReady]        = useState(false);
-  const [mapZoom,         setMapZoom]         = useState(11);
   const [gisData,         setGisData]         = useState(null);
   const [alerts,          setAlerts]          = useState([]);
   const [showLayerPanel,  setShowLayerPanel]  = useState(false);
@@ -172,14 +171,7 @@ const MapView = forwardRef(function MapView(
   const [loadingGIS,      setLoadingGIS]      = useState(true);
   const [aiStats,         setAiStats]         = useState(null);
   const [weatherData,     setWeatherData]     = useState(null);
-  const [weatherExpanded, setWeatherExpanded] = useState(false);
 
-
-  const _wxStations  = weatherData?.live?.stations || [];
-  const _wxHeadline  = _wxStations.length ? [..._wxStations].sort((a,b)=>b.wind_speed_ms-a.wind_speed_ms)[0] : null;
-  const weatherIcon  = weatherData?.forecast?.fourDay?.[0]?.icon || null;
-  const weatherWindKn= _wxHeadline ? _wxHeadline.wind_speed_kn + " kn" : null;
-  const hasDangerWind= _wxStations.some(s => s.alert === "danger");
 
   const [layers, setLayers] = useState({
     dangers: true, depths: true, regulated: true,
@@ -240,10 +232,10 @@ const MapView = forwardRef(function MapView(
     }),
   [vessels]);
 
-  // Debounce vessel updates 300ms — prevents marker cascade on rapid state changes
+  // Debounce vessel updates 500ms — prevents marker cascade on rapid state changes
   const [freshVessels, setFreshVessels] = useState(freshVesselsRaw);
   useEffect(() => {
-    const t = setTimeout(() => setFreshVessels(freshVesselsRaw), 300);
+    const t = setTimeout(() => setFreshVessels(freshVesselsRaw), 500);
     return () => clearTimeout(t);
   }, [freshVesselsRaw]);
 
@@ -276,19 +268,21 @@ const MapView = forwardRef(function MapView(
         fullscreenControl: false, rotateControl: false,
         gestureHandling: "greedy", clickableIcons: false,
         tilt: 0, heading: 0,
+        renderingType: "RASTER",   // force raster — WebGL vector can stutter on heavy overlays
+        isFractionalZoomEnabled: false,  // integer zoom only = smoother tile loads
       });
       mapObj.current   = map;
       infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: 340 });
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
 
-      // Throttle mousemove to 10fps
+      // Throttle mousemove to ~7fps — reduces layout work while panning
       let _mvTimer = null;
       map.addListener("mousemove", e => {
         if (_mvTimer) return;
         _mvTimer = setTimeout(() => {
           _mvTimer = null;
           setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) });
-        }, 100);
+        }, 150);
       });
       map.addListener("click", () => {
         infoWin.current.close();
@@ -298,7 +292,6 @@ const MapView = forwardRef(function MapView(
       map.addListener("zoom_changed", () => {
         const z = map.getZoom() ?? 11;
         mapZoomRef.current = z;
-        setMapZoom(z);
       });
       // Enforce zoom limits on bounds_changed too (belt-and-suspenders)
       map.addListener("bounds_changed", () => {
@@ -511,7 +504,7 @@ const MapView = forwardRef(function MapView(
 
     // Add/update markers — process in rAF batches to avoid janky frames
     // Selection highlight is handled separately in the pulse effect (only 2 setIcon calls)
-    const BATCH = 150;
+    const BATCH = 250;
     let idx = 0;
     const processBatch = () => {
       if (!mapObj.current) return;
@@ -576,8 +569,9 @@ const MapView = forwardRef(function MapView(
       if (idx < fresh.length) requestAnimationFrame(processBatch);
     };
     requestAnimationFrame(processBatch);
-  }, [freshVessels, onVesselClick, alertMap, mapReady, mapZoom]);
-  // NOTE: selectedVessel removed from deps — selection is handled in pulse effect only
+  }, [freshVessels, onVesselClick, alertMap, mapReady]);
+  // NOTE: selectedVessel and mapZoom removed from deps — selection handled in pulse effect,
+  // zoom icon scaling uses mapZoomRef.current (live ref, no re-render triggered)
 
   /* ── Pulse ring + selection highlight ──────────────────────
      PERF FIX: Only 2 setIcon calls on click (prev + new selected).
@@ -846,16 +840,6 @@ const MapView = forwardRef(function MapView(
           <span className="mv-strip-lbl">PORT</span>
         </button>
 
-        <button
-          className={"mv-strip-btn" + (weatherExpanded ? " mv-strip-active mv-strip-weather" : "") + (hasDangerWind ? " mv-strip-alert" : "")}
-          onClick={() => setWeatherExpanded(p => !p)} title="Live Weather"
-        >
-          <span className="mv-strip-icon">{weatherIcon || "🌤️"}</span>
-          {weatherWindKn && <span className="mv-strip-wind">{weatherWindKn}</span>}
-          {hasDangerWind && <span className="mv-strip-ping"/>}
-          <span className="mv-strip-lbl">WEATHER</span>
-        </button>
-
         <button className="mv-strip-btn" onClick={cycleStyle} title="Map style">
           <span className="mv-strip-icon">{STYLE_ICON[mapStyle] || "🌊"}</span>
           <span className="mv-strip-lbl">{mapStyle === "sea" ? "SEA" : mapStyle === "satellite" ? "SAT" : "DARK"}</span>
@@ -1014,8 +998,6 @@ const MapView = forwardRef(function MapView(
       <div className="mv-compass" aria-hidden="true">🧭</div>
 
       <WeatherPanel
-        expanded={weatherExpanded}
-        onClose={() => setWeatherExpanded(false)}
         onDataLoad={d => setWeatherData(d)}
         onStationHover={s => {
           if (!mapObj.current || !s?.lat || !s?.lng) return;

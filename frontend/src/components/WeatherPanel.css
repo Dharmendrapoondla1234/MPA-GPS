@@ -3,37 +3,35 @@
 /* ── COLLAPSED BUBBLE ───────────────────────────────────── */
 .wp-bubble {
   position: absolute;
-  bottom: 120px;
-  right: 12px;
+  bottom: 56px;
+  left: 14px;
   z-index: 25;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 2px;
-  padding: 10px 13px;
+  gap: 8px;
+  padding: 8px 14px;
   background: rgba(4, 10, 22, 0.90);
   border: 1px solid rgba(0, 229, 255, 0.22);
-  border-radius: 14px;
+  border-radius: 24px;
   cursor: pointer;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: 0 6px 28px rgba(0,0,0,0.6), 0 0 0 0 rgba(0,229,255,0.2);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
   font-family: 'JetBrains Mono', monospace;
-  transition: all 0.2s ease;
-  position: absolute;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 .wp-bubble:hover {
   border-color: rgba(0,229,255,0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.7), 0 0 20px rgba(0,229,255,0.15);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.7), 0 0 16px rgba(0,229,255,0.12);
 }
 .wp-bubble-danger { border-color: rgba(255,34,68,0.5); animation: wpDangerPulse 2s ease-in-out infinite; }
 .wp-bubble-warn   { border-color: rgba(255,136,0,0.45); }
 .wp-bubble-ok     { border-color: rgba(0,229,255,0.22); }
 
-.wp-bubble-icon  { font-size: 22px; line-height: 1; }
+.wp-bubble-icon  { font-size: 18px; line-height: 1; flex-shrink: 0; }
 .wp-bubble-wind  { font-size: 11px; font-weight: 800; letter-spacing: 0.05em; }
-.wp-bubble-label { font-size: 8px; color: #3d6a8a; letter-spacing: 0.12em; margin-top: 1px; }
+.wp-bubble-label { font-size: 8px; color: #3d6a8a; letter-spacing: 0.12em; }
 .wp-bubble-ping  {
   position: absolute;
   top: 6px; right: 6px;
@@ -47,9 +45,9 @@
 /* ── PANEL ──────────────────────────────────────────────── */
 .wp-panel {
   position: absolute;
-  top: 50%;
-  right: 92px;
-  transform: translateY(-50%);
+  bottom: 56px;
+  left: 14px;
+  transform: none;
   z-index: 25;
   width: 300px;
   max-height: min(520px, calc(100vh - 120px));
@@ -375,5 +373,5 @@
 /* ── MOBILE ─────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .wp-panel  { width: calc(100vw - 28px); bottom: 70px; }
-  .wp-bubble { bottom: 140px; }
+  .wp-bubble { bottom: 100px; left: 14px; }
 }

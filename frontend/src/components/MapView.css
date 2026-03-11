@@ -5,11 +5,17 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
+  contain: layout style;
 }
 .mv-map {
   width: 100%;
   height: 100%;
   display: block;
+  will-change: transform;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 /* ── GOOGLE MAPS OVERRIDES ── */
@@ -53,19 +59,20 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
   border-radius: 12px;
   color: #7aaacc;
   cursor: pointer;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 4px 20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04);
-  transition: all 0.18s cubic-bezier(0.4,0,0.2,1);
+  transition: border-color 0.18s, color 0.18s, background 0.18s;
   user-select: none;
   position: relative;
+  will-change: auto;
+  transform: translateZ(0);
 }
 .mv-strip-btn:hover {
   border-color: rgba(0,229,255,0.45);
   color: #00e5ff;
   background: rgba(0,14,32,0.94);
   box-shadow: 0 4px 24px rgba(0,0,0,0.65), 0 0 18px rgba(0,229,255,0.1);
-  transform: translateX(-2px);
 }
 .mv-strip-btn.mv-strip-active {
   border-color: rgba(0,229,255,0.5);
@@ -481,17 +488,18 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
 /* ── RANGE LEGEND ── */
 .mv-range-legend {
   position: absolute;
-  bottom: 56px;
-  right: 14px;
+  bottom: 14px;
+  left: 14px;
   z-index: 15;
   background: rgba(4, 10, 22, 0.88);
   border: 1px solid rgba(0,180,255,0.15);
   border-radius: 10px;
   padding: 8px 12px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
   font-family: 'JetBrains Mono', monospace;
+  transform: translateZ(0);
 }
 .mv-rl-row {
   display: flex;
@@ -542,8 +550,8 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
   .mv-ctrl-cluster { top: 10px; right: 10px; }
   .mv-ctrl-btn { padding: 7px 10px; font-size: 9px; }
   .mv-bh-coords { display: none; }
-  .mv-ai-badge { bottom: 100px; }
-  .mv-range-legend { bottom: 50px; }
+  .mv-ai-badge { bottom: 100px; left: 14px; }
+  .mv-range-legend { bottom: 14px; left: 14px; }
   .mv-bottom-hud { bottom: 10px; }
 }
 
@@ -610,22 +618,8 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
   50%       { filter: drop-shadow(0 0 18px rgba(0,229,255,0.9)); }
 }
 
-/* ── Map scanline overlay (nautical feel) ── */
-.mv-root::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 229, 255, 0.008) 2px,
-    rgba(0, 229, 255, 0.008) 4px
-  );
-  pointer-events: none;
-  z-index: 1;
-  border-radius: inherit;
-}
+/* ── Map scanline overlay — disabled for perf (causes continuous compositing) ── */
+/* .mv-root::before { ... } */
 
 /* ── Corner accent glows ── */
 .mv-root::after {
