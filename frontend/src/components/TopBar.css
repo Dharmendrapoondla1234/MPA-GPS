@@ -13,7 +13,7 @@
   box-shadow: 0 2px 20px rgba(0,0,0,0.4);
   z-index: 100;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   flex-shrink: 0;
 }
 
@@ -270,11 +270,19 @@
   .tb-stats .tb-stat:nth-child(n+4) { display: none; }
 }
 @media (max-width: 600px) {
-  .topbar { gap: 6px; padding: 0 8px; }
+  .topbar { gap: 5px; padding: 0 8px; height: 48px; min-height: 48px; }
   .tb-logo-sub { display: none; }
+  .tb-logo-text { font-size: 11px; }
   .tb-stats { display: none; }
   .tb-filter-group { display: none; }
-  .tb-search-wrap { max-width: 160px; }
+  .tb-search-wrap { max-width: 150px; min-width: 100px; }
+  .tb-updated { display: none; }
+  .tb-timer { display: none; }
+  .tb-live { font-size: 8px; }
+  .tb-user-menu {
+    right: -8px;
+    min-width: 220px;
+  }
 }
 /* Last updated timestamp */
 .tb-updated {

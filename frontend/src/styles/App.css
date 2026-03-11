@@ -137,6 +137,7 @@ html, body, #root {
   .app-right-panel.open {
     width: 90vw !important;
     min-width: 280px !important;
+    max-width: 360px !important;
     transform: translateX(0);
     transition: transform 0.28s ease;
   }
@@ -150,7 +151,35 @@ html, body, #root {
   }
   .app-detail-panel.open {
     width: 92vw !important;
+    max-width: 380px !important;
     transform: translateX(0);
+  }
+  /* Left panel slides over map on mobile */
+  .app-left-panel {
+    position: absolute !important;
+    left: 0; top: 0; bottom: 0;
+    z-index: 45;
+    width: 88vw !important;
+    max-width: 320px !important;
+    transform: translateX(-100%);
+    transition: transform 0.28s ease;
+    box-shadow: 10px 0 40px rgba(0,0,0,0.7);
+  }
+  .app-left-panel.open {
+    transform: translateX(0);
+  }
+  .app-mobile-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 44;
+    background: rgba(0,0,0,0.45);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  /* Free timer badge repositioned on mobile */
+  .free-timer-badge {
+    bottom: 80px;
+    font-size: 11px;
   }
 }
 /* ── FREE STREAMING COUNTDOWN BADGE ─────────────────────────── */
