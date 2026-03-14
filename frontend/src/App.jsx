@@ -106,12 +106,12 @@ export default function App() {
       const target = (live?.latitude_degrees && live?.longitude_degrees) ? live : vessel;
       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(target);
       mapRef.current?.triggerResize?.();
-    }, 320);
+    }, 350); // Bug #9 fix: 350ms > 280ms CSS transition so map measures correct size
   }, []);
 
   const handleCloseDetail = useCallback(() => {
     setSelectedVessel(null); setTrailData(null); setPredictRoute(null);
-    setTimeout(() => { mapRef.current?.triggerResize?.(); }, 320);
+    setTimeout(() => { mapRef.current?.triggerResize?.(); }, 350); // Bug #9 fix
   }, []);
 
   const handleLogout = useCallback(() => {

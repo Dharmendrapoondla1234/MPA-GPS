@@ -79,7 +79,6 @@ export default function PortCongestionHeatmap({ isOpen, onClose }) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const W = canvas.width, H = canvas.height;
-    frameRef.current++;
 
     // Background
     ctx.clearRect(0, 0, W, H);
@@ -199,9 +198,17 @@ export default function PortCongestionHeatmap({ isOpen, onClose }) {
 
   useEffect(() => {
     if (!isOpen) return;
-    const loop = () => {
-      draw();
+    // Bug #1 fix: throttle to ~12fps (80ms) instead of raw 60fps.
+    // The heatmap's sine-wave blobs don't need 60fps — 12fps is visually identical
+    // but uses ~80% less main-thread time, stopping it from competing with Google Maps.
+    const FRAME_MS = 80;
+    let lastTs = 0;
+    const loop = (ts) => {
       rafRef.current = requestAnimationFrame(loop);
+      if (ts - lastTs < FRAME_MS) return;
+      lastTs = ts;
+      frameRef.current++;
+      draw();
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
