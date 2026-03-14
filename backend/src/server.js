@@ -45,7 +45,7 @@ app.get("/health", (_req, res) =>
   res.json({
     status: "ok",
     service: "vessel-tracking-api-v6",
-    dataset: "Photons_MPA",
+    dataset: "MPA",
     timestamp: new Date().toISOString(),
   }),
 );
@@ -54,11 +54,16 @@ app.get("/", (_req, res) =>
     status: "ok",
     message: "MPA Vessel Tracking API v6 🚢",
     tables: [
-      "fct_vessel_live_tracking",
-      "fct_vessel_master",
-      "fct_vessel_arrivals",
-      "fct_vessel_departures",
+      "f_vessel_live_tracking",
+      "d_vessel_master",
+      "f_vessel_arrivals",
+      "f_vessel_departures",
+      "f_vessel_positions_latest",
       "stg_vessel_positions",
+      "stg_vessel_arrivals",
+      "stg_vessel_departures",
+      "stg_arrival_declarations",
+      "stg_departure_declarations",
     ],
   }),
 );
@@ -82,7 +87,7 @@ app.get("/debug/vessels", async (_req, res) => {
                        latitude_degrees, longitude_degrees,
                        speed, last_position_at,
                        minutes_since_last_ping, is_stale
-                FROM \`photons-377606.Photons_MPA.fct_vessel_live_tracking\`
+                FROM \`photons-377606.MPA.f_vessel_live_tracking\`
                 WHERE latitude_degrees IS NOT NULL
                 ORDER BY last_position_at DESC LIMIT 5`,
         location: BQ_LOCATION,
@@ -90,7 +95,7 @@ app.get("/debug/vessels", async (_req, res) => {
       bigquery.query({
         query: `SELECT MAX(effective_timestamp) as max_ts, COUNT(*) as total_rows,
                        TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(effective_timestamp), MINUTE) as mins_since_latest
-                FROM \`photons-377606.Photons_MPA.stg_vessel_positions\``,
+                FROM \`photons-377606.MPA.stg_vessel_positions\``,
         location: BQ_LOCATION,
       }),
     ]);
@@ -132,7 +137,7 @@ app.get("/debug/vessels", async (_req, res) => {
     const stgSummary = stgRows[0] || {};
     res.json({
       now: now.toISOString(),
-      fct_vessel_live_tracking: { count: rows.length, vessels: result },
+      f_vessel_live_tracking: { count: rows.length, vessels: result },
       stg_vessel_positions: {
         total_rows: Number(stgSummary.total_rows),
         latest_position_at: stgSummary.max_ts?.value || stgSummary.max_ts,
@@ -141,7 +146,7 @@ app.get("/debug/vessels", async (_req, res) => {
       diagnosis:
         Number(stgSummary.mins_since_latest) > 120
           ? "RAW DATA IS STALE: stg_vessel_positions not receiving new AIS pings"
-          : "Raw data is fresh — dbt model may not be refreshing fct_vessel_live_tracking",
+          : "Raw data is fresh — dbt model may not be refreshing f_vessel_live_tracking",
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -164,7 +169,7 @@ app.get("/debug/coords", async (_req, res) => {
     const [rows] = await bigquery.query({
       query: `SELECT vessel_name, imo_number, latitude_degrees, longitude_degrees,
                      speed, last_position_at
-              FROM \`photons-377606.Photons_MPA.fct_vessel_live_tracking\`
+              FROM \`photons-377606.MPA.f_vessel_live_tracking\`
               WHERE latitude_degrees IS NOT NULL AND longitude_degrees IS NOT NULL
               LIMIT 10`,
       location: BQ_LOCATION,

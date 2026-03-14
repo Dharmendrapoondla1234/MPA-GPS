@@ -15,8 +15,8 @@ function bqStr(v)  { if(v==null)return null; if(typeof v==="object"&&"value"in v
 function bqNum(v)  { if(v==null)return null; const n=Number(bqStr(v)||v); return isNaN(n)?null:n; }
 function bqBool(v) { return v===true||v==="true"||v===1; }
 
-// fct_vessel_positions_latest now converts radians→degrees in dbt.
-// fct_vessel_live_tracking passes degrees through unchanged.
+// f_vessel_positions_latest now converts radians→degrees in dbt.
+// f_vessel_live_tracking passes degrees through unchanged.
 // The backend must NOT convert again — toLatDeg/toLngDeg pass values straight through.
 // Legacy MPA table also stores degrees, so no conversion needed for that path either.
 const RAD_TO_DEG = 180 / Math.PI;  // kept for reference, not used in normalisation
