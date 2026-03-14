@@ -1,5 +1,5 @@
 // src/services/api.js — MPA Advanced v6
-const BASE = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.com/api";
+const BASE = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
 
 // ── REQUEST DEDUPLICATION + BROWSER CACHE ────────────────────────
 const inFlight  = new Map();
