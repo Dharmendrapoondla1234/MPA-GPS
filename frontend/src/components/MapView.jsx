@@ -156,7 +156,8 @@ const MapView = forwardRef(function MapView(
   const onVesselClickRef = useRef(onVesselClick);
   useEffect(() => { onVesselClickRef.current = onVesselClick; }, [onVesselClick]);
 
-  const [coords,          setCoords]          = useState(null);
+  // Coords written directly to DOM ref — no React state, no re-renders during map interaction
+  const coordsDomRef = useRef(null);
   const [mapStyle,        setMapStyle]        = useState("sea");    // sea = roadmap with maritime style
   const [mapReady,        setMapReady]        = useState(false);
   const [gisData,         setGisData]         = useState(null);
@@ -272,13 +273,17 @@ const MapView = forwardRef(function MapView(
       infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: 340 });
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
 
-      // Throttle mousemove to ~7fps — reduces layout work while panning
+      // Write coords directly to DOM — never call setState during map interaction
       let _mvTimer = null;
       map.addListener("mousemove", e => {
         if (_mvTimer) return;
         _mvTimer = setTimeout(() => {
           _mvTimer = null;
-          setCoords({ lat: e.latLng.lat().toFixed(5), lng: e.latLng.lng().toFixed(5) });
+          if (!coordsDomRef.current) return;
+          const lat = e.latLng.lat().toFixed(5);
+          const lng = e.latLng.lng().toFixed(5);
+          const region = getRegionName(parseFloat(lat), parseFloat(lng));
+          coordsDomRef.current.textContent = `${lat}°N · ${lng}°E${region ? ` · ${region}` : ""}`;
         }, 150);
       });
       map.addListener("click", () => {
@@ -289,14 +294,9 @@ const MapView = forwardRef(function MapView(
       map.addListener("zoom_changed", () => {
         const z = map.getZoom() ?? 11;
         mapZoomRef.current = z;
-      });
-      // Enforce zoom limits on bounds_changed too (belt-and-suspenders)
-      map.addListener("bounds_changed", () => {
-        const z = map.getZoom();
-        if (z !== undefined) {
-          if (z < MIN_ZOOM) map.setZoom(MIN_ZOOM);
-          if (z > MAX_ZOOM) map.setZoom(MAX_ZOOM);
-        }
+        // Clamp zoom in zoom_changed only — not bounds_changed which fires on every pan
+        if (z < MIN_ZOOM) map.setZoom(MIN_ZOOM);
+        if (z > MAX_ZOOM) map.setZoom(MAX_ZOOM);
       });
 
       setMapReady(true);
@@ -659,17 +659,21 @@ const MapView = forwardRef(function MapView(
       map: mapObj.current, zIndex: 5,
     });
     let opacity = 0.8, growing = false, lastPulse = 0;
-    const PULSE_MS = IS_MOBILE ? 200 : 120;
+    const PULSE_MS = IS_MOBILE ? 250 : 150; // slower on mobile = less GPU work
+    let lastOpacity = -1;
     const pulseFn = (ts) => {
       if (!pulseCirc.current) return;
-      if (ts - lastPulse >= PULSE_MS) {
-        lastPulse = ts;
-        opacity = growing ? opacity + 0.08 : opacity - 0.08;
-        if (opacity >= 0.85) growing = false;
-        if (opacity <= 0.25) growing = true;
-        try { pulseCirc.current.setOptions({ strokeOpacity: opacity }); } catch(_) {}
-      }
       pulseTimer.current = requestAnimationFrame(pulseFn);
+      if (ts - lastPulse < PULSE_MS) return;
+      lastPulse = ts;
+      opacity = growing ? opacity + 0.07 : opacity - 0.07;
+      if (opacity >= 0.85) growing = false;
+      if (opacity <= 0.25) growing = true;
+      // Only call setOptions when opacity changed by >0.02 — skips redundant GM geometry work
+      const rounded = Math.round(opacity * 50) / 50;
+      if (rounded === lastOpacity) return;
+      lastOpacity = rounded;
+      try { pulseCirc.current.setOptions({ strokeOpacity: rounded }); } catch(_) {}
     };
     pulseTimer.current = requestAnimationFrame(pulseFn);
 
@@ -886,10 +890,18 @@ const MapView = forwardRef(function MapView(
     });
   }, []);
 
-  const liveCount   = vessels.filter(v => !isStale(v)).length;
-  const dangerCount = alerts.filter(a => a.level === "danger").length;
-  const warnCount   = alerts.filter(a => a.level === "warning").length;
-  const toggleLayer = key => setLayers(prev => ({ ...prev, [key]: !prev[key] }));
+  const liveCount   = useMemo(() => vessels.filter(v => !isStale(v)).length, [vessels]);
+  const dangerCount = useMemo(() => alerts.filter(a => a.level === "danger").length, [alerts]);
+  const warnCount   = useMemo(() => alerts.filter(a => a.level === "warning").length, [alerts]);
+  const handleWeatherData  = useCallback((d) => setWeatherData(d), []);
+  const handleStationHover = useCallback((s) => {
+    if (!mapObj.current || !s?.lat || !s?.lng) return;
+    const z = mapObj.current.getZoom() || 10;
+    if (z < 8) mapObj.current.panTo({ lat: s.lat, lng: s.lng });
+  }, []);
+  const handleStationLeave = useCallback(() => {}, []);
+
+  const toggleLayer = useCallback(key => setLayers(prev => ({ ...prev, [key]: !prev[key] })), []);
   const STYLE_ICON  = { sea:"🌊", satellite:"🛰️", dark:"🗺️" };
 
   /* ── JSX ────────────────────────────────────────────────── */
@@ -1057,11 +1069,9 @@ const MapView = forwardRef(function MapView(
             {selectedVessel && <span className="mv-bh-tname">{selectedVessel.vessel_name}</span>}
           </div>
         )}
-        {coords && !IS_MOBILE && (
-          <div className="mv-bh-coords">
-            {coords.lat}°N · {coords.lng}°E
-            {(() => { const r = getRegionName(parseFloat(coords.lat), parseFloat(coords.lng)); return r ? <span className="mv-bh-region"> · {r}</span> : null; })()}
-          </div>
+        {/* Coords written directly to DOM — no React re-render on mousemove */}
+        {!IS_MOBILE && (
+          <div ref={coordsDomRef} className="mv-bh-coords" />
         )}
       </div>
 
@@ -1078,13 +1088,9 @@ const MapView = forwardRef(function MapView(
       <WeatherPanel
         expanded={showWeatherPanel}
         onExpandedChange={setShowWeatherPanel}
-        onDataLoad={d => setWeatherData(d)}
-        onStationHover={s => {
-          if (!mapObj.current || !s?.lat || !s?.lng) return;
-          const z = mapObj.current.getZoom() || 10;
-          if (z < 8) mapObj.current.panTo({ lat: s.lat, lng: s.lng });
-        }}
-        onStationLeave={() => {}}
+        onDataLoad={handleWeatherData}
+        onStationHover={handleStationHover}
+        onStationLeave={handleStationLeave}
       />
     </div>
   );
