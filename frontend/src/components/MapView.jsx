@@ -33,17 +33,6 @@ function distanceM(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function smoothMove(marker, newLat, newLng) {
-  const from = marker.getPosition();
-  if (!from) { marker.setPosition({ lat: newLat, lng: newLng }); return; }
-
-  // Bug #2 fix: always snap position, never animate during marker updates.
-  // Previously 500+ concurrent 600ms rAF chains ran on every 60s vessel refresh,
-  // each calling setPosition() every 16ms — this was the primary Chrome freeze cause.
-  // Vessels move so slowly between 60s refreshes that animation is imperceptible anyway.
-  if (marker._animId) { cancelAnimationFrame(marker._animId); marker._animId = null; }
-  marker.setPosition({ lat: newLat, lng: newLng });
-}
 
 function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
   const speed   = parseFloat(vessel.speed)   || 0;
@@ -230,10 +219,10 @@ const MapView = forwardRef(function MapView(
     }),
   [vessels]);
 
-  // Debounce vessel updates 500ms — prevents marker cascade on rapid state changes
+  // Debounce vessel updates 800ms — absorbs initial load burst and rapid filter changes
   const [freshVessels, setFreshVessels] = useState(freshVesselsRaw);
   useEffect(() => {
-    const t = setTimeout(() => setFreshVessels(freshVesselsRaw), 500);
+    const t = setTimeout(() => setFreshVessels(freshVesselsRaw), 800);
     return () => clearTimeout(t);
   }, [freshVesselsRaw]);
 
@@ -382,12 +371,12 @@ const MapView = forwardRef(function MapView(
     if (layers.regulated && gisData.regulated) gisData.regulated.forEach(f => { enqueue(() => { const p = wktToLatLng(f.coords,f.type); if(!p||!Array.isArray(p))return; add(new window.google.maps.Polygon({paths:p,map,fillColor:"#ffcc0020",strokeColor:"#ffcc00",strokeWeight:1.5,strokeOpacity:0.9,fillOpacity:1,zIndex:2,clickable:true})).addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#1a1200;border:1px solid #ffcc00;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#ffcc00;font-weight:700;font-size:12px">⚠️ REGULATED AREA</div><div style="margin-top:6px;font-size:11px">${f.name||"Restricted Zone"}</div></div>`);infoWin.current.setPosition(p[0]);infoWin.current.open(map);}); }); });
     if (layers.tracks && gisData.tracks) gisData.tracks.forEach(f => { enqueue(() => { if(f.type==="track_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#00aaff12",strokeColor:"#00aaff88",strokeWeight:1,fillOpacity:1,zIndex:1}));}else if(f.type==="track_line"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polyline({path:p,map,strokeColor:"#0088ffaa",strokeWeight:1.5,strokeOpacity:0.8,zIndex:3,icons:[{icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:2,fillColor:"#0088ff",fillOpacity:0.7,strokeColor:"#fff",strokeWeight:0.5},offset:"50%",repeat:"80px"}]}));} }); });
     if (layers.depths && gisData.depths) gisData.depths.forEach(f => { enqueue(() => { const p=wktToLatLng(f.coords,f.type);if(!p)return;const depth=parseFloat(f.depth)||0;const c=depth<=5?"#ff440088":depth<=10?"#ff880055":depth<=20?"#ffcc0044":"#0055aa44";add(new window.google.maps.Polyline({path:p,map,strokeColor:c,strokeWeight:depth<=5?2:1,zIndex:1})); }); });
-    if (layers.dangers && gisData.dangers) gisData.dangers.forEach(f => { enqueue(() => { if(f.type==="danger_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos)return;const m=add(new window.google.maps.Marker({position:pos,map,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#ff2244",fillOpacity:0.9,strokeColor:"#fff",strokeWeight:1.5},title:f.name||"Danger",zIndex:10}));m.addListener("click",()=>{infoWin.current.setContent(dangerInfoContent(f));infoWin.current.open(map,m);});add(new window.google.maps.Circle({center:pos,radius:80,map,fillColor:"#ff2244",fillOpacity:0.15,strokeColor:"#ff2244",strokeWeight:1,strokeOpacity:0.6,zIndex:4}));}else if(f.type==="danger_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#ff224433",strokeColor:"#ff2244",strokeWeight:2,fillOpacity:1,zIndex:5,clickable:true})).addListener("click",()=>{infoWin.current.setContent(dangerInfoContent(f));infoWin.current.setPosition(p[0]);infoWin.current.open(map);});}else if(f.type==="danger_line"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polyline({path:p,map,strokeColor:"#ff4466",strokeWeight:2.5,zIndex:6}));} }); });
-    if (layers.aids && gisData.aids) gisData.aids.forEach(f => { enqueue(() => { if(!f.coords||isNaN(f.coords[0]))return;const pos={lat:f.coords[1],lng:f.coords[0]};const c=f.colour==="1"?"#ff2244":f.colour==="3"?"#00cc44":f.lighted?"#ffee00":"#cccccc";const m=add(new window.google.maps.Marker({position:pos,map,icon:{path:f.lighted?"M -2 -8 L 0 -10 L 2 -8 L 1 -8 L 1 0 L -1 0 L -1 -8 Z":window.google.maps.SymbolPath.CIRCLE,scale:f.lighted?1:4,fillColor:c,fillOpacity:0.9,strokeColor:"#000",strokeWeight:1},title:f.name||"Aid",zIndex:8}));if(f.lighted&&f.range_nm>0)add(new window.google.maps.Circle({center:pos,radius:f.range_nm*1852,map,fillColor:c+"08",strokeColor:c+"30",strokeWeight:0.5,zIndex:1}));m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#061020;border:1px solid ${c};border-radius:8px;padding:10px 14px;color:#fff"><div style="color:${c};font-weight:700;font-size:12px">${f.lighted?"💡":"🔘"} ${f.buoy?"BUOY":"BEACON"}</div><div style="margin-top:4px;font-size:11px">${f.name||"Aid"}</div></div>`);infoWin.current.open(map,m);}); }); });
-    if (layers.ports && gisData.ports) gisData.ports.forEach(f => { enqueue(() => { if(!f.coords)return;const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;const m=add(new window.google.maps.Marker({position:pos,map,icon:{path:"M -4 0 L -2 -6 L 2 -6 L 4 0 L 2 0 L 2 2 L -2 2 L -2 0 Z",scale:1,fillColor:"#44aaff",fillOpacity:0.9,strokeColor:"#fff",strokeWeight:1},title:f.name||"Port",zIndex:7}));m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#001830;border:1px solid #44aaff;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#44aaff;font-weight:700;font-size:12px">⚓ PORT / SERVICE</div><div style="font-size:11px;margin-top:4px">${f.name||"Facility"}</div>${f.depth?`<div style="font-size:10px;color:#88aacc">Depth: ${f.depth}m</div>`:""}</div>`);infoWin.current.open(map,m);}); }); });
-    if (layers.tides && gisData.tides) gisData.tides.forEach(f => { enqueue(() => { const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;add(new window.google.maps.Marker({position:pos,map,icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:5,rotation:parseFloat(f.direction)||0,fillColor:"#00eeff",fillOpacity:0.8,strokeColor:"#fff",strokeWeight:1},title:`${f.current_speed||"?"}kn`,zIndex:6})); }); });
-    if (layers.cultural && gisData.cultural) gisData.cultural.forEach(f => { enqueue(() => { if(f.type==="cultural_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object")return;const c=f.cable?"#ff8800":f.pipe?"#884400":"#888888";add(new window.google.maps.Marker({position:pos,map,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:3,fillColor:c,fillOpacity:0.8,strokeColor:"#fff",strokeWeight:0.5},zIndex:5}));}else if(f.type==="cultural_bridge"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#88888833",strokeColor:"#aaaaaa",strokeWeight:1.5,zIndex:4}));} }); });
-    if (layers.seabed && gisData.seabed) gisData.seabed.forEach(f => { enqueue(() => { if(f.type==="seabed_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#aa660033",strokeColor:"#aa6600",strokeWeight:1,fillOpacity:1,zIndex:2}));}else if(f.type==="seabed_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;const c=f.surface==="rock"?"#cc4400":f.surface==="mud"?"#886600":"#aa8800";add(new window.google.maps.Marker({position:pos,map,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:3,fillColor:c,fillOpacity:0.7,strokeColor:"#fff",strokeWeight:0.5},zIndex:4}));} }); });
+    if (layers.dangers && gisData.dangers) gisData.dangers.forEach(f => { enqueue(() => { if(f.type==="danger_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos)return;const m=add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#ff2244",fillOpacity:0.9,strokeColor:"#fff",strokeWeight:1.5},title:f.name||"Danger",zIndex:10}));m.addListener("click",()=>{infoWin.current.setContent(dangerInfoContent(f));infoWin.current.open(map,m);});add(new window.google.maps.Circle({center:pos,radius:80,map,fillColor:"#ff2244",fillOpacity:0.15,strokeColor:"#ff2244",strokeWeight:1,strokeOpacity:0.6,zIndex:4}));}else if(f.type==="danger_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#ff224433",strokeColor:"#ff2244",strokeWeight:2,fillOpacity:1,zIndex:5,clickable:true})).addListener("click",()=>{infoWin.current.setContent(dangerInfoContent(f));infoWin.current.setPosition(p[0]);infoWin.current.open(map);});}else if(f.type==="danger_line"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polyline({path:p,map,strokeColor:"#ff4466",strokeWeight:2.5,zIndex:6}));} }); });
+    if (layers.aids && gisData.aids) gisData.aids.forEach(f => { enqueue(() => { if(!f.coords||isNaN(f.coords[0]))return;const pos={lat:f.coords[1],lng:f.coords[0]};const c=f.colour==="1"?"#ff2244":f.colour==="3"?"#00cc44":f.lighted?"#ffee00":"#cccccc";const m=add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:f.lighted?"M -2 -8 L 0 -10 L 2 -8 L 1 -8 L 1 0 L -1 0 L -1 -8 Z":window.google.maps.SymbolPath.CIRCLE,scale:f.lighted?1:4,fillColor:c,fillOpacity:0.9,strokeColor:"#000",strokeWeight:1},title:f.name||"Aid",zIndex:8}));if(f.lighted&&f.range_nm>0)add(new window.google.maps.Circle({center:pos,radius:f.range_nm*1852,map,fillColor:c+"08",strokeColor:c+"30",strokeWeight:0.5,zIndex:1}));m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#061020;border:1px solid ${c};border-radius:8px;padding:10px 14px;color:#fff"><div style="color:${c};font-weight:700;font-size:12px">${f.lighted?"💡":"🔘"} ${f.buoy?"BUOY":"BEACON"}</div><div style="margin-top:4px;font-size:11px">${f.name||"Aid"}</div></div>`);infoWin.current.open(map,m);}); }); });
+    if (layers.ports && gisData.ports) gisData.ports.forEach(f => { enqueue(() => { if(!f.coords)return;const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;const m=add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:"M -4 0 L -2 -6 L 2 -6 L 4 0 L 2 0 L 2 2 L -2 2 L -2 0 Z",scale:1,fillColor:"#44aaff",fillOpacity:0.9,strokeColor:"#fff",strokeWeight:1},title:f.name||"Port",zIndex:7}));m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#001830;border:1px solid #44aaff;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#44aaff;font-weight:700;font-size:12px">⚓ PORT / SERVICE</div><div style="font-size:11px;margin-top:4px">${f.name||"Facility"}</div>${f.depth?`<div style="font-size:10px;color:#88aacc">Depth: ${f.depth}m</div>`:""}</div>`);infoWin.current.open(map,m);}); }); });
+    if (layers.tides && gisData.tides) gisData.tides.forEach(f => { enqueue(() => { const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:5,rotation:parseFloat(f.direction)||0,fillColor:"#00eeff",fillOpacity:0.8,strokeColor:"#fff",strokeWeight:1},title:`${f.current_speed||"?"}kn`,zIndex:6})); }); });
+    if (layers.cultural && gisData.cultural) gisData.cultural.forEach(f => { enqueue(() => { if(f.type==="cultural_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object")return;const c=f.cable?"#ff8800":f.pipe?"#884400":"#888888";add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:3,fillColor:c,fillOpacity:0.8,strokeColor:"#fff",strokeWeight:0.5},zIndex:5}));}else if(f.type==="cultural_bridge"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#88888833",strokeColor:"#aaaaaa",strokeWeight:1.5,zIndex:4}));} }); });
+    if (layers.seabed && gisData.seabed) gisData.seabed.forEach(f => { enqueue(() => { if(f.type==="seabed_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#aa660033",strokeColor:"#aa6600",strokeWeight:1,fillOpacity:1,zIndex:2}));}else if(f.type==="seabed_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;const c=f.surface==="rock"?"#cc4400":f.surface==="mud"?"#886600":"#aa8800";add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:3,fillColor:c,fillOpacity:0.7,strokeColor:"#fff",strokeWeight:0.5},zIndex:4}));} }); });
 
     // Flush the queue in rAF batches — 40 items per frame keeps each frame under ~16ms
     const GIS_BATCH = 40;
@@ -410,7 +399,40 @@ const MapView = forwardRef(function MapView(
     layers.aids, layers.ports, layers.tides, layers.cultural, layers.seabed,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Proximity alerts ───────────────────────────────────── */
+  // ── Viewport culling: hide markers outside bounds, show when back in view ──
+  // This is the single biggest win — 1000 markers all active costs GPU compositing
+  // even for the 800 outside the viewport. At zoom 11 only ~200 are typically visible.
+  const viewportCullRef = useRef(null);
+  useEffect(() => {
+    if (!mapReady || !mapObj.current) return;
+    const cull = () => {
+      const bounds = mapObj.current?.getBounds();
+      if (!bounds) return;
+      Object.values(markersRef.current).forEach(m => {
+        const pos = m.getPosition();
+        if (!pos) return;
+        const inView = bounds.contains(pos);
+        // Only call setMap when visibility actually needs to change
+        const currently = m.getMap();
+        if (inView && !currently) m.setMap(mapObj.current);
+        else if (!inView && currently) m.setMap(null);
+      });
+    };
+    // Debounce culling: run 200ms after pan/zoom stops, not during
+    let cullTimer = null;
+    const schedule = () => {
+      clearTimeout(cullTimer);
+      cullTimer = setTimeout(cull, 200);
+    };
+    const l1 = mapObj.current.addListener("idle", cull);      // fires when map stops moving
+    const l2 = mapObj.current.addListener("zoom_changed", schedule);
+    viewportCullRef.current = () => {
+      clearTimeout(cullTimer);
+      window.google.maps.event.removeListener(l1);
+      window.google.maps.event.removeListener(l2);
+    };
+    return () => viewportCullRef.current?.();
+  }, [mapReady]);
   useEffect(() => {
     Object.values(alertCircles.current).forEach(c => { try{c.setMap(null);}catch(_){} });
     Object.values(vesselCircles.current).forEach(c => { try{c.setMap(null);}catch(_){} });
@@ -486,24 +508,19 @@ const MapView = forwardRef(function MapView(
     const fresh    = freshVessels;
     const activeIds = new Set(fresh.map(v => String(v.imo_number)));
 
-    // Incrementally update hover cache — only rebuild entries whose speed or heading changed.
-    // Previously this rebuilt HTML strings for ALL vessels every time freshVessels changed,
-    // which was thousands of string concatenations per selection / per refresh.
-    const prevCache = hoverCache.current;
-    const newCache  = { ...prevCache };
+    // Incrementally update hover cache — mutate in place, never spread 1000+ entries
+    const cache = hoverCache.current;
     fresh.forEach(v => {
       const spd = parseFloat(v.speed || 0);
       const hdg = parseFloat(v.heading || 0);
       const prev = markersRef.current[String(v.imo_number)]?._vessel;
-      // Skip if speed and heading haven't changed (the only things that affect the tooltip)
-      if (prev && Math.abs((prev.speed || 0) - spd) < 0.1 && Math.abs((prev.heading || 0) - hdg) < 2 && prevCache[v.imo_number]) return;
+      if (prev && Math.abs((prev.speed || 0) - spd) < 0.1 && Math.abs((prev.heading || 0) - hdg) < 2 && cache[v.imo_number]) return;
       const col    = getSpeedColor(spd);
       const region = getRegionName(parseFloat(v.latitude_degrees || 0), parseFloat(v.longitude_degrees || 0));
-      newCache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || 'Unknown'}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${hdg}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ''}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
+      cache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || 'Unknown'}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${hdg}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ''}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
     });
-    // Remove entries for vessels that are no longer active
-    Object.keys(newCache).forEach(id => { if (!activeIds.has(id)) delete newCache[id]; });
-    hoverCache.current = newCache;
+    // Evict stale entries
+    Object.keys(cache).forEach(id => { if (!activeIds.has(id)) delete cache[id]; });
 
     // Remove stale markers
     Object.keys(markersRef.current).forEach(id => {
@@ -515,15 +532,18 @@ const MapView = forwardRef(function MapView(
       }
     });
 
-    // Auto-fit on first load
+    // Auto-fit on first load — defer to after batch completes so it doesn't block
     if (!hasFitBounds.current && fresh.length > 0 && mapObj.current) {
       hasFitBounds.current = true;
-      const bounds = new window.google.maps.LatLngBounds();
-      fresh.slice(0, 200).forEach(v => {
-        const la = Number(v.latitude_degrees), lo = Number(v.longitude_degrees);
-        if (la && lo && !isNaN(la) && !isNaN(lo)) bounds.extend({ lat: la, lng: lo });
-      });
-      if (!bounds.isEmpty()) mapObj.current.fitBounds(bounds, { padding: 60 });
+      setTimeout(() => {
+        if (!mapObj.current) return;
+        const bounds = new window.google.maps.LatLngBounds();
+        fresh.slice(0, 100).forEach(v => {
+          const la = Number(v.latitude_degrees), lo = Number(v.longitude_degrees);
+          if (la && lo && !isNaN(la) && !isNaN(lo)) bounds.extend({ lat: la, lng: lo });
+        });
+        if (!bounds.isEmpty()) mapObj.current.fitBounds(bounds, { padding: 60 });
+      }, 1200); // after all 50-per-frame batches have settled
     }
 
     // Add/update markers — process in rAF batches to avoid janky frames
@@ -550,8 +570,15 @@ const MapView = forwardRef(function MapView(
 
         if (markersRef.current[id]) {
           const m = markersRef.current[id];
-          smoothMove(m, lat, lng);
-          // Only rebuild icon if speed/heading changed — NOT selection (pulse handles that)
+          // Only call setPosition if coords actually changed (skip no-op updates)
+          const curPos = m.getPosition();
+          if (!curPos || Math.abs(curPos.lat() - lat) > 0.00001 || Math.abs(curPos.lng() - lng) > 0.00001) {
+            m.setPosition({ lat, lng });
+            // Re-show if it was culled but coords moved into viewport
+            if (!m.getMap() && mapObj.current?.getBounds()?.contains({ lat, lng })) {
+              m.setMap(mapObj.current);
+            }
+          }
           const pv = m._vessel;
           const speedChanged   = Math.abs((pv?.speed || 0) - (v.speed || 0)) > 0.1;
           const headingChanged = Math.abs((pv?.heading || 0) - (v.heading || 0)) > 2;
@@ -564,7 +591,8 @@ const MapView = forwardRef(function MapView(
             title: v.vessel_name || "Vessel",
             optimized: true,
             zIndex: al === "danger" ? 500 : 10,
-            map: mapObj.current,
+            // Only attach to map if inside viewport — culling hook will show it when panned into view
+            map: mapObj.current?.getBounds()?.contains({ lat, lng }) ? mapObj.current : null,
           });
           m._vessel = v;
           m.addListener("click", () => {
