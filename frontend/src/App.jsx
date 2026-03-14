@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import AuthPage from "./components/Authpage";
 import TopBar from "./components/TopBar";
 import VesselPanel from "./components/VesselPanel";
@@ -7,121 +7,73 @@ import MapView from "./components/MapView";
 import SpeedLegend from "./components/SpeedLegend";
 import ErrorBanner from "./components/ErrorBanner";
 import PortActivityPanel from "./components/PortActivityPanel";
-import VesselComparison from "./components/VesselComparison";
-import LiveAlertsFeed from "./components/LiveAlertsFeed";
-import PortCongestionHeatmap from "./components/PortCongestionHeatmap";
-import ThemePreferences from "./components/ThemePreferences";
 import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import "./styles/App.css";
 
+// ── New panels — lazy loaded so missing files don't break the build ──
+const VesselComparison      = lazy(() => import("./components/VesselComparison"));
+const LiveAlertsFeed        = lazy(() => import("./components/LiveAlertsFeed"));
+const PortCongestionHeatmap = lazy(() => import("./components/PortCongestionHeatmap"));
+const ThemePreferences      = lazy(() => import("./components/ThemePreferences"));
+
 const IS_MOBILE = () => window.innerWidth <= 768;
 
-/* ═══════════════════════════════════════════════════════════════
-   FREE STREAMING — 5 minutes of free access before auth wall
-   ─────────────────────────────────────────────────────────────
-   Logic:
-   • On FIRST open: record start time in sessionStorage, show map
-   • Each second: calculate remaining = 300 - (now - start)
-   • At 0: show AuthPage wall
-   • On login: clear session, never show wall again
-   • On logout: reset so user gets another free session
-   • Uses sessionStorage (not localStorage) so each browser tab
-     gets its own fresh 5-minute session
-═══════════════════════════════════════════════════════════════ */
 const FREE_SECONDS = 300;
 const FREE_KEY = "mpa_free_start";
 
 function getFreeSecsRemaining() {
   try {
     const raw = sessionStorage.getItem(FREE_KEY);
-    if (!raw) return FREE_SECONDS; // no timer set yet
+    if (!raw) return FREE_SECONDS;
     const elapsed = Math.floor((Date.now() - parseInt(raw, 10)) / 1000);
     return Math.max(0, FREE_SECONDS - elapsed);
-  } catch {
-    return FREE_SECONDS;
-  }
+  } catch { return FREE_SECONDS; }
 }
 
 function startFreeTimer() {
-  try {
-    if (!sessionStorage.getItem(FREE_KEY)) {
-      sessionStorage.setItem(FREE_KEY, String(Date.now()));
-    }
-  } catch {}
+  try { if (!sessionStorage.getItem(FREE_KEY)) sessionStorage.setItem(FREE_KEY, String(Date.now())); } catch {}
 }
 
 function resetFreeTimer() {
-  try {
-    sessionStorage.removeItem(FREE_KEY);
-    sessionStorage.setItem(FREE_KEY, String(Date.now()));
-  } catch {}
+  try { sessionStorage.removeItem(FREE_KEY); sessionStorage.setItem(FREE_KEY, String(Date.now())); } catch {}
 }
 
-/* ═══════════════════════════════════════════════════════════════ */
-
 export default function App() {
-
   const [user, setUser] = useState(() => getCurrentUser());
-
-  // ── Free streaming ──────────────────────────────────────────
-  // Always start with map visible. Timer starts on mount.
   const [freeSecsLeft, setFreeSecsLeft] = useState(FREE_SECONDS);
   const [freeExpired,  setFreeExpired]  = useState(false);
   const freeIntervalRef = useRef(null);
 
-  // Start the free timer on first mount (or when user logs out)
   useEffect(() => {
-    // If already logged in, no timer needed at all
-    if (user) {
-      clearInterval(freeIntervalRef.current);
-      return;
-    }
-
-    // Stamp the start time (no-op if already stamped this session)
+    if (user) { clearInterval(freeIntervalRef.current); return; }
     startFreeTimer();
-
-    // Check immediately in case page was loaded mid-session
     const initialRem = getFreeSecsRemaining();
     setFreeSecsLeft(initialRem);
-    if (initialRem <= 0) {
-      setFreeExpired(true);
-      return;
-    }
-
-    // Tick every second
+    if (initialRem <= 0) { setFreeExpired(true); return; }
     freeIntervalRef.current = setInterval(() => {
       const rem = getFreeSecsRemaining();
       setFreeSecsLeft(rem);
-      if (rem <= 0) {
-        setFreeExpired(true);
-        clearInterval(freeIntervalRef.current);
-      }
+      if (rem <= 0) { setFreeExpired(true); clearInterval(freeIntervalRef.current); }
     }, 1000);
-
     return () => clearInterval(freeIntervalRef.current);
-  }, [user]); // re-runs when user logs in or out
-  // ────────────────────────────────────────────────────────────
+  }, [user]);
 
-  const [filters, setFilters] = useState({
-    search: "", vesselType: "", speedRange: "", speedMin: null, speedMax: null,
-  });
-  const [selectedVessel, setSelectedVessel] = useState(null);
-  const [trailData,       setTrailData]      = useState(null);
-  const [predictRoute,    setPredictRoute]   = useState(null);
-  const [panelOpen,       setPanelOpen]      = useState(!IS_MOBILE());
-  const [portPanelOpen,   setPortPanelOpen]  = useState(false);
-  const [compareOpen,     setCompareOpen]    = useState(false);
-  const [alertsOpen,      setAlertsOpen]     = useState(false);
-  const [alertCount,      setAlertCount]     = useState(0);
-  const [heatmapOpen,     setHeatmapOpen]    = useState(false);
-  const [prefsOpen,       setPrefsOpen]      = useState(false);
+  const [filters,       setFilters]       = useState({ search: "", vesselType: "", speedRange: "", speedMin: null, speedMax: null });
+  const [selectedVessel,setSelectedVessel]= useState(null);
+  const [trailData,     setTrailData]     = useState(null);
+  const [predictRoute,  setPredictRoute]  = useState(null);
+  const [panelOpen,     setPanelOpen]     = useState(!IS_MOBILE());
+  const [portPanelOpen, setPortPanelOpen] = useState(false);
+  const [compareOpen,   setCompareOpen]   = useState(false);
+  const [alertsOpen,    setAlertsOpen]    = useState(false);
+  const [alertCount,    setAlertCount]    = useState(0);
+  const [heatmapOpen,   setHeatmapOpen]   = useState(false);
+  const [prefsOpen,     setPrefsOpen]     = useState(false);
   const mapRef = useRef(null);
 
-  const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } =
-    useVessels(filters);
+  const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
 
-  // Auto-locate on exact search match
   useEffect(() => {
     if (!filters.search || filters.search.length < 2) return;
     if (vessels.length === 1) {
@@ -131,23 +83,18 @@ export default function App() {
     }
   }, [vessels, filters.search]);
 
-  // Keep selected vessel in sync with live refreshes
   useEffect(() => {
     if (!selectedVessel) return;
     const fresh = vessels.find(v => v.imo_number === selectedVessel.imo_number);
     if (fresh) setSelectedVessel(fresh);
   }, [vessels]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reopen left panel on desktop resize
   useEffect(() => {
     const handler = () => { if (!IS_MOBILE() && !panelOpen) setPanelOpen(true); };
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }, [panelOpen]);
 
-  // Use a stable ref for vessels so handleSelectVessel never changes identity.
-  // Previously vessels was in the dep array → new function every render →
-  // MapView's marker useEffect re-ran and rebuilt ALL 1000+ markers on every selection.
   const vesselsRef = useRef(vessels);
   useEffect(() => { vesselsRef.current = vessels; }, [vessels]);
 
@@ -160,7 +107,7 @@ export default function App() {
       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(target);
       mapRef.current?.triggerResize?.();
     }, 320);
-  }, []); // stable — no deps, uses ref
+  }, []);
 
   const handleCloseDetail = useCallback(() => {
     setSelectedVessel(null); setTrailData(null); setPredictRoute(null);
@@ -168,12 +115,7 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(() => {
-    logoutUser();
-    setUser(null);
-    // Give the user another free session after logout
-    resetFreeTimer();
-    setFreeSecsLeft(FREE_SECONDS);
-    setFreeExpired(false);
+    logoutUser(); setUser(null); resetFreeTimer(); setFreeSecsLeft(FREE_SECONDS); setFreeExpired(false);
   }, []);
 
   const handleSearchEnter = useCallback(() => {
@@ -184,30 +126,30 @@ export default function App() {
       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(v);
       if (IS_MOBILE()) setPanelOpen(false);
     }
-  }, []); // stable — no deps, uses ref
-
-  const handleBackdropClick = useCallback(() => {
-    setPanelOpen(false); setSelectedVessel(null);
   }, []);
 
-  // Called when user successfully signs in or registers
+  const handleBackdropClick = useCallback(() => { setPanelOpen(false); setSelectedVessel(null); }, []);
+
   const handleAuth = useCallback((u) => {
-    setUser(u);
-    clearInterval(freeIntervalRef.current);
+    setUser(u); clearInterval(freeIntervalRef.current);
     try { sessionStorage.removeItem(FREE_KEY); } catch {}
     setFreeExpired(false);
   }, []);
 
-  /* ── Auth wall: only shown AFTER free time runs out ─────── */
-  if (!user && freeExpired) {
-    return <AuthPage onAuth={handleAuth} />;
-  }
+  // Helpers to open one panel at a time
+  const openCompare  = useCallback(() => { setCompareOpen(p => !p); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
+  const openAlerts   = useCallback(() => { setAlertsOpen(p => !p);  setCompareOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
+  const openHeatmap  = useCallback(() => { setHeatmapOpen(p => !p); setCompareOpen(false); setAlertsOpen(false);  setPrefsOpen(false); }, []);
+  const openPrefs    = useCallback(() => { setPrefsOpen(p => !p);   setCompareOpen(false); setAlertsOpen(false);  setHeatmapOpen(false); }, []);
+
+  if (!user && freeExpired) return <AuthPage onAuth={handleAuth} />;
 
   const showLeftBackdrop  = IS_MOBILE() && panelOpen;
   const showRightBackdrop = IS_MOBILE() && !!selectedVessel;
-  const freeMin = Math.floor(freeSecsLeft / 60);
-  const freeSec = String(freeSecsLeft % 60).padStart(2, "0");
+  const freeMin  = Math.floor(freeSecsLeft / 60);
+  const freeSec  = String(freeSecsLeft % 60).padStart(2, "0");
   const isUrgent = freeSecsLeft <= 60;
+  const dockOpen = compareOpen || alertsOpen || heatmapOpen || prefsOpen;
 
   return (
     <div className="app-root">
@@ -220,17 +162,16 @@ export default function App() {
         lastUpdated={lastUpdated} user={user} onLogout={handleLogout}
         onSearchEnter={handleSearchEnter}
         portPanelOpen={portPanelOpen} onTogglePortPanel={() => setPortPanelOpen(p => !p)}
-        compareOpen={compareOpen}  onToggleCompare={() => setCompareOpen(p => !p)}
-        alertsOpen={alertsOpen}    onToggleAlerts={() => setAlertsOpen(p => !p)} alertCount={alertCount}
-        heatmapOpen={heatmapOpen}  onToggleHeatmap={() => setHeatmapOpen(p => !p)}
-        prefsOpen={prefsOpen}      onTogglePrefs={() => setPrefsOpen(p => !p)}
+        compareOpen={compareOpen}  onToggleCompare={openCompare}
+        alertsOpen={alertsOpen}    onToggleAlerts={openAlerts}   alertCount={alertCount}
+        heatmapOpen={heatmapOpen}  onToggleHeatmap={openHeatmap}
+        prefsOpen={prefsOpen}      onTogglePrefs={openPrefs}
       />
 
       <ErrorBanner message={error} onRetry={refresh} />
 
       <div className="app-body">
 
-        {/* LEFT PANEL */}
         <div className={`app-left-panel ${panelOpen ? "open" : "closed"}`}>
           <VesselPanel
             vessels={vessels} selectedId={selectedVessel?.imo_number}
@@ -239,11 +180,8 @@ export default function App() {
           />
         </div>
 
-        {showLeftBackdrop && (
-          <div className="app-mobile-backdrop" onClick={handleBackdropClick} />
-        )}
+        {showLeftBackdrop && <div className="app-mobile-backdrop" onClick={handleBackdropClick} />}
 
-        {/* MAP AREA */}
         <div className="app-map-area">
 
           <PortActivityPanel
@@ -268,10 +206,6 @@ export default function App() {
             </div>
           )}
 
-          {/* ── FREE STREAMING COUNTDOWN BADGE ─────────────────
-              Shown only when NOT logged in and timer still running.
-              Disappears forever once user signs in.
-          ─────────────────────────────────────────────────────── */}
           {!user && !freeExpired && (
             <div className={`free-timer-badge${isUrgent ? " urgent" : ""}`}>
               <span className="free-timer-dot" />
@@ -279,26 +213,16 @@ export default function App() {
                 <span className="free-timer-label">FREE STREAMING</span>
                 <span className="free-timer-count">{freeMin}:{freeSec}</span>
               </div>
-              <button
-                className="free-timer-signin"
-                onClick={() => setFreeExpired(true)}
-              >
-                SIGN IN
-              </button>
+              <button className="free-timer-signin" onClick={() => setFreeExpired(true)}>SIGN IN</button>
             </div>
           )}
 
         </div>
 
         {showRightBackdrop && (
-          <div
-            className="app-mobile-backdrop"
-            onClick={handleCloseDetail}
-            style={{ zIndex: 45 }}
-          />
+          <div className="app-mobile-backdrop" onClick={handleCloseDetail} style={{ zIndex: 45 }} />
         )}
 
-        {/* RIGHT DETAIL PANEL */}
         <div className={`app-right-panel ${selectedVessel ? "open" : "closed"}`}>
           <VesselDetailPanel
             vessel={selectedVessel} onClose={handleCloseDetail}
@@ -306,35 +230,34 @@ export default function App() {
           />
         </div>
 
-      </div>{/* end app-body */}
+      </div>
 
-      {/* ── BOTTOM PANEL DOCK ────────────────────────────────────
-          Panels slide up from the bottom of the viewport.
-          Only one is visible at a time; toggling an active one closes it.
-      ──────────────────────────────────────────────────────────── */}
-      <div className={`app-bottom-dock${(compareOpen || alertsOpen || heatmapOpen || prefsOpen) ? " open" : ""}`}>
-        <VesselComparison
-          vessels={vessels}
-          onSelectVessel={handleSelectVessel}
-          isOpen={compareOpen}
-          onClose={() => setCompareOpen(false)}
-        />
-        <LiveAlertsFeed
-          vessels={vessels}
-          onSelectVessel={handleSelectVessel}
-          isOpen={alertsOpen}
-          onClose={() => setAlertsOpen(false)}
-          onAlertCountChange={setAlertCount}
-        />
-        <PortCongestionHeatmap
-          isOpen={heatmapOpen}
-          onClose={() => setHeatmapOpen(false)}
-        />
-        <ThemePreferences
-          isOpen={prefsOpen}
-          onClose={() => setPrefsOpen(false)}
-          onSave={(prefs) => console.log("[MPA] Preferences saved:", prefs)}
-        />
+      {/* ── BOTTOM PANEL DOCK ─────────────────────────────────── */}
+      <div className={`app-bottom-dock${dockOpen ? " open" : ""}`}>
+        <Suspense fallback={null}>
+          {compareOpen && (
+            <VesselComparison
+              vessels={vessels} onSelectVessel={handleSelectVessel}
+              isOpen={compareOpen} onClose={() => setCompareOpen(false)}
+            />
+          )}
+          {alertsOpen && (
+            <LiveAlertsFeed
+              vessels={vessels} onSelectVessel={handleSelectVessel}
+              isOpen={alertsOpen} onClose={() => setAlertsOpen(false)}
+              onAlertCountChange={setAlertCount}
+            />
+          )}
+          {heatmapOpen && (
+            <PortCongestionHeatmap isOpen={heatmapOpen} onClose={() => setHeatmapOpen(false)} />
+          )}
+          {prefsOpen && (
+            <ThemePreferences
+              isOpen={prefsOpen} onClose={() => setPrefsOpen(false)}
+              onSave={(prefs) => console.log("[MPA] Preferences saved:", prefs)}
+            />
+          )}
+        </Suspense>
       </div>
 
     </div>
