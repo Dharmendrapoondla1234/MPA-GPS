@@ -11,11 +11,11 @@ import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import "./styles/App.css";
 
-// ── New panels — lazy loaded so missing files don't break the build ──
-const VesselComparison      = lazy(() => import("./components/VesselComparison"));
-const LiveAlertsFeed        = lazy(() => import("./components/LiveAlertsFeed"));
-const PortCongestionHeatmap = lazy(() => import("./components/PortCongestionHeatmap"));
-const ThemePreferences      = lazy(() => import("./components/ThemePreferences"));
+// ── New panels — paths match the actual filenames GitHub saved (lowercase) ──
+const VesselComparison      = lazy(() => import("./components/Vesselcomparison"));
+const LiveAlertsFeed        = lazy(() => import("./components/Livealertsfeed"));
+const PortCongestionHeatmap = lazy(() => import("./components/Portcongestionheatmap"));
+const ThemePreferences      = lazy(() => import("./components/Themepreferences"));
 
 const IS_MOBILE = () => window.innerWidth <= 768;
 

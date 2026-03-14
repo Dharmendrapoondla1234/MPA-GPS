@@ -1,6 +1,6 @@
 // src/components/LiveAlertsFeed.jsx — MPA v7
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import "./LiveAlertsFeed.css";
+import "./Livealertsfeed.css";
 
 const ALERT_TEMPLATES = [
   {
