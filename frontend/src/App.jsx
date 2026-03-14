@@ -7,6 +7,10 @@ import MapView from "./components/MapView";
 import SpeedLegend from "./components/SpeedLegend";
 import ErrorBanner from "./components/ErrorBanner";
 import PortActivityPanel from "./components/PortActivityPanel";
+import VesselComparison from "./components/VesselComparison";
+import LiveAlertsFeed from "./components/LiveAlertsFeed";
+import PortCongestionHeatmap from "./components/PortCongestionHeatmap";
+import ThemePreferences from "./components/ThemePreferences";
 import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import "./styles/App.css";
@@ -107,6 +111,11 @@ export default function App() {
   const [predictRoute,    setPredictRoute]   = useState(null);
   const [panelOpen,       setPanelOpen]      = useState(!IS_MOBILE());
   const [portPanelOpen,   setPortPanelOpen]  = useState(false);
+  const [compareOpen,     setCompareOpen]    = useState(false);
+  const [alertsOpen,      setAlertsOpen]     = useState(false);
+  const [alertCount,      setAlertCount]     = useState(0);
+  const [heatmapOpen,     setHeatmapOpen]    = useState(false);
+  const [prefsOpen,       setPrefsOpen]      = useState(false);
   const mapRef = useRef(null);
 
   const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } =
@@ -211,6 +220,10 @@ export default function App() {
         lastUpdated={lastUpdated} user={user} onLogout={handleLogout}
         onSearchEnter={handleSearchEnter}
         portPanelOpen={portPanelOpen} onTogglePortPanel={() => setPortPanelOpen(p => !p)}
+        compareOpen={compareOpen}  onToggleCompare={() => setCompareOpen(p => !p)}
+        alertsOpen={alertsOpen}    onToggleAlerts={() => setAlertsOpen(p => !p)} alertCount={alertCount}
+        heatmapOpen={heatmapOpen}  onToggleHeatmap={() => setHeatmapOpen(p => !p)}
+        prefsOpen={prefsOpen}      onTogglePrefs={() => setPrefsOpen(p => !p)}
       />
 
       <ErrorBanner message={error} onRetry={refresh} />
@@ -293,7 +306,37 @@ export default function App() {
           />
         </div>
 
+      </div>{/* end app-body */}
+
+      {/* ── BOTTOM PANEL DOCK ────────────────────────────────────
+          Panels slide up from the bottom of the viewport.
+          Only one is visible at a time; toggling an active one closes it.
+      ──────────────────────────────────────────────────────────── */}
+      <div className={`app-bottom-dock${(compareOpen || alertsOpen || heatmapOpen || prefsOpen) ? " open" : ""}`}>
+        <VesselComparison
+          vessels={vessels}
+          onSelectVessel={handleSelectVessel}
+          isOpen={compareOpen}
+          onClose={() => setCompareOpen(false)}
+        />
+        <LiveAlertsFeed
+          vessels={vessels}
+          onSelectVessel={handleSelectVessel}
+          isOpen={alertsOpen}
+          onClose={() => setAlertsOpen(false)}
+          onAlertCountChange={setAlertCount}
+        />
+        <PortCongestionHeatmap
+          isOpen={heatmapOpen}
+          onClose={() => setHeatmapOpen(false)}
+        />
+        <ThemePreferences
+          isOpen={prefsOpen}
+          onClose={() => setPrefsOpen(false)}
+          onSave={(prefs) => console.log("[MPA] Preferences saved:", prefs)}
+        />
       </div>
+
     </div>
   );
 }
