@@ -268,3 +268,29 @@ html, body, #root {
   transform: scale(1.04);
   box-shadow: 0 4px 14px rgba(0,229,255,0.35);
 }
+/* ── BOTTOM PANEL DOCK ───────────────────────────────────────── */
+/* Sits below app-body, collapses to 0 height when no panel open */
+.app-bottom-dock {
+  flex-shrink: 0;
+  width: 100%;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.30s cubic-bezier(0.4,0,0.2,1);
+  border-top: 1px solid transparent;
+  background: #07111e;
+  z-index: 35;
+}
+.app-bottom-dock.open {
+  max-height: 480px;
+  border-top-color: rgba(0,229,255,0.12);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,229,255,0.2) transparent;
+}
+.app-bottom-dock::-webkit-scrollbar { height: 3px; }
+.app-bottom-dock::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.2); border-radius: 2px; }
+
+/* On mobile the dock scrolls horizontally for the comparison cards */
+@media (max-width: 768px) {
+  .app-bottom-dock.open { max-height: 400px; }
+}
