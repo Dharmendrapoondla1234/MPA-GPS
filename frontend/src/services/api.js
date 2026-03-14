@@ -1,5 +1,8 @@
 // src/services/api.js — MPA Advanced v6
-const BASE = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
+// Single source of truth for the API base URL.
+// All components import this instead of repeating the hardcoded fallback.
+export const BASE_URL = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
+const BASE = BASE_URL;
 
 // ── REQUEST DEDUPLICATION + BROWSER CACHE ────────────────────────
 const inFlight  = new Map();
