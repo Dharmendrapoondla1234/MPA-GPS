@@ -1,6 +1,6 @@
 // src/components/PortCongestionHeatmap.jsx — MPA v7
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import "./PortCongestionHeatmap.css";
+import "./Portcongestionheatmap.css";
 
 // 12 regional ports with rough canvas coords (680×360 projection of SEA)
 const PORTS = [

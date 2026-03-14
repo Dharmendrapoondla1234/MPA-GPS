@@ -1,7 +1,7 @@
 // src/components/VesselComparison.jsx — MPA v7
 import React, { useState, useCallback  } from "react";
 import { getSpeedColor, getFlagEmoji  } from "../utils/vesselUtils";
-import "./VesselComparison.css";
+import "./Vesselcomparison.css";
 
 const MAX_VESSELS = 4;
 const MAX_SPEED   = 25; // kn — bar scale ceiling

@@ -1,6 +1,6 @@
 // src/components/ThemePreferences.jsx — MPA v7
 import React, { useState, useCallback } from "react";
-import "./ThemePreferences.css";
+import "./Themepreferences.css";
 
 const THEMES = [
   {
