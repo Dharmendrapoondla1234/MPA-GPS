@@ -136,16 +136,22 @@ export default function App() {
     return () => window.removeEventListener("resize", handler);
   }, [panelOpen]);
 
+  // Use a stable ref for vessels so handleSelectVessel never changes identity.
+  // Previously vessels was in the dep array → new function every render →
+  // MapView's marker useEffect re-ran and rebuilt ALL 1000+ markers on every selection.
+  const vesselsRef = useRef(vessels);
+  useEffect(() => { vesselsRef.current = vessels; }, [vessels]);
+
   const handleSelectVessel = useCallback((vessel) => {
     setSelectedVessel(vessel); setTrailData(null); setPredictRoute(null);
     if (IS_MOBILE()) setPanelOpen(false);
     setTimeout(() => {
-      const live = vessels.find(v => v.imo_number === vessel?.imo_number);
+      const live = vesselsRef.current.find(v => v.imo_number === vessel?.imo_number);
       const target = (live?.latitude_degrees && live?.longitude_degrees) ? live : vessel;
       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(target);
       mapRef.current?.triggerResize?.();
     }, 320);
-  }, [vessels]);
+  }, []); // stable — no deps, uses ref
 
   const handleCloseDetail = useCallback(() => {
     setSelectedVessel(null); setTrailData(null); setPredictRoute(null);
@@ -162,13 +168,14 @@ export default function App() {
   }, []);
 
   const handleSearchEnter = useCallback(() => {
-    if (vessels.length > 0) {
-      const v = vessels[0];
+    const cur = vesselsRef.current;
+    if (cur.length > 0) {
+      const v = cur[0];
       setSelectedVessel(v); setTrailData(null); setPredictRoute(null);
       if (mapRef.current?.panToVessel) mapRef.current.panToVessel(v);
       if (IS_MOBILE()) setPanelOpen(false);
     }
-  }, [vessels]);
+  }, []); // stable — no deps, uses ref
 
   const handleBackdropClick = useCallback(() => {
     setPanelOpen(false); setSelectedVessel(null);

@@ -472,15 +472,24 @@ const MapView = forwardRef(function MapView(
     const fresh    = freshVessels;
     const activeIds = new Set(fresh.map(v => String(v.imo_number)));
 
-    // Rebuild hover cache
-    const newHoverCache = {};
+    // Incrementally update hover cache — only rebuild entries whose speed or heading changed.
+    // Previously this rebuilt HTML strings for ALL vessels every time freshVessels changed,
+    // which was thousands of string concatenations per selection / per refresh.
+    const prevCache = hoverCache.current;
+    const newCache  = { ...prevCache };
     fresh.forEach(v => {
       const spd = parseFloat(v.speed || 0);
-      const col = getSpeedColor(spd);
+      const hdg = parseFloat(v.heading || 0);
+      const prev = markersRef.current[String(v.imo_number)]?._vessel;
+      // Skip if speed and heading haven't changed (the only things that affect the tooltip)
+      if (prev && Math.abs((prev.speed || 0) - spd) < 0.1 && Math.abs((prev.heading || 0) - hdg) < 2 && prevCache[v.imo_number]) return;
+      const col    = getSpeedColor(spd);
       const region = getRegionName(parseFloat(v.latitude_degrees || 0), parseFloat(v.longitude_degrees || 0));
-      newHoverCache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || 'Unknown'}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${v.heading || 0}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ''}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
+      newCache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || 'Unknown'}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${hdg}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ''}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
     });
-    hoverCache.current = newHoverCache;
+    // Remove entries for vessels that are no longer active
+    Object.keys(newCache).forEach(id => { if (!activeIds.has(id)) delete newCache[id]; });
+    hoverCache.current = newCache;
 
     // Remove stale markers
     Object.keys(markersRef.current).forEach(id => {
@@ -539,9 +548,10 @@ const MapView = forwardRef(function MapView(
           m._vessel = v;
           m.addListener("click", () => {
             hoverWin.current.close();
-            infoWin.current.setContent(buildInfoWindowContent(v));
+            // Use m._vessel (live ref) not v (stale closure from creation time)
+            infoWin.current.setContent(buildInfoWindowContent(m._vessel));
             infoWin.current.open(mapObj.current, m);
-            onVesselClick(v);
+            onVesselClick(m._vessel);
           });
           if (!IS_MOBILE) {
             m.addListener("mouseover", () => {
@@ -610,25 +620,33 @@ const MapView = forwardRef(function MapView(
     }
     prevSelectedId.current = selId;
 
-    // Pulse circle animation
+    // Pulse circle animation — use rAF + opacity-only updates instead of setInterval + setRadius.
+    // setRadius triggers a Google Maps geometry recalc every 80ms = continuous main-thread jank.
+    // Pulsing strokeOpacity is ~4x cheaper: no geometry recompute, just a paint update.
     const color = getSpeedColor(selectedVessel.speed);
     pulseCirc.current = new window.google.maps.Circle({
-      center: { lat, lng }, radius: 600,
+      center: { lat, lng }, radius: 900,
       fillColor: color, fillOpacity: 0.07,
       strokeColor: color, strokeOpacity: 0.8, strokeWeight: 2,
       map: mapObj.current, zIndex: 5,
     });
-    let r = 600, grow = true;
-    pulseTimer.current = setInterval(() => {
+    let opacity = 0.8, growing = false, lastPulse = 0;
+    const PULSE_MS = IS_MOBILE ? 200 : 120;
+    const pulseFn = (ts) => {
       if (!pulseCirc.current) return;
-      r = grow ? r + 60 : r - 60;
-      if (r > 1200) grow = false;
-      if (r < 600)  grow = true;
-      try { pulseCirc.current.setRadius(r); } catch(_) {}
-    }, IS_MOBILE ? 150 : 80);
+      if (ts - lastPulse >= PULSE_MS) {
+        lastPulse = ts;
+        opacity = growing ? opacity + 0.08 : opacity - 0.08;
+        if (opacity >= 0.85) growing = false;
+        if (opacity <= 0.25) growing = true;
+        try { pulseCirc.current.setOptions({ strokeOpacity: opacity }); } catch(_) {}
+      }
+      pulseTimer.current = requestAnimationFrame(pulseFn);
+    };
+    pulseTimer.current = requestAnimationFrame(pulseFn);
 
     return () => {
-      clearInterval(pulseTimer.current);
+      cancelAnimationFrame(pulseTimer.current);
       if (pulseCirc.current) { pulseCirc.current.setMap(null); pulseCirc.current = null; }
     };
   }, [selectedVessel]);
