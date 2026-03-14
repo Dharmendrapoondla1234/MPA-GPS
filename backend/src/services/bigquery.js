@@ -8,15 +8,15 @@ const PROJECT = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
 const BQ_LOCATION = process.env.BIGQUERY_LOCATION || "asia-southeast1";
 
 // ── DATASET NORMALISATION ─────────────────────────────────────────
-const DATASET_ENV = process.env.BIGQUERY_DATASET || "Photons_MPA";
-const DATASET = DATASET_ENV === "MPA" ? "Photons_MPA" : DATASET_ENV;
+const DATASET_ENV = process.env.BIGQUERY_DATASET || "MPA";
+const DATASET = DATASET_ENV;
 
 // ── TABLE REFERENCES ──────────────────────────────────────────────
 const T = {
-  VESSELS: `\`${PROJECT}.${DATASET}.fct_vessel_live_tracking\``,
-  MASTER: `\`${PROJECT}.${DATASET}.fct_vessel_master\``,
-  ARRIVALS: `\`${PROJECT}.${DATASET}.fct_vessel_arrivals\``,
-  DEPARTURES: `\`${PROJECT}.${DATASET}.fct_vessel_departures\``,
+  VESSELS: `\`${PROJECT}.${DATASET}.f_vessel_live_tracking\``,
+  MASTER: `\`${PROJECT}.${DATASET}.d_vessel_master\``,
+  ARRIVALS: `\`${PROJECT}.${DATASET}.f_vessel_arrivals\``,
+  DEPARTURES: `\`${PROJECT}.${DATASET}.f_vessel_departures\``,
   POSITIONS_HIST: `\`${PROJECT}.${DATASET}.stg_vessel_positions\``,
   USERS: `\`${PROJECT}.${DATASET}.MPA_Users\``,
   LEGACY_VESSELS: `\`${PROJECT}.MPA.MPA_Master_Vessels\``,
@@ -96,7 +96,7 @@ async function useDbt() {
       .then(() => {
         cache.dbtExists = { checked: true, value: true };
         logger.info(
-          "✅ dbt tables found — Photons_MPA.fct_vessel_live_tracking",
+          "✅ dbt tables found — MPA.f_vessel_live_tracking",
         );
         return true;
       })
@@ -187,9 +187,9 @@ async function getLatestVessels({
   const lim = Math.min(parseInt(limit) || 5000, 10000);
 
   if (dbt) {
-    // last_position_at is already corrected UTC (fixed in fct_vessel_positions_latest)
-    // latitude_degrees/longitude_degrees are already in degrees (converted in fct_vessel_positions_latest)
-    // fct_vessel_live_tracking passes them through unchanged — just SELECT *
+    // last_position_at is already corrected UTC (fixed in f_vessel_positions_latest)
+    // latitude_degrees/longitude_degrees are already in degrees (converted in f_vessel_positions_latest)
+    // f_vessel_live_tracking passes them through unchanged — just SELECT *
     cond.push(
       `last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)`,
     );
@@ -310,8 +310,8 @@ async function getVesselDetail(imoNumber) {
     });
     return rows[0] || null;
   }
-  // fct_vessel_master.latitude and .longitude are already in DEGREES
-  // (converted in fct_vessel_positions_latest, stored through fct_vessel_master).
+  // d_vessel_master.latitude and .longitude are already in DEGREES
+  // (converted in f_vessel_positions_latest, stored through d_vessel_master).
   // Do NOT multiply by RAD — that would double-convert to ~79°N (Russia).
   // last_position_at is already corrected UTC — do NOT subtract 8h again.
   const [rows] = await bigquery.query({
@@ -375,7 +375,7 @@ async function getRecentArrivals(limit = 50) {
       return toCache("arrivals", rows);
     } catch (e) {
       logger.warn(
-        `[BQ] fct_vessel_arrivals not ready, falling back: ${e.message.slice(0, 80)}`,
+        `[BQ] f_vessel_arrivals not ready, falling back: ${e.message.slice(0, 80)}`,
       );
     }
   }
@@ -411,7 +411,7 @@ async function getRecentDepartures(limit = 50) {
       return toCache("departures", rows);
     } catch (e) {
       logger.warn(
-        `[BQ] fct_vessel_departures not ready, falling back: ${e.message.slice(0, 80)}`,
+        `[BQ] f_vessel_departures not ready, falling back: ${e.message.slice(0, 80)}`,
       );
     }
   }
@@ -490,7 +490,7 @@ async function getPortActivity() {
       return toCache("portActivity", rows);
     } catch (e) {
       logger.warn(
-        `[BQ] fct_vessel_arrivals not ready for port-activity, falling back: ${e.message.slice(0, 80)}`,
+        `[BQ] f_vessel_arrivals not ready for port-activity, falling back: ${e.message.slice(0, 80)}`,
       );
     }
   }
@@ -541,7 +541,7 @@ async function warmCache() {
     }
   }
   logger.info(
-    `🔥 Cache warm done: ${ok}/${jobs.length} (${dbt ? "Photons_MPA" : "legacy MPA"})`,
+    `🔥 Cache warm done: ${ok}/${jobs.length} (${dbt ? "MPA" : "legacy MPA"})`,
   );
 }
 
