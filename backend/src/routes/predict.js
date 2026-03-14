@@ -216,7 +216,7 @@ router.get("/:imo", async (req, res) => {
         shipping_agent:bqv(v.shipping_agent),
         crew_count:    v.crew_count ? Number(v.crew_count) : null,
         data_quality:  v.data_quality_score ? Number(v.data_quality_score) : null,
-        data_source:   isDbt ? "Photons_MPA dbt" : "MPA legacy",
+        data_source:   isDbt ? "MPA dbt" : "MPA legacy",
       },
       prediction: top ? {
         destination: top.port, destination_code: top.code,
@@ -241,7 +241,7 @@ router.get("/:imo", async (req, res) => {
         routing_method:    routeMeta.method,
         routing_engine:    routeMeta.routingEngine,
         lane_hits:         routeMeta.laneHits,
-        data_source:       isDbt ? "Photons_MPA dbt tables" : "MPA legacy tables",
+        data_source:       isDbt ? "MPA dbt tables" : "MPA legacy tables",
       },
     };
 
