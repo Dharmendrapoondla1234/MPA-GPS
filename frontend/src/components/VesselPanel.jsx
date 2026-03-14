@@ -1,8 +1,7 @@
 // src/components/WeatherPanel.jsx — MPA Live Weather Overlay v1
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import "./WeatherPanel.css";
-
-const BASE_URL = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
+import { BASE_URL } from "../services/api";
 const REFRESH_MS = 3 * 60 * 1000; // 3 min — matches backend cache
 
 // ── Wind speed to colour (Beaufort-based) ──────────────────────

@@ -4,11 +4,11 @@ import React, {
 } from "react";
 import { Loader } from "@googlemaps/js-api-loader";
 import { buildInfoWindowContent, getSpeedColor, getRegionName } from "../utils/vesselUtils";
+import { BASE_URL } from "../services/api";
 import "./MapView.css";
 import WeatherPanel from "./WeatherPanel";
 
 const MAP_CENTER  = { lat: 1.35, lng: 103.82 };
-const BASE_URL    = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
 let loaderPromise = null;
 const RADIUS   = { DANGER: 500, WARNING: 1500 };
 const STALE_MS = 2 * 60 * 60 * 1000;   // 2h live window
@@ -36,7 +36,6 @@ function distanceM(lat1, lng1, lat2, lng2) {
 function smoothMove(marker, newLat, newLng) {
   const from = marker.getPosition();
   if (!from) { marker.setPosition({ lat: newLat, lng: newLng }); return; }
-  const dLat = newLat - from.lat(), dLng = newLng - from.lng();
 
   // Bug #2 fix: always snap position, never animate during marker updates.
   // Previously 500+ concurrent 600ms rAF chains ran on every 60s vessel refresh,
@@ -732,13 +731,10 @@ const MapView = forwardRef(function MapView(
       raw.forEach(p => bounds.extend({ lat: p.latitude_degrees, lng: p.longitude_degrees }));
       mapObj.current.fitBounds(bounds, { padding: 90 });
     }
-  }, [trailData]); // aiTrajectory layer changes handled separately below
-
-  // Redraw AI interpolation overlay when the layer is toggled without re-fitting bounds
-  useEffect(() => {
-    // Just let the trail useEffect above re-run naturally; this effect is a no-op placeholder
-    // that documents the intentional dep split. aiTrajectory visual is already inside trailData effect.
-  }, [layers.aiTrajectory]);
+    // Bug #8 fix: layers.aiTrajectory intentionally excluded from deps.
+    // Toggling it redraws the trail visual without re-fitting map bounds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trailData]);
 
   /* ── Predict route overlay ──────────────────────────────── */
   useEffect(() => {
@@ -1000,7 +996,7 @@ const MapView = forwardRef(function MapView(
                 onClick={e => {
                   e.stopPropagation();
                   if (a.lat && a.lng && mapObj.current) { mapObj.current.panTo({ lat: a.lat, lng: a.lng }); mapObj.current.setZoom(15); }
-                  if (a.imo) onVesselClick(vessels.find(v => v.imo_number===a.imo || String(v.imo_number)===String(a.imo)) || null);
+                  if (a.imo) onVesselClickRef.current(vessels.find(v => v.imo_number===a.imo || String(v.imo_number)===String(a.imo)) || null);
                 }}
               >
                 <div className="mv-ap-item-left">
