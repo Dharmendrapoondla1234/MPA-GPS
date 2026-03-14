@@ -422,7 +422,9 @@
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
-  padding-bottom: 28px;
+  /* Add safe-area padding so content clears iOS home indicator and Android nav bar */
+  padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+  -webkit-overflow-scrolling: touch;  /* smooth momentum scroll on iOS */
 }
 .dp-body::-webkit-scrollbar { width: 2px; }
 .dp-body::-webkit-scrollbar-track { background: transparent; }
@@ -827,4 +829,20 @@
   .dp-cap-grid  { grid-template-columns: repeat(2,1fr); }
   .dp-stat-grid { grid-template-columns: repeat(2,1fr); }
   .dp-name      { font-size: 15px; }
+  /* Ensure root fills the sliding panel fully — no content cut-off */
+  .dp-root {
+    height: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Tabs must always be fully visible — don't let them scroll off-screen */
+  .dp-tabs {
+    flex-shrink: 0;
+  }
+  /* On small phones reduce hero padding to give more room to scrollable body */
+  @media (max-height: 640px) {
+    .dp-hero     { padding: 8px 14px 8px; }
+    .dp-speed-num { font-size: 36px; }
+  }
 }

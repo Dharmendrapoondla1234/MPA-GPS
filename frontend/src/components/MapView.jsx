@@ -569,10 +569,14 @@ const MapView = forwardRef(function MapView(
           m._vessel = v;
           m.addListener("click", () => {
             hoverWin.current.close();
-            // Use m._vessel (live ref) not v (stale closure from creation time)
-            infoWin.current.setContent(buildInfoWindowContent(m._vessel));
-            infoWin.current.open(mapObj.current, m);
-            onVesselClickRef.current(m._vessel); // Bug #6: use ref, not closure
+            // Defer the heavy HTML string build to next frame so the tap/click
+            // feedback (marker highlight, panel open) is instant on mobile.
+            requestAnimationFrame(() => {
+              if (!infoWin.current || !mapObj.current) return;
+              infoWin.current.setContent(buildInfoWindowContent(m._vessel));
+              infoWin.current.open(mapObj.current, m);
+            });
+            onVesselClickRef.current(m._vessel);
           });
           if (!IS_MOBILE) {
             m.addListener("mouseover", () => {
@@ -866,16 +870,20 @@ const MapView = forwardRef(function MapView(
     setMapStyle(next);
   }, [mapStyle]);
 
-  // Safe zoom helpers that respect min/max
+  // Zoom helpers — wrapped in rAF so Google Maps paint doesn't block touch feedback
   const zoomIn  = useCallback(() => {
     if (!mapObj.current) return;
-    const z = mapObj.current.getZoom() ?? 11;
-    if (z < MAX_ZOOM) mapObj.current.setZoom(z + 1);
+    requestAnimationFrame(() => {
+      const z = mapObj.current?.getZoom() ?? 11;
+      if (z < MAX_ZOOM) mapObj.current.setZoom(z + 1);
+    });
   }, []);
   const zoomOut = useCallback(() => {
     if (!mapObj.current) return;
-    const z = mapObj.current.getZoom() ?? 11;
-    if (z > MIN_ZOOM) mapObj.current.setZoom(z - 1);
+    requestAnimationFrame(() => {
+      const z = mapObj.current?.getZoom() ?? 11;
+      if (z > MIN_ZOOM) mapObj.current.setZoom(z - 1);
+    });
   }, []);
 
   const liveCount   = vessels.filter(v => !isStale(v)).length;

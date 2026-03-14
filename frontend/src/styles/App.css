@@ -140,6 +140,8 @@ html, body, #root {
     max-width: 360px !important;
     transform: translateX(0);
     transition: transform 0.28s ease;
+    /* Respect iOS safe area — panel shouldn't overlap the home indicator */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .app-detail-panel {
     position: absolute;
