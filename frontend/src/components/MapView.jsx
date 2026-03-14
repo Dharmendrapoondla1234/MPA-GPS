@@ -8,7 +8,7 @@ import "./MapView.css";
 import WeatherPanel from "./WeatherPanel";
 
 const MAP_CENTER  = { lat: 1.35, lng: 103.82 };
-const BASE_URL    = process.env.REACT_APP_API_URL || "https://vessel-backends.onrender.com/api";
+const BASE_URL    = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
 let loaderPromise = null;
 const RADIUS   = { DANGER: 500, WARNING: 1500 };
 const STALE_MS = 2 * 60 * 60 * 1000;   // 2h live window
