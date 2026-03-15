@@ -1,6 +1,6 @@
 // src/components/PortActivityPanel.jsx — v4 "Port Command Centre"
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { fetchArrivals, fetchDepartures, fetchPortActivity } from "../services/api";
+import { fetchArrivals, fetchDepartures, fetchPortActivity, fetchVesselDetail } from "../services/api";
 import { getFlagEmoji, formatTimestamp, timeAgo, getVesselTypeLabel } from "../utils/vesselUtils";
 import "./PortActivityPanel.css";
 
@@ -80,11 +80,52 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
   const panelRef  = useRef(null);
   const searchRef = useRef(null);
 
-  const selectWithNav = useCallback((record) => {
+  const [loadingVessel, setLoadingVessel] = useState(null);
+
+  // Merge arrival/departure record fields onto live vessel — gives detail panel ALL data
+  const mergeRecordOntoVessel = useCallback((live, record) => {
+    if (!live) return null;
+    return {
+      ...live,
+      berth_location:        live.berth_location        || bq(record.berth_location) || bq(record.berth_grid),
+      berth_grid:            live.berth_grid             || bq(record.berth_grid),
+      shipping_agent:        live.shipping_agent         || bq(record.shipping_agent),
+      voyage_purpose:        live.voyage_purpose         || bq(record.voyage_purpose),
+      last_port_departed:    live.last_port_departed     || bq(record.location_from),
+      next_port_destination: live.next_port_destination  || bq(record.next_port),
+      declared_arrival_time: live.declared_arrival_time  || bq(record.arrival_time) || bq(record.departure_time),
+      crew_count:            live.crew_count             ?? record.crew_count,
+      passenger_count:       live.passenger_count        ?? record.passenger_count,
+    };
+  }, []);
+
+  const selectWithNav = useCallback(async (record) => {
     if (!onSelectVessel || !record?.imo_number) return;
-    const live = vessels.find(v => String(v.imo_number)===String(record.imo_number));
-    onSelectVessel(live || record);
-  }, [vessels, onSelectVessel]);
+
+    // 1. Live match — has position + all fields
+    const live = vessels.find(v => String(v.imo_number) === String(record.imo_number));
+    if (live) {
+      onSelectVessel(mergeRecordOntoVessel(live, record));
+      return;
+    }
+
+    // 2. No live match — fetch full vessel detail (position + static data) from API
+    setLoadingVessel(String(record.imo_number));
+    try {
+      const res    = await fetchVesselDetail(record.imo_number);
+      const detail = res?.data || res;
+      if (detail?.imo_number) {
+        onSelectVessel(mergeRecordOntoVessel(detail, record));
+      } else {
+        // 3. Fallback — pass record as-is (panel will show what data it has)
+        onSelectVessel(record);
+      }
+    } catch {
+      onSelectVessel(record);
+    } finally {
+      setLoadingVessel(null);
+    }
+  }, [vessels, onSelectVessel, mergeRecordOntoVessel]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -390,6 +431,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
             {filteredArrivals.map((v,i)=>(
               <VesselCard key={v.imo_number+"-a-"+i} v={v} type="arrival"
                 isSelected={selectedImo===v.imo_number}
+                isFetching={loadingVessel===String(v.imo_number)}
                 isExpanded={expanded===(v.imo_number+"-a-"+i)}
                 onSelect={()=>selectWithNav(v)}
                 onExpand={()=>setExpanded(expanded===(v.imo_number+"-a-"+i)?null:(v.imo_number+"-a-"+i))}
@@ -407,6 +449,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
             {filteredDepartures.map((v,i)=>(
               <VesselCard key={v.imo_number+"-d-"+i} v={v} type="departure"
                 isSelected={selectedImo===v.imo_number}
+                isFetching={loadingVessel===String(v.imo_number)}
                 isExpanded={expanded===(v.imo_number+"-d-"+i)}
                 onSelect={()=>selectWithNav(v)}
                 onExpand={()=>setExpanded(expanded===(v.imo_number+"-d-"+i)?null:(v.imo_number+"-d-"+i))}
@@ -436,6 +479,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
             {expectedVessels.map((v,i)=>(
               <VesselCard key={v.imo_number+"-e-"+i} v={v} type="expected"
                 isSelected={selectedImo===v.imo_number}
+                isFetching={loadingVessel===String(v.imo_number)}
                 isExpanded={expanded===(v.imo_number+"-e-"+i)}
                 onSelect={()=>selectWithNav(v)}
                 onExpand={()=>setExpanded(expanded===(v.imo_number+"-e-"+i)?null:(v.imo_number+"-e-"+i))}
@@ -472,7 +516,7 @@ function StatPill({ color, val, label, onClick, active }) {
 }
 
 /* ── Vessel Card ── */
-function VesselCard({ v, isSelected, isExpanded, onSelect, onExpand, timeField, routeFrom, routeTo, dirColor, dirLabel }) {
+function VesselCard({ v, isSelected, isExpanded, isFetching, onSelect, onExpand, timeField, routeFrom, routeTo, dirColor, dirLabel }) {
   const name    = bq(v.vessel_name)||"Unknown Vessel";
   const imo     = v.imo_number;
   const flag    = bq(v.flag);
@@ -489,9 +533,10 @@ function VesselCard({ v, isSelected, isExpanded, onSelect, onExpand, timeField, 
   const dq      = safeNum(v.data_quality_score);
 
   return (
-    <div className={"pa-card"+(isSelected?" pa-card--sel":"")+(v.is_upcoming?" pa-card--upcoming":"")}
+    <div className={"pa-card"+(isSelected?" pa-card--sel":"")+(v.is_upcoming?" pa-card--upcoming":"")+(isFetching?" pa-card--fetching":"")}
       style={{"--dc":dirColor}} onClick={onSelect}>
 
+      {isFetching && <div className="pa-card-fetch-overlay"><span className="pa-fetch-spinner"/>Locating…</div>}
       <div className="pa-card-accent"/>
 
       <div className="pa-card-body">

@@ -1,5 +1,20 @@
 /* PortActivityPanel.css — v4 "Port Command Centre" */
 
+/* ── Fetching overlay on card ── */
+.pa-card--fetching { pointer-events:none; }
+.pa-card-fetch-overlay {
+  position:absolute; inset:0; z-index:10; border-radius:10px;
+  background:rgba(6,15,29,0.75); backdrop-filter:blur(3px);
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  font-family:'JetBrains Mono',monospace; font-size:9px; color:#00e5ff;
+  letter-spacing:.08em;
+}
+.pa-fetch-spinner {
+  width:12px; height:12px; border-radius:50%;
+  border:2px solid rgba(0,229,255,0.2); border-top-color:#00e5ff;
+  animation:pa-spin-anim .7s linear infinite; flex-shrink:0;
+}
+
 /* ── Trigger button ── */
 .pa-trigger {
   display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -59,7 +74,7 @@
   from { transform:rotate(0deg); border-top-color:rgba(0,229,255,0.4); }
   to   { transform:rotate(360deg); border-top-color:rgba(0,229,255,0.4); }
 }
-
+ 
 .pa-title-main {
   font-family:'Barlow Condensed',sans-serif; font-size:14px; font-weight:900;
   color:#e8f4ff; letter-spacing:.1em; display:flex; align-items:center; gap:5px;
