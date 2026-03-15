@@ -5,19 +5,29 @@
 
 html, body, #root {
   height: 100%;
+  /* Use dvh (dynamic viewport height) on mobile — avoids browser chrome overlap */
+  height: 100dvh;
   width: 100%;
   overflow: hidden;
   background: #060e18;
   color: #c8dff0;
   font-family: 'Rajdhani', sans-serif;
+  /* Prevent content shift when mobile browser chrome shows/hides */
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 .app-root {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
+  /* Respect notch/home-bar on iOS */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* ── BODY: map takes ALL remaining space ─────────────── */

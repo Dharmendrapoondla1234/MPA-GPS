@@ -263,26 +263,86 @@
 }
 .tb-user-logout:hover { color: #ff2244; }
 
-/* Responsive */
+/* Responsive — tablet */
 @media (max-width: 900px) {
   .tb-filter-group:last-of-type { display: none; }
   .tb-stats .tb-divider:nth-child(n+4),
   .tb-stats .tb-stat:nth-child(n+4) { display: none; }
 }
+
+/* ── MOBILE (≤600px) ─────────────────────────────────────────── */
 @media (max-width: 600px) {
-  .topbar { gap: 5px; padding: 0 8px; height: 48px; min-height: 48px; }
-  .tb-logo-sub { display: none; }
-  .tb-logo-text { font-size: 11px; }
-  .tb-stats { display: none; }
-  .tb-filter-group { display: none; }
-  .tb-search-wrap { max-width: 150px; min-width: 100px; }
-  .tb-updated { display: none; }
-  .tb-timer { display: none; }
-  .tb-live { font-size: 8px; }
-  .tb-user-menu {
-    right: -8px;
-    min-width: 220px;
+  .topbar {
+    gap: 0;
+    padding: 0 10px;
+    /* Two rows on mobile: logo+live row + search row */
+    height: auto;
+    min-height: 52px;
+    flex-wrap: nowrap;
+    align-items: center;
+    overflow: visible;
+    /* Prevent horizontal scroll */
+    max-width: 100vw;
+    box-sizing: border-box;
   }
+
+  /* ── Logo — keep but trim sub-text ── */
+  .tb-logo-sub { display: none; }
+  .tb-logo-text { font-size: 12px; letter-spacing: 0.04em; }
+  .tb-sonar { width: 22px; height: 22px; }
+  .tb-sonar-dot { width: 5px; height: 5px; }
+
+  /* ── Search — grow to fill middle ── */
+  .tb-search-wrap {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+    margin: 0 6px;
+    height: 30px;
+    padding: 0 8px;
+  }
+  .tb-search { font-size: 11px; }
+
+  /* ── Hide all filter dropdowns & stats ── */
+  .tb-stats         { display: none; }
+  .tb-filter-group  { display: none; }
+  .tb-updated       { display: none; }
+  .tb-timer         { display: none; }
+
+  /* ── Right controls — tighter, icon-only ── */
+  .tb-right {
+    gap: 3px;
+    flex-shrink: 0;
+  }
+  .tb-live {
+    font-size: 7px;
+    gap: 3px;
+    white-space: nowrap;
+  }
+  .tb-live-dot { width: 5px; height: 5px; }
+
+  /* Shrink icon buttons */
+  .tb-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+  }
+  .tb-btn svg { width: 12px; height: 12px; }
+
+  .tb-divider-v { display: none; }
+
+  /* Avatar */
+  .tb-avatar { width: 26px; height: 26px; font-size: 10px; }
+
+  /* User dropdown — stay inside screen */
+  .tb-user-menu {
+    right: 0;
+    min-width: 200px;
+    max-width: calc(100vw - 20px);
+  }
+
+  /* Alert badge */
+  .tb-alert-badge { top: -3px; right: -3px; font-size: 6px; padding: 1px 3px; }
 }
 /* Last updated timestamp */
 .tb-updated {

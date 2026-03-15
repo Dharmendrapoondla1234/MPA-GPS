@@ -570,7 +570,14 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
 /* ── MOBILE ── */
 @media (max-width: 768px) {
   .mv-alert-panel { max-width: calc(100vw - 28px); }
-  .mv-layer-panel { right: 14px; top: auto; bottom: 120px; }
+  .mv-layer-panel {
+    right: 8px;
+    top: auto;
+    bottom: 130px;
+    transform: none;
+    max-width: calc(100vw - 16px);
+    width: 220px;
+  }
   .mv-ctrl-cluster { top: 10px; right: 10px; }
   .mv-ctrl-btn { padding: 7px 10px; font-size: 9px; }
   .mv-bh-coords { display: none; }
@@ -578,19 +585,49 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
   .mv-range-legend { bottom: 14px; left: 14px; }
   .mv-bottom-hud { bottom: 10px; }
 
-  /* Icon strip — more compact on mobile */
+  /* ── Icon strip: flush right, vertically centred, compact ──── */
   .mv-icon-strip {
-    right: 8px;
-    top: calc(50% - 60px);
-    gap: 4px;
+    right: 6px;
+    /* Start at 50% but offset so strip centre aligns with map centre */
+    top: 50%;
+    transform: translateY(-55%);   /* slight upward bias avoids bottom HUD */
+    gap: 5px;
+    /* Never overflow vertically */
+    max-height: calc(100% - 120px);
+    /* Smooth GPU composite — no repaints */
+    will-change: transform;
   }
+
+  /* Strip buttons — tighter but still finger-friendly (44px min) */
   .mv-strip-btn {
-    width: 54px;
-    padding: 8px 6px 7px;
+    width: 52px;
+    min-height: 52px;
+    padding: 8px 5px 7px;
+    border-radius: 10px;
+    /* Promote to own layer — removes jank when map pans underneath */
+    will-change: border-color, color;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
   }
-  .mv-strip-icon { font-size: 16px; }
-  .mv-strip-lbl { font-size: 6.5px; }
-  .mv-strip-zoom-btn { padding: 7px 0; font-size: 15px; }
+  .mv-strip-icon { font-size: 18px; }
+  .mv-strip-lbl  { font-size: 6.5px; letter-spacing: 0.08em; }
+  .mv-strip-wind { font-size: 8px; }
+
+  /* Zoom pair */
+  .mv-strip-zoom { gap: 4px; }
+  .mv-strip-zoom-btn {
+    padding: 8px 0;
+    min-height: 44px;
+    min-width: 22px;
+    font-size: 16px;
+    border-radius: 9px;
+  }
+
+  /* Layer panel: open to the left of the strip */
+  .mv-layer-panel {
+    right: 66px;   /* strip width (52) + gap (8) + border fudge (6) */
+    left: auto;
+  }
 }
 
 /* ── Predicted Route Info Window ───────────────────────── */

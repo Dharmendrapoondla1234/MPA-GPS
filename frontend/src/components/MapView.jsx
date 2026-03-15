@@ -12,7 +12,15 @@ const MAP_CENTER  = { lat: 1.35, lng: 103.82 };
 let loaderPromise = null;
 const RADIUS   = { DANGER: 500, WARNING: 1500 };
 const STALE_MS = 2 * 60 * 60 * 1000;   // 2h live window
-const IS_MOBILE = /Mobi|Android/i.test(navigator.userAgent);
+// More aggressive mobile detection (covers iOS Safari)
+const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod|Touch/i.test(navigator.userAgent)
+  || (navigator.maxTouchPoints > 1);
+
+// ── Mobile performance caps ────────────────────────────────────────
+// Fewer markers rendered simultaneously on mobile prevents frame drops
+const MAX_MARKERS_MOBILE = 300;
+const MAX_MARKERS_DESKTOP = 800;
+const MAX_MARKERS = IS_MOBILE ? MAX_MARKERS_MOBILE : MAX_MARKERS_DESKTOP;
 
 // ── Zoom limits ──────────────────────────────────────────────────
 const MIN_ZOOM = 3;   // can't zoom out past world overview
@@ -267,7 +275,7 @@ const MapView = forwardRef(function MapView(
       if (mapObj.current) return;
       const map = new window.google.maps.Map(mapRef.current, {
         center: MAP_CENTER,
-        zoom: 11,
+        zoom: IS_MOBILE ? 10 : 11,
         minZoom: MIN_ZOOM,
         maxZoom: MAX_ZOOM,
         mapTypeId: "roadmap",  // roadmap shows Google's built-in sea/ferry routes
@@ -278,6 +286,10 @@ const MapView = forwardRef(function MapView(
         tilt: 0, heading: 0,
         renderingType: "RASTER",   // force raster — WebGL vector can stutter on heavy overlays
         isFractionalZoomEnabled: false,  // integer zoom only = smoother tile loads
+        // Mobile-specific: disable keyboard shortcuts (saves listener overhead)
+        keyboardShortcuts: !IS_MOBILE,
+        // Disable POI click popups on mobile (reduces accidental taps causing jank)
+        ...(IS_MOBILE && { clickableIcons: false }),
       });
       mapObj.current   = map;
       infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: 340 });
@@ -412,7 +424,8 @@ const MapView = forwardRef(function MapView(
     if (layers.seabed && gisData.seabed) gisData.seabed.forEach(f => { enqueue(() => { if(f.type==="seabed_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#aa660033",strokeColor:"#aa6600",strokeWeight:1,fillOpacity:1,zIndex:2}));}else if(f.type==="seabed_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;const c=f.surface==="rock"?"#cc4400":f.surface==="mud"?"#886600":"#aa8800";add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:3,fillColor:c,fillOpacity:0.7,strokeColor:"#fff",strokeWeight:0.5},zIndex:4}));} }); });
 
     // Flush the queue in rAF batches — 40 items per frame keeps each frame under ~16ms
-    const GIS_BATCH = 60; // increased: depth polylines now geodesic:false so each is cheaper
+    // Mobile gets smaller batches to stay within 16ms budget on slower CPUs
+    const GIS_BATCH = IS_MOBILE ? 30 : 60;
     let qi = 0;
     let rafId;
     const flush = () => {
@@ -552,7 +565,10 @@ const MapView = forwardRef(function MapView(
   ─────────────────────────────────────────────────────────── */
   useEffect(() => {
     if (!mapReady || !mapObj.current) return;
-    const fresh    = freshVessels;
+    // Cap total vessels rendered on mobile — prevents frame drops with 1000+ markers
+    const fresh    = IS_MOBILE
+      ? freshVessels.slice(0, MAX_MARKERS)
+      : freshVessels;
     const activeIds = new Set(fresh.map(v => String(v.imo_number)));
 
     // Incrementally update hover cache — mutate in place, never spread 1000+ entries
@@ -599,7 +615,7 @@ const MapView = forwardRef(function MapView(
     // Each Google Maps Marker involves DOM work + event attachment + tile layer hooks.
     // 250 in one 16ms frame = ~5ms per marker × 250 = 1250ms freeze on initial load.
     // 50 per frame = smooth staggered render across ~10 frames.
-    const BATCH = 80; // increased: fewer rAF frames needed for 1000 vessels
+    const BATCH = IS_MOBILE ? 40 : 80; // fewer per frame on mobile = stays within 16ms budget
     let idx = 0;
     // Bug #7 fix: track the rAF id so the current batch is cancelled if freshVessels
     // changes before it finishes (e.g. 60s refresh arriving mid-render).
