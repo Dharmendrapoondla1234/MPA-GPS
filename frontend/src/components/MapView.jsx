@@ -736,9 +736,15 @@ const MapView = forwardRef(function MapView(
     const SEG=Math.min(raw.length-1,50), step=Math.max(1,Math.floor((raw.length-1)/SEG));
     for (let i=0; i<raw.length-1; i+=step) {
       const end=Math.min(i+step+1,raw.length), prog=i/(raw.length-1);
-      // Trail: vivid orange (start) → bright yellow-green (end) — high contrast on sea/dark maps
-      const r=Math.round(255), g=Math.round(100+prog*155), b=Math.round(0+prog*20);
-      trailObjs.current.push(new window.google.maps.Polyline({path:raw.slice(i,end).map(p=>({lat:p.latitude_degrees,lng:p.longitude_degrees})),geodesic:true,strokeColor:`rgb(${r},${g},${b})`,strokeOpacity:0.45+prog*0.50,strokeWeight:1.5+prog*2.5,map:mapObj.current,zIndex:3}));
+      // Trail: vivid orange (start) → bright lime-yellow (end) — maximum contrast on all map styles
+      const r=Math.round(255), g=Math.round(120+prog*135), b=Math.round(0);
+      const segPath=raw.slice(i,end).map(p=>({lat:p.latitude_degrees,lng:p.longitude_degrees}));
+      // Shadow / halo layer — thick black outline for visibility on light maps
+      trailObjs.current.push(new window.google.maps.Polyline({path:segPath,geodesic:true,strokeColor:"#000000",strokeOpacity:0.55,strokeWeight:7+prog*3,map:mapObj.current,zIndex:3}));
+      // Main vivid trail
+      trailObjs.current.push(new window.google.maps.Polyline({path:segPath,geodesic:true,strokeColor:`rgb(${r},${g},${b})`,strokeOpacity:0.88+prog*0.12,strokeWeight:4+prog*3,map:mapObj.current,zIndex:4}));
+      // Top highlight — thin bright white core
+      trailObjs.current.push(new window.google.maps.Polyline({path:segPath,geodesic:true,strokeColor:"#ffffff",strokeOpacity:0.35+prog*0.30,strokeWeight:1.5,map:mapObj.current,zIndex:5}));
     }
 
     if (layers.aiTrajectory && aiCount > 0) {
@@ -795,17 +801,22 @@ const MapView = forwardRef(function MapView(
     if (curSeg.length > 1) segmentsByType.push({ pts: curSeg, type: curType });
 
     const typeColors = {
-      TSS:  { outer:"#c0392b", inner:"#ff4d4d", glow:"#ffaaaa" },   // vivid red
-      DWR:  { outer:"#b8860b", inner:"#ffcc00", glow:"#fff176" },   // vivid amber/gold
-      AIS:  { outer:"#7b0e87", inner:"#e040fb", glow:"#f5a9ff" },   // vivid magenta/purple
+      TSS:  { outer:"#ff0000", inner:"#ff6666", glow:"#ffcccc" },   // blazing red
+      DWR:  { outer:"#e6a800", inner:"#ffe040", glow:"#fff9a0" },   // blazing amber/gold
+      AIS:  { outer:"#9b00c0", inner:"#e040fb", glow:"#ffd6ff" },   // blazing magenta/purple
     };
 
-    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#1a0020",strokeOpacity:0.15,strokeWeight:24,zIndex:5,map:mapObj.current}));
+    // Dark shadow/halo for contrast on all map types
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#000000",strokeOpacity:0.35,strokeWeight:28,zIndex:5,map:mapObj.current}));
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#1a0020",strokeOpacity:0.25,strokeWeight:22,zIndex:5,map:mapObj.current}));
     for (const seg of segmentsByType) {
       const c = typeColors[seg.type] || typeColors.AIS;
-      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.outer,strokeOpacity:0.22,strokeWeight:12,zIndex:6,map:mapObj.current}));
-      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.inner,strokeOpacity:0.92,strokeWeight:4,zIndex:8,map:mapObj.current}));
-      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.glow,strokeOpacity:0.55,strokeWeight:1.5,zIndex:9,map:mapObj.current}));
+      // Glow halo
+      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.outer,strokeOpacity:0.45,strokeWeight:16,zIndex:6,map:mapObj.current}));
+      // Main vivid line
+      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.inner,strokeOpacity:1.0,strokeWeight:5,zIndex:8,map:mapObj.current}));
+      // Bright highlight core
+      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.glow,strokeOpacity:0.85,strokeWeight:2,zIndex:9,map:mapObj.current}));
     }
     predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:10,map:mapObj.current,icons:[{icon:{path:"M 0,-1 0,1",strokeOpacity:0.90,strokeColor:"#ffe0ff",scale:2.2},offset:"0",repeat:"16px"}]}));
     predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:11,map:mapObj.current,icons:["6%","16%","26%","36%","46%","56%","66%","76%","86%","96%"].map(offset=>({icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:2.8,strokeColor:"#7b0e87",strokeWeight:1,fillColor:"#e040fb",fillOpacity:1,strokeOpacity:1},offset}))}));

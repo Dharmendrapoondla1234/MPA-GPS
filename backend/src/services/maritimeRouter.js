@@ -12,7 +12,15 @@
 "use strict";
 
 const logger = require("../utils/logger");
-const { learnLanes, nearestLaneCell, dijkstraLane, distNM } = require("./aisLaneExtractor");
+// aisLaneExtractor is an Express router for the AI trajectory endpoint —
+// it does NOT export lane-graph helpers. Pull distNM from seaRouter instead.
+const { distNM } = require("./seaRouter");
+
+// Stub AIS-lane functions so the router gracefully falls back to TSS/deep-water
+// routing when no BigQuery lane data is available.
+function learnLanes()       { return Promise.resolve(null); }
+function nearestLaneCell()  { return null; }
+function dijkstraLane()     { return null; }
 
 // Injected BigQuery deps
 let _bq = null, _loc = null, _T = null;
