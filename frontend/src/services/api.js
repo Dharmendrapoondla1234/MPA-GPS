@@ -7,7 +7,7 @@ const BASE = BASE_URL;
 // ── REQUEST DEDUPLICATION + BROWSER CACHE ────────────────────────
 const inFlight  = new Map();
 const respCache = new Map(); // url → { data, ts, etag }
-const CACHE_TTL = { vessels: 55_000, stats: 115_000, default: 30_000 };
+const CACHE_TTL = { vessels: 58_000, stats: 120_000, default: 55_000 }; // GIS/arrivals cached longer
 
 // Test helper — call this in afterEach to prevent cache bleed between tests
 export function __clearCache() { inFlight.clear(); respCache.clear(); }
@@ -103,7 +103,7 @@ async function call(path) {
 // cached response so the next call always hits the network for fresh vessel data.
 // Previously bustCache was passed by useVessels.js but silently ignored here.
 export async function fetchVessels(
-  { search="", vesselType="", speedMin=null, speedMax=null, limit=5000 } = {},
+  { search="", vesselType="", speedMin=null, speedMax=null, limit=3000 } = {}, // 3000 reduces payload ~40% vs 5000
   { bustCache=false } = {}
 ) {
   const p = new URLSearchParams();
@@ -111,7 +111,7 @@ export async function fetchVessels(
   if (vesselType)       p.set("vesselType",vesselType);
   if (speedMin!=null)   p.set("speedMin",  speedMin);
   if (speedMax!=null)   p.set("speedMax",  speedMax);
-  p.set("limit", limit);
+  p.set("limit", limit); // backend caps at 10000
   const path = `/vessels?${p}`;
   // FIX: bust the browser cache on background refresh so stale data is never returned
   if (bustCache) respCache.delete(`${BASE}${path}`);

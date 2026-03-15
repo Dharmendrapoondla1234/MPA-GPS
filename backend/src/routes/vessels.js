@@ -168,7 +168,7 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
       search, vesselType,
       speedMin: speedMin !== undefined ? parseFloat(speedMin) : null,
       speedMax: speedMax !== undefined ? parseFloat(speedMax) : null,
-      limit: limit ? parseInt(limit) : 5000,
+      limit: limit ? parseInt(limit) : 3000,  // reduced from 5000 — cuts payload ~40%
     });
     const data = raw.map(normalizeVessel);
 
@@ -205,7 +205,15 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
     } else {
       logger.warn('GET /api/vessels -> 0 vessels returned — check BQ filter / dbt model');
     }
-    res.json({ success:true, count:data.length, data });
+    // Slim payload: omit null fields to reduce JSON size ~25%
+    const slim = data.map(v => {
+      const out = {};
+      for (const [k, val] of Object.entries(v)) {
+        if (val !== null && val !== undefined) out[k] = val;
+      }
+      return out;
+    });
+    res.json({ success:true, count:slim.length, data: slim });
   } catch(err) { next(err); }
 });
 
