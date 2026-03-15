@@ -288,11 +288,14 @@ const MapView = forwardRef(function MapView(
         isFractionalZoomEnabled: false,  // integer zoom only = smoother tile loads
         // Mobile-specific: disable keyboard shortcuts (saves listener overhead)
         keyboardShortcuts: !IS_MOBILE,
-        // Disable POI click popups on mobile (reduces accidental taps causing jank)
-        ...(IS_MOBILE && { clickableIcons: false }),
+        // Disable zoom animations on mobile — they compound with marker redraws to cause jank
+        ...(IS_MOBILE && {
+          zoomControlOptions: { position: window.google?.maps?.ControlPosition?.RIGHT_CENTER },
+          scrollwheel: false,
+        }),
       });
       mapObj.current   = map;
-      infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: 340 });
+      infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: IS_MOBILE ? 280 : 340 });
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
 
       // Write coords directly to DOM — never call setState during map interaction

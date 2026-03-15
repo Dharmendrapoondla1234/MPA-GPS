@@ -6,6 +6,9 @@
   height: 100%;
   overflow: hidden;
   contain: layout style;
+  /* Promote map root to its own GPU layer — prevents parent repaints */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 .mv-map {
   width: 100%;
@@ -16,6 +19,8 @@
   -webkit-transform: translateZ(0);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+  /* Prevent browser from triggering layout on touch events */
+  touch-action: pan-x pan-y;
 }
 
 /* ── GOOGLE MAPS OVERRIDES ── */
