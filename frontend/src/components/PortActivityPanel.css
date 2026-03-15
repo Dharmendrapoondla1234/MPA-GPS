@@ -1,470 +1,292 @@
-/* PortActivityPanel.css — Floating Panel v2 */
+/* PortActivityPanel.css — v3 "MarineTraffic-Beater" */
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
 
-/* ── Floating Trigger Button ─────────────────────────────────────── */
+/* ── Trigger ── */
 .pa-trigger {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  width: 48px;
-  height: 52px;
-  background: rgba(7,17,30,0.92);
-  border: 1px solid rgba(0,229,255,0.18);
-  border-radius: 10px;
-  color: rgba(0,229,255,0.7);
-  cursor: pointer;
-  position: relative;
-  transition: all 0.2s ease;
-  backdrop-filter: blur(12px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; width: 48px; height: 52px;
+  background: rgba(7,17,30,0.92); border: 1px solid rgba(0,229,255,0.18);
+  border-radius: 10px; color: rgba(0,229,255,0.7); cursor: pointer; position: relative;
+  transition: all 0.2s ease; backdrop-filter: blur(12px);
   box-shadow: 0 4px 20px rgba(0,0,0,0.4);
 }
-.pa-trigger:hover {
-  background: rgba(0,229,255,0.08);
-  border-color: rgba(0,229,255,0.4);
-  color: #00e5ff;
-  box-shadow: 0 0 16px rgba(0,229,255,0.15);
-  transform: translateY(-1px);
-}
-.pa-trigger--open {
-  background: rgba(0,229,255,0.1);
-  border-color: rgba(0,229,255,0.5);
-  color: #00e5ff;
-  box-shadow: 0 0 20px rgba(0,229,255,0.2);
-}
-.pa-trigger-label {
-  font-family: 'Orbitron', monospace;
-  font-size: 7px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: inherit;
-}
+.pa-trigger:hover { background: rgba(0,229,255,0.08); border-color: rgba(0,229,255,0.4); color: #00e5ff; transform: translateY(-1px); }
+.pa-trigger--open { background: rgba(0,229,255,0.1); border-color: rgba(0,229,255,0.5); color: #00e5ff; box-shadow: 0 0 20px rgba(0,229,255,0.2); }
+.pa-trigger-label { font-family: 'Barlow Condensed', sans-serif; font-size: 7px; font-weight: 700; letter-spacing: 0.12em; }
 .pa-trigger-badge {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 4px;
-  background: #00e5ff;
-  color: #060e18;
-  border-radius: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 8px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 8px rgba(0,229,255,0.5);
-  animation: pa-badge-pulse 2s ease-in-out infinite;
+  position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px;
+  background: #00e5ff; color: #060e18; border-radius: 9px;
+  font-family: 'JetBrains Mono', monospace; font-size: 8px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 8px rgba(0,229,255,0.5); animation: pa-badge-pulse 2s ease-in-out infinite;
 }
-@keyframes pa-badge-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(0,229,255,0.5); }
-  50%       { box-shadow: 0 0 14px rgba(0,229,255,0.9); }
-}
+@keyframes pa-badge-pulse { 0%,100%{box-shadow:0 0 8px rgba(0,229,255,0.5)} 50%{box-shadow:0 0 16px rgba(0,229,255,0.9)} }
 
-/* ── Floating Panel ──────────────────────────────────────────────── */
+/* ── Panel shell ── */
 .pa-panel {
-  position: fixed;
-  /* positioned from right via App.jsx inline style */
-  top: 56px;
-  right: 12px;
-  width: 340px;
-  max-height: calc(100vh - 72px);
-  background: #07111e;
-  border: 1px solid rgba(0,229,255,0.12);
+  position: fixed; top: 56px; right: 12px;
+  width: 370px; max-height: calc(100vh - 72px);
+  background: #060f1c;
+  border: 1px solid rgba(0,229,255,0.10);
+  border-top: 2px solid rgba(0,229,255,0.25);
   border-radius: 14px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden;
   z-index: 200;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.65), 0 0 0 1px rgba(0,229,255,0.05);
-  transform: translateY(-8px) scale(0.97);
-  opacity: 0;
-  pointer-events: none;
-  transition: transform 0.22s cubic-bezier(0.34,1.56,0.64,1), opacity 0.18s ease;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.8), 0 0 0 1px rgba(0,229,255,0.04), inset 0 1px 0 rgba(255,255,255,0.03);
+  transform: translateY(-10px) scale(0.97); opacity: 0; pointer-events: none;
+  transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.2s ease;
 }
-.pa-panel--open {
-  transform: translateY(0) scale(1);
-  opacity: 1;
-  pointer-events: all;
-}
+.pa-panel--open { transform: translateY(0) scale(1); opacity: 1; pointer-events: all; }
 
-/* ── Header ──────────────────────────────────────────────────────── */
+/* ── Header ── */
 .pa-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 11px 12px 10px;
-  border-bottom: 1px solid rgba(0,229,255,0.07);
-  background: rgba(0,229,255,0.025);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px 11px;
+  background: linear-gradient(135deg, rgba(0,229,255,0.04), rgba(0,40,80,0.5));
+  border-bottom: 1px solid rgba(0,229,255,0.08);
   flex-shrink: 0;
 }
-.pa-header-left {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+.pa-header-title { display: flex; align-items: center; gap: 10px; }
+.pa-header-icon {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: rgba(0,229,255,0.08); border: 1px solid rgba(0,229,255,0.2);
+  display: flex; align-items: center; justify-content: center;
 }
-.pa-title-text {
-  font-family: 'Orbitron', monospace;
-  font-size: 9px;
-  font-weight: 700;
-  color: #00e5ff;
-  letter-spacing: 0.12em;
-}
-.pa-refresh-ts {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 8px;
-  color: rgba(120,160,200,0.4);
-}
-.pa-header-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+.pa-title-main { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 900; color: #00e5ff; letter-spacing: 0.12em; }
+.pa-title-sub { font-family: 'JetBrains Mono', monospace; font-size: 8px; color: rgba(0,229,255,0.4); margin-top: 2px; }
+.pa-header-actions { display: flex; align-items: center; gap: 6px; }
+.pa-refresh-ts { font-family: 'JetBrains Mono', monospace; font-size: 8px; color: rgba(100,140,180,0.4); }
 .pa-icon-btn {
-  width: 26px;
-  height: 26px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.07);
-  border-radius: 6px;
-  color: rgba(120,160,200,0.6);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
+  width: 26px; height: 26px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px; color: rgba(100,140,180,0.6); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 10px; transition: all 0.15s;
 }
 .pa-icon-btn:hover { background: rgba(0,229,255,0.08); color: #00e5ff; border-color: rgba(0,229,255,0.2); }
-.pa-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pa-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.pa-close-btn { font-size: 9px; }
 .pa-close-btn:hover { background: rgba(255,60,80,0.1); color: #ff5577; border-color: rgba(255,60,80,0.2); }
 @keyframes pa-spin-anim { to { transform: rotate(360deg); } }
 .pa-spin { animation: pa-spin-anim 0.7s linear infinite; }
 
-/* ── Tabs ────────────────────────────────────────────────────────── */
-.pa-tabs {
-  display: flex;
-  border-bottom: 1px solid rgba(0,229,255,0.07);
+/* ── Stats bar ── */
+.pa-stats-bar {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 0; border-bottom: 1px solid rgba(0,229,255,0.06);
   flex-shrink: 0;
 }
+.pa-stat-pill {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 7px 4px; gap: 2px; position: relative;
+  border-right: 1px solid rgba(255,255,255,0.04); cursor: default;
+}
+.pa-stat-pill:last-child { border-right: none; }
+.pa-stat-dot {
+  width: 5px; height: 5px; border-radius: 50%; margin-bottom: 1px;
+  animation: pa-dot-pulse 2s ease-in-out infinite;
+}
+.pa-stat-green .pa-stat-dot { background: #00ff9d; box-shadow: 0 0 6px #00ff9d; }
+.pa-stat-amber .pa-stat-dot { background: #ffaa00; box-shadow: 0 0 6px #ffaa00; }
+.pa-stat-cyan  .pa-stat-dot { background: #00e5ff; box-shadow: 0 0 6px #00e5ff; }
+.pa-stat-purple .pa-stat-dot { background: #a78bfa; box-shadow: 0 0 6px #a78bfa; }
+.pa-stat-val { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; line-height: 1; }
+.pa-stat-green .pa-stat-val  { color: #00ff9d; }
+.pa-stat-amber .pa-stat-val  { color: #ffaa00; }
+.pa-stat-cyan  .pa-stat-val  { color: #00e5ff; }
+.pa-stat-purple .pa-stat-val { color: #a78bfa; }
+.pa-stat-label { font-family: 'JetBrains Mono', monospace; font-size: 7px; color: rgba(120,160,200,0.5); letter-spacing: 0.08em; }
+@keyframes pa-dot-pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+
+/* ── Search bar ── */
+.pa-search-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; border-bottom: 1px solid rgba(0,229,255,0.06); flex-shrink: 0;
+}
+.pa-search-wrap {
+  flex: 1; position: relative; display: flex; align-items: center;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 7px; transition: border-color 0.15s;
+}
+.pa-search-wrap:focus-within { border-color: rgba(0,229,255,0.3); background: rgba(0,229,255,0.03); }
+.pa-search-icon { position: absolute; left: 8px; color: rgba(100,140,180,0.4); pointer-events: none; }
+.pa-search-input {
+  flex: 1; background: none; border: none; outline: none;
+  padding: 6px 8px 6px 26px; color: #c8dff0;
+  font-family: 'JetBrains Mono', monospace; font-size: 9px;
+}
+.pa-search-input::placeholder { color: rgba(100,140,180,0.35); }
+.pa-search-clear {
+  background: none; border: none; color: rgba(100,140,180,0.4); cursor: pointer;
+  padding: 4px 8px; font-size: 9px; transition: color 0.15s;
+}
+.pa-search-clear:hover { color: #ff5577; }
+.pa-filter-select {
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 6px; color: rgba(120,160,200,0.7); font-size: 8px;
+  font-family: 'JetBrains Mono', monospace; padding: 5px 8px; cursor: pointer; outline: none;
+}
+.pa-filter-select:focus { border-color: rgba(0,229,255,0.3); }
+
+/* ── Tabs ── */
+.pa-tabs { display: flex; border-bottom: 1px solid rgba(0,229,255,0.06); flex-shrink: 0; }
 .pa-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 8px 4px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: rgba(120,160,200,0.5);
-  font-family: 'Orbitron', monospace;
-  font-size: 7.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-  transition: all 0.15s;
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 8px 3px; background: none; border: none;
+  border-bottom: 2px solid transparent; color: rgba(100,140,180,0.45);
+  font-family: 'Barlow Condensed', sans-serif; font-size: 8px; font-weight: 700;
+  letter-spacing: 0.08em; cursor: pointer; transition: all 0.15s;
 }
-.pa-tab:hover { color: rgba(0,229,255,0.8); background: rgba(0,229,255,0.03); }
-.pa-tab--on {
-  color: #00e5ff;
-  border-bottom-color: #00e5ff;
-  background: rgba(0,229,255,0.04);
-}
-.pa-tab-icon { font-size: 10px; line-height: 1; }
-.pa-tab-label { font-size: 7px; }
+.pa-tab:hover { color: rgba(200,230,255,0.7); background: rgba(255,255,255,0.02); }
+.pa-tab--on { color: var(--tab-color, #00e5ff); border-bottom-color: var(--tab-color, #00e5ff); background: rgba(0,229,255,0.03); }
+.pa-tab-icon { font-size: 11px; }
 .pa-tab-count {
-  background: rgba(0,229,255,0.1);
-  border: 1px solid rgba(0,229,255,0.15);
-  border-radius: 8px;
-  padding: 1px 5px;
-  font-size: 7px;
-  color: rgba(0,229,255,0.8);
-  font-family: 'JetBrains Mono', monospace;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; padding: 1px 5px; font-size: 7px; font-family: 'JetBrains Mono', monospace;
+  color: rgba(100,140,180,0.5); transition: all 0.15s;
 }
-.pa-tab--on .pa-tab-count { background: rgba(0,229,255,0.15); border-color: rgba(0,229,255,0.3); color: #00e5ff; }
 
-/* ── Body / Scroll ───────────────────────────────────────────────── */
-.pa-body {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  min-height: 0;
-}
+/* ── Body ── */
+.pa-body { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .pa-body::-webkit-scrollbar { width: 3px; }
-.pa-body::-webkit-scrollbar-track { background: transparent; }
-.pa-body::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.15); border-radius: 2px; }
-
-/* ── List Items ──────────────────────────────────────────────────── */
+.pa-body::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.12); border-radius: 2px; }
 .pa-list { padding: 6px; display: flex; flex-direction: column; gap: 4px; }
 
-.pa-item {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.05);
-  border-radius: 9px;
-  padding: 9px 10px 8px;
-  cursor: pointer;
-  transition: all 0.15s;
+/* ── Vessel Card ── */
+.pa-card {
+  position: relative; overflow: hidden;
+  background: rgba(255,255,255,0.022); border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px; cursor: pointer; transition: all 0.16s;
+  display: flex; align-items: stretch;
 }
-.pa-item:hover {
-  background: rgba(0,229,255,0.04);
-  border-color: rgba(0,229,255,0.15);
+.pa-card:hover { background: rgba(255,255,255,0.038); border-color: rgba(var(--dir-color-rgb,0,229,255),0.2); transform: translateX(1px); }
+.pa-card--sel { background: rgba(0,229,255,0.06); border-color: rgba(0,229,255,0.28); box-shadow: 0 0 0 1px rgba(0,229,255,0.08); }
+.pa-card--upcoming { border-color: rgba(167,139,250,0.2); background: rgba(167,139,250,0.03); }
+.pa-card--inport { border-color: rgba(0,229,255,0.12); }
+.pa-card-stripe {
+  width: 3px; flex-shrink: 0; background: var(--dir-color, #00e5ff);
+  opacity: 0.7; border-radius: 10px 0 0 10px;
 }
-.pa-item--sel {
-  background: rgba(0,229,255,0.07);
-  border-color: rgba(0,229,255,0.3);
-  box-shadow: 0 0 0 1px rgba(0,229,255,0.1);
+.pa-card-main { flex: 1; padding: 9px 10px 9px 10px; min-width: 0; }
+
+.pa-card-top { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+.pa-card-flag { font-size: 17px; line-height: 1; flex-shrink: 0; margin-top: 1px; }
+.pa-card-identity { flex: 1; min-width: 0; }
+.pa-card-name {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700;
+  color: #daeeff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.01em;
+}
+.pa-card-imo { font-family: 'JetBrains Mono', monospace; font-size: 8px; color: rgba(100,140,180,0.45); margin-top: 2px; }
+.pa-card-badges { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+.pa-dir-badge, .pa-src-badge2, .pa-inport-badge {
+  font-family: 'JetBrains Mono', monospace; font-size: 7px; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px; border: 1px solid; letter-spacing: 0.06em; flex-shrink: 0;
+}
+.pa-inport-badge { background: rgba(0,229,255,0.10); border-color: rgba(0,229,255,0.30); color: #00e5ff; }
+
+/* ── Route display ── */
+.pa-card-route {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 7px; flex-wrap: nowrap;
+}
+.pa-route-node {
+  font-family: 'JetBrains Mono', monospace; font-size: 8.5px;
+  padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+}
+.pa-route-from {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: rgba(180,210,230,0.6);
+}
+.pa-route-to {
+  background: rgba(0,229,255,0.05); border: 1px solid; font-weight: 700;
+}
+.pa-route-line { flex-shrink: 0; display: flex; align-items: center; }
+
+/* ── Meta chips ── */
+.pa-card-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.pa-time-chip {
+  font-family: 'JetBrains Mono', monospace; font-size: 8px; font-weight: 700;
+  color: rgba(180,210,230,0.7); padding: 2px 6px; border-radius: 4px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
+}
+.pa-time-urgent { color: #a78bfa; background: rgba(167,139,250,0.08); border-color: rgba(167,139,250,0.2); animation: pa-urgent-pulse 1.5s ease-in-out infinite; }
+@keyframes pa-urgent-pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+.pa-meta-chip {
+  font-family: 'JetBrains Mono', monospace; font-size: 7.5px;
+  padding: 2px 6px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 4px; color: rgba(160,200,220,0.55); white-space: nowrap;
 }
 
-.pa-item-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 5px;
+/* ── Expand button ── */
+.pa-expand-btn {
+  background: none; border: none; color: rgba(100,140,180,0.3);
+  font-size: 18px; line-height: 1; padding: 0 10px 0 4px; cursor: pointer;
+  align-self: center; flex-shrink: 0; transition: all 0.2s; transform: rotate(0deg);
 }
-.pa-item-flag { font-size: 16px; line-height: 1; flex-shrink: 0; margin-top: 1px; }
-.pa-item-info { flex: 1; min-width: 0; }
-.pa-item-name {
-  font-size: 11px;
-  font-weight: 600;
-  color: #daeeff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: 'Rajdhani', sans-serif;
-  letter-spacing: 0.02em;
-}
-.pa-item-imo {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 8px;
-  color: rgba(120,160,200,0.5);
-  margin-top: 2px;
-}
+.pa-expand-btn:hover { color: rgba(0,229,255,0.6); }
+.pa-expand-btn--open { transform: rotate(90deg); color: rgba(0,229,255,0.8); }
 
-/* Source badge */
-.pa-src-badge {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 7px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-  letter-spacing: 0.05em;
-  flex-shrink: 0;
+/* ── Expanded detail ── */
+.pa-card-detail {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex; flex-direction: column; gap: 6px;
 }
-.src-ais   { background: rgba(38,222,129,0.1);  border: 1px solid rgba(38,222,129,0.25); color: #26de81; }
-.src-decl  { background: rgba(0,229,255,0.08);  border: 1px solid rgba(0,229,255,0.2);   color: #00e5ff; }
-.src-sched { background: rgba(253,150,68,0.1);  border: 1px solid rgba(253,150,68,0.25); color: #fd9644; }
+.pa-detail-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pa-detail-label { font-family: 'JetBrains Mono', monospace; font-size: 7.5px; color: rgba(100,140,180,0.5); flex-shrink: 0; }
+.pa-detail-val { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; color: #c8dff0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pa-dq-inline { display: flex; align-items: center; gap: 6px; font-family:'JetBrains Mono',monospace; font-size: 8px; font-weight: 700; }
+.pa-dq-bar-sm { width: 60px; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+.pa-dq-fill-sm { height: 100%; border-radius: 2px; transition: width 0.5s; }
+.pa-track-btn {
+  margin-top: 2px; padding: 6px 10px; border-radius: 6px; font-size: 9px; font-weight: 700;
+  font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.06em; cursor: pointer;
+  background: rgba(0,229,255,0.08); border: 1px solid rgba(0,229,255,0.25); color: #00e5ff;
+  transition: all 0.15s; width: 100%;
+}
+.pa-track-btn:hover { background: rgba(0,229,255,0.14); border-color: rgba(0,229,255,0.4); }
 
-/* Route */
-.pa-route {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 5px;
-  flex-wrap: wrap;
+/* ── Berth progress ── */
+.pa-berth-progress { margin-top: 7px; }
+.pa-bp-track {
+  position: relative; height: 4px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: visible; margin-bottom: 4px;
 }
-.pa-route-from, .pa-route-to {
-  font-size: 9px;
-  font-family: 'JetBrains Mono', monospace;
-  color: rgba(200,223,240,0.6);
-  background: rgba(255,255,255,0.04);
-  border-radius: 4px;
-  padding: 2px 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 110px;
+.pa-bp-fill { height: 100%; background: linear-gradient(90deg, rgba(0,229,255,0.5), #00e5ff); border-radius: 3px; transition: width 0.6s; }
+.pa-bp-dot {
+  position: absolute; top: -3px; width: 10px; height: 10px;
+  background: #00e5ff; border: 2px solid #060f1c; border-radius: 50%; transform: translateX(-50%);
+  box-shadow: 0 0 8px #00e5ff;
 }
-.pa-route-to { color: rgba(0,229,255,0.7); background: rgba(0,229,255,0.05); }
-.pa-route-arr { font-size: 10px; color: rgba(120,160,200,0.4); flex-shrink: 0; }
+.pa-bp-label { font-family: 'JetBrains Mono', monospace; font-size: 7.5px; color: rgba(0,229,255,0.45); }
 
-/* Meta chips */
-.pa-meta {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
+/* ── Port Heatmap footer ── */
+.pa-heatmap {
+  border-top: 1px solid rgba(0,229,255,0.07);
+  padding: 10px 12px; flex-shrink: 0;
+  background: rgba(0,229,255,0.015);
 }
-.pa-meta-time {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 8px;
-  color: rgba(120,160,200,0.5);
-  margin-right: 2px;
-}
-.pa-chip {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 7.5px;
-  padding: 1px 5px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.07);
-  border-radius: 4px;
-  color: rgba(200,223,240,0.5);
-}
-.pa-agent {
-  margin-top: 4px;
-  font-size: 8.5px;
-  color: rgba(120,160,200,0.5);
-  font-family: 'Rajdhani', sans-serif;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.pa-heatmap-title { font-family: 'Barlow Condensed', sans-serif; font-size: 8px; font-weight: 900; color: rgba(0,229,255,0.4); letter-spacing: 0.14em; margin-bottom: 8px; }
+.pa-heatmap-bars { display: flex; flex-direction: column; gap: 5px; }
+.pa-heatmap-row { display: flex; align-items: center; gap: 8px; }
+.pa-heatmap-name { font-family: 'JetBrains Mono', monospace; font-size: 8px; color: rgba(180,210,230,0.6); width: 110px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pa-heatmap-bar-wrap { flex: 1; height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; overflow: hidden; }
+.pa-heatmap-bar-fill { height: 100%; background: linear-gradient(90deg, rgba(0,229,255,0.3), rgba(0,229,255,0.85)); border-radius: 2px; transition: width 0.8s ease; }
+.pa-heatmap-count { font-family: 'JetBrains Mono', monospace; font-size: 8px; font-weight: 700; color: #00e5ff; width: 22px; text-align: right; flex-shrink: 0; }
 
-/* ── Port Stats ──────────────────────────────────────────────────── */
-.pa-ports-list { padding: 6px; display: flex; flex-direction: column; gap: 4px; }
-.pa-port-item {
-  padding: 8px 10px;
-  background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.05);
-  border-radius: 8px;
-}
-.pa-port-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 5px;
-}
-.pa-port-rank {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 8px;
-  color: rgba(0,229,255,0.4);
-  width: 22px;
-  flex-shrink: 0;
-}
-.pa-port-name {
-  flex: 1;
-  font-size: 10px;
-  font-weight: 600;
-  color: #daeeff;
-  font-family: 'Rajdhani', sans-serif;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pa-port-count {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  color: #00e5ff;
-  font-weight: 700;
-}
-.pa-port-bar {
-  height: 3px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 2px;
-  overflow: hidden;
-  margin-bottom: 4px;
-}
-.pa-port-fill {
-  height: 100%;
-  background: linear-gradient(90deg, rgba(0,229,255,0.4), #00e5ff);
-  border-radius: 2px;
-  transition: width 0.6s ease;
-}
-.pa-port-last {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 7.5px;
-  color: rgba(120,160,200,0.35);
-}
-
-/* ── Skeleton / Empty ────────────────────────────────────────────── */
-.pa-skel-wrap { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+/* ── Skeleton ── */
+.pa-skel-wrap { padding: 8px; display: flex; flex-direction: column; gap: 5px; }
 .pa-skel {
-  height: 62px;
-  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
-  background-size: 200% 100%;
-  border-radius: 9px;
-  animation: pa-shimmer 1.4s infinite;
+  background: linear-gradient(90deg, rgba(255,255,255,0.025) 25%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.025) 75%);
+  background-size: 200% 100%; border-radius: 10px; animation: pa-shimmer 1.5s infinite;
 }
 @keyframes pa-shimmer { to { background-position: -200% 0; } }
 
+/* ── Empty ── */
 .pa-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 40px 20px;
-  color: rgba(120,160,200,0.3);
-  font-size: 11px;
-  font-family: 'Rajdhani', sans-serif;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 50px 20px; color: rgba(100,140,180,0.25);
 }
+.pa-empty-icon { font-size: 32px; opacity: 0.3; }
+.pa-empty span { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; letter-spacing: 0.08em; }
 
-/* ── Mobile ──────────────────────────────────────────────────────── */
+/* ── Mobile ── */
 @media (max-width: 768px) {
-  .pa-panel {
-    right: 8px;
-    left: 8px;
-    width: auto;
-    max-height: calc(100vh - 120px);
-    top: 60px;
-  }
-}
-
-/* ── Upcoming departure badge ────────────────────────────────────── */
-.pa-upcoming-badge {
-  font-family: 'Orbitron', monospace;
-  font-size: 6.5px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-  letter-spacing: 0.08em;
-  background: rgba(253,150,68,0.12);
-  border: 1px solid rgba(253,150,68,0.35);
-  color: #fd9644;
-  animation: pa-upcoming-pulse 2s ease-in-out infinite;
-  flex-shrink: 0;
-}
-@keyframes pa-upcoming-pulse {
-  0%,100% { opacity: 1; }
-  50%      { opacity: 0.6; }
-}
-.pa-item--upcoming {
-  border-color: rgba(253,150,68,0.18);
-  background: rgba(253,150,68,0.03);
-}
-.pa-item--upcoming:hover {
-  border-color: rgba(253,150,68,0.3);
-  background: rgba(253,150,68,0.06);
-}
-
-/* ── Trigger centered vertically ────────────────────────────────── */
-.pa-trigger-wrap {
-  position: absolute;
-  top: 50%;
-  right: 12px;
-  transform: translateY(-50%);
-  z-index: 100;
-}
-/* ── 24h activity badge in ports tab ────────────────────────── */
-.pa-port-counts {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.pa-port-count-24h {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  font-weight: 800;
-  color: #00ff9d;
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-}
-.pa-port-24h-label {
-  font-size: 7px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: rgba(0,255,157,0.6);
-}
-.pa-port-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 3px;
-}
-.pa-port-src {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 7px;
-  color: rgba(0,229,255,0.4);
-  letter-spacing: 0.1em;
+  .pa-panel { right: 8px; left: 8px; width: auto; max-height: calc(100vh - 120px); top: 60px; }
 }
