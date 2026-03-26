@@ -37,9 +37,15 @@
   height: 52px;
   min-height: 52px;
 }
-/* Bottom row hidden on desktop — only shown on mobile */
+/* Bottom row — visible on ALL screen sizes */
 .tb-row-bottom {
-  display: none;
+  display: flex;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid rgba(0,229,255,0.06);
 }
 
 /* ── Logo ── */
@@ -384,7 +390,6 @@
 
   /* ── ROW 2: Search + buttons ── */
   .tb-row-bottom {
-    display: flex;            /* show it on mobile */
     height: 42px;
     min-height: 42px;
     padding: 0 8px;
