@@ -1,4 +1,4 @@
-/* VesselContactPanel.css */
+/* VesselContactPanel.css — v3 */
 .cp-panel {
   display: flex;
   flex-direction: column;
@@ -36,8 +36,32 @@
 .cp-tab:hover  { color: #b0bec5; }
 .cp-tab-active { color: #00e5ff; border-bottom-color: #00e5ff; }
 .cp-tab-icon   { font-size: 13px; }
-.cp-refresh-btn {
+
+.cp-tab-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cp-enrich-btn {
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.25);
+  color: #00e5ff;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.cp-enrich-btn:hover:not(:disabled) {
+  background: rgba(0,229,255,0.15);
+  border-color: #00e5ff;
+}
+.cp-enrich-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cp-refresh-btn {
   background: transparent;
   border: 1px solid rgba(255,255,255,0.1);
   color: #607d8b;
@@ -50,17 +74,18 @@
 .cp-refresh-btn:hover:not(:disabled) { color: #00e5ff; }
 
 /* ── Content ── */
-.cp-content { padding: 12px; overflow-y: auto; }
+.cp-content { padding: 12px; overflow-y: auto; max-height: 500px; }
 
 .cp-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 32px 0;
   color: #607d8b;
   font-size: 12px;
 }
+.cp-loading-sub { font-size: 10px; color: #455a64; }
 .cp-spinner {
   width: 24px; height: 24px;
   border: 2px solid rgba(0,229,255,0.2);
@@ -94,7 +119,7 @@
 .cp-enrich-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 10px;
   flex-wrap: wrap;
 }
@@ -105,10 +130,28 @@
   border-radius: 10px;
   letter-spacing: 0.4px;
 }
-.conf-high { background: rgba(38,222,129,0.15); color: #26de81; }
-.conf-mid  { background: rgba(253,150,68,0.15);  color: #fd9644; }
+.conf-high { background: rgba(38,222,129,0.15);  color: #26de81; }
+.conf-mid  { background: rgba(253,150,68,0.15);   color: #fd9644; }
 .conf-low  { background: rgba(252,92,101,0.12);   color: #fc5c65; }
 .cp-last-checked { font-size: 10px; color: #546e7a; }
+.cp-live-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #fc5c65;
+  animation: cp-pulse 2s infinite;
+}
+@keyframes cp-pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+.cp-source-pills { display: flex; gap: 3px; flex-wrap: wrap; }
+.cp-source-pill {
+  font-size: 9px;
+  font-weight: 600;
+  background: rgba(255,255,255,0.06);
+  color: #78909c;
+  border-radius: 3px;
+  padding: 1px 5px;
+  letter-spacing: 0.3px;
+}
 
 /* ── Company cards ── */
 .cp-companies { display: flex; flex-direction: column; gap: 10px; }
@@ -119,9 +162,7 @@
   border-radius: 8px;
   padding: 12px 14px;
 }
-.cp-card-empty {
-  opacity: 0.5;
-}
+.cp-card-empty { opacity: 0.4; }
 .cp-card-title {
   font-size: 10px;
   font-weight: 700;
@@ -133,13 +174,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.cp-country-badge {
-  background: rgba(255,255,255,0.08);
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-size: 9px;
-  color: #90a4ae;
+  flex-wrap: wrap;
 }
 .cp-company-name {
   font-size: 14px;
@@ -159,6 +194,11 @@
   font-style: italic;
   padding: 4px 0;
 }
+.cp-verified-date {
+  font-size: 9px;
+  color: #26de81;
+  margin-top: 6px;
+}
 
 /* ── Contact rows ── */
 .cp-contact-row {
@@ -169,11 +209,11 @@
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .cp-contact-row:last-of-type { border-bottom: none; }
-.cp-icon  { font-size: 12px; width: 16px; text-align: center; flex-shrink: 0; }
+.cp-icon   { font-size: 12px; width: 16px; text-align: center; flex-shrink: 0; }
 .cp-contact-body { flex: 1; display: flex; flex-direction: column; }
-.cp-label { font-size: 9px; font-weight: 600; color: #546e7a; letter-spacing: 0.5px; }
-.cp-value { font-size: 12px; color: #b0bec5; }
-.cp-link  { color: #00e5ff; text-decoration: none; }
+.cp-label  { font-size: 9px; font-weight: 600; color: #546e7a; letter-spacing: 0.5px; }
+.cp-value  { font-size: 12px; color: #b0bec5; }
+.cp-link   { color: #00e5ff; text-decoration: none; }
 .cp-link:hover { text-decoration: underline; }
 .cp-copy-btn {
   background: transparent;
@@ -188,49 +228,61 @@
 }
 .cp-copy-btn:hover { color: #00e5ff; border-color: #00e5ff; }
 
-.cp-source {
-  font-size: 9px;
-  color: #455a64;
-  margin-top: 8px;
-  font-style: italic;
+/* ── Port Agents ── */
+.cp-port-context-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
-.cp-verified { color: #26de81; }
-
-/* ── Port agents ── */
 .cp-port-badge {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.5px;
-  color: #00e5ff;
-  background: rgba(0,229,255,0.08);
-  border: 1px solid rgba(0,229,255,0.2);
   padding: 3px 10px;
   border-radius: 12px;
   display: inline-block;
-  margin-bottom: 10px;
+}
+.cp-port-badge.current {
+  color: #00e5ff;
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.2);
+}
+.cp-port-badge.next {
+  color: #fd9644;
+  background: rgba(253,150,68,0.08);
+  border: 1px solid rgba(253,150,68,0.2);
 }
 .cp-agents { display: flex; flex-direction: column; gap: 10px; }
+.cp-agents-count {
+  font-size: 10px;
+  color: #546e7a;
+  margin-bottom: 2px;
+}
 .cp-agent-card {
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.07);
   border-radius: 8px;
   padding: 12px 14px;
 }
-.cp-agent-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-.cp-agent-name {
-  font-size: 13px;
+.cp-agent-header  { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.cp-agent-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cp-agent-name  { font-size: 13px; font-weight: 700; color: #e0f7fa; }
+.cp-agent-contact-name { font-size: 10px; color: #78909c; }
+.cp-agent-port  { font-size: 10px; color: #546e7a; margin-bottom: 6px; }
+.cp-port-context-badge {
+  font-size: 9px;
   font-weight: 700;
-  color: #e0f7fa;
+  padding: 1px 6px;
+  border-radius: 8px;
 }
-.cp-agent-company {
-  font-size: 10px;
-  color: #78909c;
+.cp-port-context-badge.current {
+  background: rgba(0,229,255,0.12);
+  color: #00e5ff;
+}
+.cp-port-context-badge.next {
+  background: rgba(253,150,68,0.12);
+  color: #fd9644;
 }
 .cp-agent-type {
   font-size: 9px;
@@ -240,8 +292,36 @@
   border-radius: 3px;
   padding: 1px 5px;
 }
+.cp-agent-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.cp-service-pill {
+  font-size: 9px;
+  font-weight: 600;
+  background: rgba(38,222,129,0.1);
+  color: #26de81;
+  border-radius: 3px;
+  padding: 1px 6px;
+  text-transform: capitalize;
+}
+.cp-agent-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.cp-agent-source {
+  font-size: 9px;
+  color: #455a64;
+  font-style: italic;
+}
 
-/* ── No data state ── */
+/* ── No data ── */
 .cp-no-data {
   display: flex;
   flex-direction: column;
@@ -254,4 +334,5 @@
 }
 .cp-no-data-icon { font-size: 28px; }
 .cp-no-data-sub  { font-size: 11px; color: #455a64; line-height: 1.6; }
-.cp-no-data-sub a { color: #00e5ff; }
+.cp-no-data-links { font-size: 11px; }
+.cp-no-data-links a { color: #00e5ff; margin: 0 2px; }
