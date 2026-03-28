@@ -78,6 +78,19 @@ app.use("/api", vesselRoutes); // covers /vessels, /arrivals, /departures, /port
 app.use("/api/contacts", contactRoutes); // vessel contact enrichment
 app.use("/api", contactRoutes);           // spec endpoint: GET /api/vessel-contact
 
+// ── DEBUG: test Equasis directly ─────────────────────────────────
+app.get("/debug/equasis/:imo", async (req, res) => {
+  try {
+    const { enrichVesselContact } = require("./services/contactEnricher");
+    const imo = parseInt(req.params.imo, 10);
+    if (!imo) return res.json({ error: "Invalid IMO" });
+    const result = await enrichVesselContact(imo, { forceRefresh: true });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
 // ── DEBUG: sample raw + converted coords ─────────────────────
 // ── DEBUG: vessels endpoint — shows raw BQ vs normalized output ──────────────
 app.get("/debug/vessels", async (_req, res) => {

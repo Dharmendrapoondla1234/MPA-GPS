@@ -63,63 +63,168 @@ function extractPhones(text) {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 1: EQUASIS
+// STEP 1: EQUASIS  (fully rewritten — fixes cookie handling + URL + HTML parsing)
 // ═════════════════════════════════════════════════════════════════
 let _equasisCookies  = null;
 let _equasisCookieTs = 0;
 const EQUASIS_COOKIE_TTL = 4 * 60 * 60 * 1000;
+const EQ_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const EQ_BASE = "https://www.equasis.org/EquasisWeb";
+
+// Helper: collect ALL Set-Cookie headers (Node 18+ supports getSetCookie())
+function getAllCookies(res) {
+  if (typeof res.headers.getSetCookie === "function") {
+    return res.headers.getSetCookie().join("; ");
+  }
+  // Fallback for older Node
+  const raw = res.headers.get("set-cookie") || "";
+  return raw.split(/,(?=[^ ].*?=)/).map(c => c.split(";")[0].trim()).join("; ");
+}
 
 async function equasisLogin() {
   if (_equasisCookies && Date.now() - _equasisCookieTs < EQUASIS_COOKIE_TTL) return _equasisCookies;
   const email = process.env.EQUASIS_EMAIL, password = process.env.EQUASIS_PASSWORD;
-  if (!email || !password) { logger.warn("[equasis] Credentials not set"); return null; }
+  if (!email || !password) { logger.warn("[equasis] EQUASIS_EMAIL / EQUASIS_PASSWORD not set in env"); return null; }
   try {
-    const pageRes = await fetch("https://www.equasis.org/EquasisWeb/public/HomePage", {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; MPA-GPS/4.0)" },
+    // 1. Get initial session cookie from home page
+    const pageRes = await fetch(`${EQ_BASE}/public/HomePage`, {
+      headers: { "User-Agent": EQ_UA, "Accept": "text/html,application/xhtml+xml" },
     });
-    const cookies = pageRes.headers.get("set-cookie") || "";
-    const loginRes = await fetch("https://www.equasis.org/EquasisWeb/authen/HomePage?fs=Search", {
+    const pageCookies = getAllCookies(pageRes);
+
+    // 2. POST login — follow redirects so we land on the authed home page
+    const loginRes = await fetch(`${EQ_BASE}/authen/HomePage?fs=Search`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Cookie: cookies, "User-Agent": "Mozilla/5.0 (compatible; MPA-GPS/4.0)",
-        Referer: "https://www.equasis.org/EquasisWeb/public/HomePage",
+        "Cookie": pageCookies,
+        "User-Agent": EQ_UA,
+        "Referer": `${EQ_BASE}/public/HomePage`,
+        "Accept": "text/html,application/xhtml+xml",
       },
       body: new URLSearchParams({ j_email: email, j_password: password, submit: "Login" }),
-      redirect: "manual",
+      redirect: "follow",
     });
-    const sessionCookie = loginRes.headers.get("set-cookie") || cookies;
-    if (sessionCookie && (loginRes.status === 302 || loginRes.status === 200)) {
-      _equasisCookies = sessionCookie; _equasisCookieTs = Date.now();
-      logger.info("[equasis] ✅ Login OK"); return sessionCookie;
+
+    const loginCookies = getAllCookies(loginRes);
+    // Merge: page cookies + login cookies (session cookie lives in login response)
+    const allCookies = [pageCookies, loginCookies].filter(Boolean).join("; ");
+
+    // Verify login succeeded by checking response body
+    const loginBody = await loginRes.text();
+    const loggedIn  = loginBody.toLowerCase().includes("logout") ||
+                      loginBody.toLowerCase().includes("welcome") ||
+                      loginRes.url.includes("authen");
+
+    if (!loggedIn) {
+      logger.warn("[equasis] Login failed — wrong credentials or Equasis changed its form");
+      return null;
     }
-    return null;
-  } catch (err) { logger.warn("[equasis] Login failed:", err.message); return null; }
+
+    _equasisCookies  = allCookies;
+    _equasisCookieTs = Date.now();
+    logger.info("[equasis] ✅ Login OK");
+    return allCookies;
+  } catch (err) { logger.warn("[equasis] Login error:", err.message); return null; }
+}
+
+// Parse Equasis ship info HTML — handles their table-based layout
+function parseEquasisHtml(html) {
+  // Strip tags helper for a captured group
+  const strip = s => (s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+  // Equasis renders company info in a pattern like:
+  // <td ...>Registered owner</td> ... <td ...><a ...>COMPANY NAME</a></td>
+  // We look for the label then grab the next non-empty text content
+  function extractAfterLabel(label) {
+    // Match label text then capture everything up to the next </tr>
+    const re = new RegExp(label + "[\s\S]{0,300}?<td[^>]*>([\s\S]{3,200}?)<\/td>", "i");
+    const m = re.exec(html);
+    if (!m) return null;
+    const val = strip(m[1]);
+    // Skip if it looks like a UI element, not a company name
+    if (!val || val.length < 3 || val === "-" || /^(n\/a|none|unknown)$/i.test(val)) return null;
+    return val;
+  }
+
+  const owner    = extractAfterLabel("Registered owner");
+  const manager  = extractAfterLabel("ISM Manager") || extractAfterLabel("ISM manager");
+  const shipMgr  = extractAfterLabel("Ship manager");
+  const operator = extractAfterLabel("Operator");
+  const flag     = extractAfterLabel("Flag");
+
+  // Address: look for country/address block near owner
+  const addrM = /Address[\s\S]{0,200}?<td[^>]*>([\s\S]{5,300}?)<\/td>/i.exec(html);
+  const address = addrM ? strip(addrM[1]) : null;
+
+  return { owner, manager, shipMgr, operator, flag, address };
 }
 
 async function fetchFromEquasis(imo) {
   const cookies = await equasisLogin();
   if (!cookies) return null;
+
+  const hdrs = {
+    "Cookie": cookies,
+    "User-Agent": EQ_UA,
+    "Accept": "text/html,application/xhtml+xml",
+  };
+
   try {
-    const res = await fetch(
-      `https://www.equasis.org/EquasisWeb/authen/ShipInfo?fs=Search&P_IMO=${imo}`,
-      { headers: { Cookie: cookies, "User-Agent": "Mozilla/5.0 (compatible; MPA-GPS/4.0)",
-        Referer: "https://www.equasis.org/EquasisWeb/authen/HomePage?fs=Search" } }
-    );
-    if (!res.ok) return null;
-    const html = await res.text();
-    const pick = re => re.exec(html)?.[1]?.trim() || null;
-    const owner    = pick(/Registered owner[^<]*<\/[^>]+>[^<]*<[^>]+>([^<]{3,100})</i);
-    const manager  = pick(/ISM[^<]*[Mm]anager[^<]*<\/[^>]+>[^<]*<[^>]+>([^<]{3,100})</i);
-    const shipMgr  = pick(/Ship manager[^<]*<\/[^>]+>[^<]*<[^>]+>([^<]{3,100})</i);
-    const operator = pick(/Operator[^<]*<\/[^>]+>[^<]*<[^>]+>([^<]{3,100})</i);
-    const address  = pick(/Address[^<]*<\/[^>]+>[^<]*<[^>]+>([^<]{5,200})</i)?.replace(/<[^>]+>/g, "").trim();
-    const flag     = pick(/Flag[^<]*<\/[^>]+>[^<]*<[^>]+>([^<]{3,60})</i);
-    if (!owner && !manager) return null;
-    logger.info(`[equasis] ✅ IMO ${imo}: owner="${owner}"`);
-    return { owner_name: owner, manager_name: manager, ship_manager: shipMgr,
-             operator_name: operator, address, flag, source: "equasis", confidence: 0.92 };
-  } catch (err) { logger.warn("[equasis] error:", err.message); return null; }
+    // Strategy A: POST to restricted/Search (the correct Equasis ship search)
+    const searchRes = await fetch(`${EQ_BASE}/restricted/Search?fs=HomePage`, {
+      method: "POST",
+      headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": `${EQ_BASE}/authen/HomePage?fs=Search` },
+      body: new URLSearchParams({ P_ENTREE_HOME: imo, checkbox_ship: "on", P_PAGE_SHIP: 1 }),
+      redirect: "follow",
+    });
+    let html = searchRes.ok ? await searchRes.text() : "";
+
+    // Strategy B: POST to ShipInfo with P_IMO (alternative endpoint)
+    if (!html.includes("Registered owner") && !html.includes("ISM")) {
+      const infoRes = await fetch(`${EQ_BASE}/authen/ShipInfo`, {
+        method: "POST",
+        headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": `${EQ_BASE}/authen/HomePage?fs=ByShip` },
+        body: new URLSearchParams({ P_IMO: imo }),
+        redirect: "follow",
+      });
+      if (infoRes.ok) html = await infoRes.text();
+    }
+
+    // Strategy C: GET ShipInfo (legacy endpoint that may still work)
+    if (!html.includes("Registered owner") && !html.includes("ISM")) {
+      const getRes = await fetch(
+        `${EQ_BASE}/authen/ShipInfo?fs=ByShip&P_IMO=${imo}`,
+        { headers: { ...hdrs, "Referer": `${EQ_BASE}/authen/HomePage?fs=ByShip` }, redirect: "follow" }
+      );
+      if (getRes.ok) html = await getRes.text();
+    }
+
+    if (!html.includes("Registered owner") && !html.includes("ISM")) {
+      logger.warn(`[equasis] No ship data found in response for IMO ${imo}`);
+      return null;
+    }
+
+    const parsed = parseEquasisHtml(html);
+    if (!parsed.owner && !parsed.manager) {
+      logger.warn(`[equasis] HTML parsed but no owner/manager extracted for IMO ${imo}`);
+      return null;
+    }
+
+    logger.info(`[equasis] ✅ IMO ${imo}: owner="${parsed.owner}" manager="${parsed.manager}"`);
+    return {
+      owner_name:    parsed.owner,
+      manager_name:  parsed.manager,
+      ship_manager:  parsed.shipMgr,
+      operator_name: parsed.operator,
+      address:       parsed.address,
+      flag:          parsed.flag,
+      source:        "equasis",
+      confidence:    0.92,
+    };
+  } catch (err) { logger.warn("[equasis] fetch error:", err.message); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -129,7 +234,7 @@ async function aiSearchCompanyContacts(companyName, country) {
   if (!companyName || !process.env.ANTHROPIC_API_KEY) return null;
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5", max_tokens: 600,
+      model: "claude-sonnet-4-5-20251001", max_tokens: 600,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
         `Find official contact information for shipping company: "${companyName}"${country ? ` (${country})` : ""}.
@@ -154,7 +259,7 @@ async function aiLookupByIMO(imo) {
   if (!imo || !process.env.ANTHROPIC_API_KEY) return null;
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5", max_tokens: 800,
+      model: "claude-sonnet-4-5-20251001", max_tokens: 800,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
         `Search for the vessel with IMO number ${imo}. Find its registered owner company, operator, and any contact information.
@@ -257,7 +362,7 @@ async function resolvePortAgents({ portName, portCode, vesselType, ownerName, po
   try {
     logger.info(`[port-agents] AI search for "${portName || portCode}"`);
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5", max_tokens: 1200,
+      model: "claude-sonnet-4-5-20251001", max_tokens: 1200,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
         `Find shipping/port agents at: "${portName || portCode}"${vesselType ? ` for ${vesselType}` : ""}${ownerName ? ` (ship owner: ${ownerName})` : ""}.
@@ -366,7 +471,7 @@ async function enrichAgentOrganisation({ ownerName, managerName, vesselName, ves
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5", max_tokens: 800,
+      model: "claude-sonnet-4-5-20251001", max_tokens: 800,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
         `Find the appointed ship agent or husbandry agent organisation for this vessel:
@@ -428,7 +533,7 @@ async function enrichMasterContact({ ownerName, managerName, shipManager, flag, 
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5", max_tokens: 700,
+      model: "claude-sonnet-4-5-20251001", max_tokens: 700,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
         `Find the correct communication channel to reach the vessel master / captain of:
