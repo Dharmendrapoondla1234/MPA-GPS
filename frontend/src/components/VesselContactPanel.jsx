@@ -1,7 +1,6 @@
 // src/components/VesselContactPanel.jsx — MPA Contacts v3
 // Shows owner/operator/manager contacts + AI-discovered port agents
 import React, { useState, useEffect, useCallback, memo } from "react";
-import { fetchVesselContacts, fetchPortAgents } from "../services/api";
 import "./VesselContactPanel.css";
 
 // ── Helpers ───────────────────────────────────────────────────────
