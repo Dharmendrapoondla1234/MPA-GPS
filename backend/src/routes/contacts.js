@@ -1,4 +1,5 @@
-// backend/src/routes/contacts.js — MPA Contacts v3 (AI Enriched + Port Agent Intelligence)
+// backend/src/routes/contacts.js — MPA Contacts v4
+// Unified vessel-contact API matching the spec + original endpoints
 "use strict";
 const express  = require("express");
 const router   = express.Router();
@@ -6,6 +7,7 @@ const { getVesselContacts, getPortAgents, upsertContactData } = require("../serv
 const { enrichVesselContact, batchEnrichArrivals, enrichPortAgents } = require("../services/contactEnricher");
 const logger   = require("../utils/logger");
 
+// ── Normalizers ───────────────────────────────────────────────────
 function normalizeCompany(c) {
   if (!c) return null;
   return {
@@ -26,26 +28,144 @@ function normalizeCompany(c) {
 function normalizeAgent(a) {
   if (!a) return null;
   return {
-    agent_id:            a.agent_id           || null,
-    agent_name:          a.agent_name         || null,
-    agency_company:      a.agency_company     || null,
-    port_code:           a.port_code          || null,
-    port_name:           a.port_name          || null,
-    email:               a.email_primary      || a.email || null,
-    email_ops:           a.email_ops          || null,
-    phone:               a.phone_main         || a.phone || null,
-    phone_24h:           a.phone_24h          || null,
-    vhf_channel:         a.vhf_channel        || null,
-    vessel_type_served:  a.vessel_type_served || a.vessel_types_served || "ALL",
-    services:            a.services           || [],
-    website:             a.website            || null,
-    port_context:        a.port_context       || null, // "current" | "next"
-    confidence:          a.confidence         || null,
-    data_source:         a.data_source        || a.source || null,
+    agent_id:           a.agent_id              || null,
+    agent_name:         a.agent_name            || null,
+    agency_company:     a.agency_company        || null,
+    port_code:          a.port_code             || null,
+    port_name:          a.port_name             || null,
+    email:              a.email_primary || a.email || null,
+    email_ops:          a.email_ops             || null,
+    phone:              a.phone_main  || a.phone || null,
+    phone_24h:          a.phone_24h             || null,
+    vhf_channel:        a.vhf_channel           || null,
+    vessel_type_served: a.vessel_type_served || a.vessel_types_served || "ALL",
+    services:           a.services              || [],
+    website:            a.website               || null,
+    port_context:       a.port_context          || null,
+    confidence:         a.confidence            || null,
+    data_source:        a.data_source || a.source || null,
   };
 }
 
-// ── GET /api/contacts/vessel/:imo ─────────────────────────────────
+// Format to spec: { agent_name, contact: { email, phone }, confidence_score }
+function agentToSpec(a) {
+  const n = normalizeAgent(a);
+  return {
+    agent_name:       n.agency_company || n.agent_name || null,
+    contact_person:   n.agent_name !== n.agency_company ? n.agent_name : null,
+    contact: { email: n.email, phone: n.phone, phone_24h: n.phone_24h, vhf: n.vhf_channel },
+    port_code:        n.port_code,
+    port_name:        n.port_name,
+    port_context:     n.port_context,
+    services:         n.services,
+    website:          n.website,
+    confidence_score: n.confidence ? `${Math.round(n.confidence * 100)}%` : null,
+    data_source:      n.data_source,
+  };
+}
+
+async function resolveContacts({ imo, mmsi, name, enrich, currentPort, nextPort, vesselType, forceRefresh }) {
+  // Try BigQuery first
+  let bqData = null;
+  try { bqData = await getVesselContacts({ imo, mmsi, name }); } catch {}
+
+  const hasGoodData = bqData?.owner?.company_name || bqData?.owner?.email;
+  let enrichedData  = null;
+
+  if ((!hasGoodData || forceRefresh) && enrich && imo) {
+    logger.info(`[contacts] AI enrichment IMO ${imo}...`);
+    try {
+      enrichedData = await enrichVesselContact(imo, {
+        vesselName: name, currentPort, nextPort, vesselType, forceRefresh,
+      });
+    } catch (err) { logger.warn(`[contacts] enrichment error:`, err.message); }
+  }
+
+  // Port agents: enriched > BQ > standalone AI search
+  let portAgents = enrichedData?.port_agents || bqData?.port_agents || [];
+  if (!portAgents.length && (currentPort || nextPort) && enrich) {
+    try {
+      portAgents = await enrichPortAgents({
+        portName: currentPort || nextPort,
+        portCode: currentPort || nextPort,
+        vesselType: vesselType || null,
+      });
+    } catch (err) { logger.warn("[contacts] port agent error:", err.message); }
+  }
+
+  const final = enrichedData || bqData || {};
+  const owner = final.owner || bqData?.owner || null;
+
+  return { final, owner, portAgents, enrichedData, bqData };
+}
+
+// ═════════════════════════════════════════════════════════════════
+// SPEC ENDPOINT: GET /api/vessel-contact?imo=XXXX
+// Returns the exact format specified in the requirements doc
+// ═════════════════════════════════════════════════════════════════
+router.get("/vessel-contact", async (req, res, next) => {
+  try {
+    const imo         = parseInt(req.query.imo, 10) || null;
+    const mmsi        = parseInt(req.query.mmsi, 10) || null;
+    const name        = req.query.name || null;
+    const enrich      = req.query.enrich !== "false";
+    const currentPort = req.query.currentPort || req.query.port || null;
+    const nextPort    = req.query.nextPort || null;
+    const vesselType  = req.query.vesselType || null;
+
+    if (!imo && !mmsi && !name) {
+      return res.status(400).json({ success: false, error: "Provide imo, mmsi, or name" });
+    }
+
+    const { final, owner, portAgents, enrichedData } = await resolveContacts({
+      imo, mmsi, name, enrich, currentPort, nextPort, vesselType,
+    });
+
+    const nc = normalizeCompany(owner);
+
+    res.json({
+      success: true,
+      vessel: {
+        name: final.vessel_name || name || null,
+        imo:  String(imo || ""),
+        mmsi: String(mmsi || ""),
+      },
+      operator: nc ? {
+        name: nc.company_name,
+        type: nc.company_type,
+        contact: { email: nc.email, phone: nc.phone, website: nc.website },
+        registered_address: nc.registered_address,
+        data_source: nc.data_source,
+      } : null,
+      manager: final.manager ? {
+        name: final.manager.company_name,
+        type: final.manager.company_type,
+        data_source: "equasis",
+      } : null,
+      ship_manager: final.ship_manager ? {
+        name: final.ship_manager.company_name,
+        data_source: "equasis",
+      } : null,
+      port: {
+        current: currentPort || null,
+        next:    nextPort    || null,
+      },
+      port_agents: portAgents.map(agentToSpec),
+      captain_contact: "Available via port agent or operator only — direct contact not provided.",
+      enrichment: {
+        source:       final.enrichment?.source      || "bigquery",
+        confidence:   final.enrichment?.confidence  ?? null,
+        confidence_pct: final.enrichment?.confidence ? `${Math.round(final.enrichment.confidence * 100)}%` : null,
+        last_checked: final.enrichment?.enriched_at || null,
+        pipeline_ran: !!enrichedData,
+      },
+    });
+  } catch (err) { logger.error("[vessel-contact] error:", err.message); next(err); }
+});
+
+// ═════════════════════════════════════════════════════════════════
+// ORIGINAL: GET /api/contacts/vessel/:imo
+// ═════════════════════════════════════════════════════════════════
 router.get("/vessel/:imo", async (req, res, next) => {
   try {
     const imo         = parseInt(req.params.imo, 10);
@@ -55,53 +175,15 @@ router.get("/vessel/:imo", async (req, res, next) => {
     const currentPort = req.query.currentPort || null;
     const nextPort    = req.query.nextPort    || null;
     const vesselType  = req.query.vesselType  || null;
+    const forceRefresh= req.query.forceRefresh === "true";
 
     if (!imo && !mmsi && !name) {
       return res.status(400).json({ success: false, error: "Provide imo, mmsi, or name" });
     }
 
-    // Try BigQuery first
-    let bqData = null;
-    try { bqData = await getVesselContacts({ imo, mmsi, name }); } catch {}
-
-    // Run AI enrichment if no good data
-    const hasGoodData = bqData?.owner?.company_name || bqData?.owner?.email || bqData?.owner?.phone;
-    let enrichedData  = null;
-    if (!hasGoodData && enrich && imo) {
-      logger.info(`[contacts] Running AI enrichment for IMO ${imo}...`);
-      try {
-        enrichedData = await enrichVesselContact(imo, {
-          vesselName: name,
-          currentPort,
-          nextPort,
-          vesselType,
-        });
-      } catch (err) {
-        logger.warn(`[contacts] Enrichment error IMO ${imo}:`, err.message);
-      }
-    }
-
-    // Port agents: use enriched data, or fall back to BQ, or AI-search separately
-    let portAgents = enrichedData?.port_agents || bqData?.port_agents || [];
-
-    // If no agents found yet but we have a port, do a targeted AI search
-    if (!portAgents.length && (currentPort || nextPort) && enrich) {
-      const searchPort = currentPort || nextPort;
-      logger.info(`[contacts] AI port agent search for: ${searchPort}`);
-      try {
-        const aiAgents = await enrichPortAgents({
-          portName:   searchPort,
-          portCode:   searchPort,
-          vesselType: vesselType || null,
-        });
-        portAgents = aiAgents;
-      } catch (err) {
-        logger.warn("[contacts] port agent AI error:", err.message);
-      }
-    }
-
-    const final = enrichedData || bqData || {};
-    const owner = final.owner || bqData?.owner || null;
+    const { final, owner, portAgents, enrichedData, bqData } = await resolveContacts({
+      imo, mmsi, name, enrich, currentPort, nextPort, vesselType, forceRefresh,
+    });
 
     res.json({
       success: true,
@@ -121,17 +203,15 @@ router.get("/vessel/:imo", async (req, res, next) => {
         },
       },
     });
-  } catch (err) {
-    logger.error("[contacts] error:", err.message);
-    next(err);
-  }
+  } catch (err) { logger.error("[contacts] error:", err.message); next(err); }
 });
 
-// ── GET /api/contacts/agents?port=SGSIN ───────────────────────────
-// First checks BigQuery, then falls back to AI search
+// ═════════════════════════════════════════════════════════════════
+// GET /api/contacts/agents?port=SGSIN&portName=Singapore
+// ═════════════════════════════════════════════════════════════════
 router.get("/agents", async (req, res, next) => {
   try {
-    const port       = req.query.port || "";
+    const port       = req.query.port     || "";
     const portName   = req.query.portName || port;
     const vesselType = req.query.vesselType || "";
     const useAI      = req.query.ai !== "false";
@@ -140,32 +220,27 @@ router.get("/agents", async (req, res, next) => {
       return res.status(400).json({ success: false, error: "port or portName required" });
     }
 
-    // Try BigQuery first
+    // BQ first
     let agents = [];
-    try {
-      agents = await getPortAgents({ portCode: port.toUpperCase(), vesselType });
-    } catch {}
+    try { agents = await getPortAgents({ portCode: port.toUpperCase(), vesselType }); } catch {}
 
-    // Fall back to AI search if no BQ results
+    // Fallback: static DB + AI
     if (!agents.length && useAI) {
-      logger.info(`[contacts] AI port agent fallback for: ${portName || port}`);
-      try {
-        agents = await enrichPortAgents({ portName: portName || port, portCode: port, vesselType });
-      } catch (err) {
-        logger.warn("[contacts] AI agents error:", err.message);
-      }
+      agents = await enrichPortAgents({ portName: portName || port, portCode: port, vesselType });
     }
 
     res.json({
       success: true,
       count: agents.length,
-      source: agents.length && !agents[0]?.data_source?.includes("ai") ? "bigquery" : "ai_enriched",
+      source: agents[0]?.data_source?.includes("ai") ? "ai_enriched" : agents[0]?.data_source || "bigquery",
       data: agents.map(normalizeAgent),
     });
   } catch (err) { next(err); }
 });
 
-// ── POST /api/contacts/enrich/:imo ────────────────────────────────
+// ═════════════════════════════════════════════════════════════════
+// POST /api/contacts/enrich/:imo  — force re-run pipeline
+// ═════════════════════════════════════════════════════════════════
 router.post("/enrich/:imo", async (req, res, next) => {
   try {
     const imo = parseInt(req.params.imo, 10);
@@ -176,23 +251,28 @@ router.post("/enrich/:imo", async (req, res, next) => {
       currentPort: req.body.current_port,
       nextPort:    req.body.next_port,
       vesselType:  req.body.vessel_type,
+      forceRefresh: true,
     });
     res.json({ success: true, data });
   } catch (err) { next(err); }
 });
 
-// ── POST /api/contacts/batch-enrich ──────────────────────────────
+// ═════════════════════════════════════════════════════════════════
+// POST /api/contacts/batch-enrich
+// ═════════════════════════════════════════════════════════════════
 router.post("/batch-enrich", async (req, res, next) => {
   try {
     const limit = parseInt(req.body.limit || req.query.limit || 20, 10);
     res.json({ success: true, message: `Batch enrichment started for up to ${limit} vessels` });
     batchEnrichArrivals(limit).then(results => {
-      logger.info(`[batch] Done: ${results.filter(r => r.found).length}/${results.length} enriched`);
+      logger.info(`[batch] Done: ${results.filter(r => r.found).length}/${results.length}`);
     });
   } catch (err) { next(err); }
 });
 
-// ── POST /api/contacts/vessel/:imo (manual override) ─────────────
+// ═════════════════════════════════════════════════════════════════
+// POST /api/contacts/vessel/:imo  — manual override
+// ═════════════════════════════════════════════════════════════════
 router.post("/vessel/:imo", async (req, res, next) => {
   try {
     const imo = parseInt(req.params.imo, 10);
