@@ -1,10 +1,11 @@
-// backend/src/routes/contacts.js — MPA Contacts v4
+// backend/src/routes/contacts.js — MPA Contacts v5
 // Unified vessel-contact API matching the spec + original endpoints
 "use strict";
 const express  = require("express");
 const router   = express.Router();
 const { getVesselContacts, getPortAgents, upsertContactData } = require("../services/contacts");
 const { enrichVesselContact, batchEnrichArrivals, enrichPortAgents } = require("../services/contactEnricher");
+const { getDBStats } = require("../services/portAgentDB");
 const logger   = require("../utils/logger");
 
 // ── Normalizers ───────────────────────────────────────────────────
@@ -280,6 +281,17 @@ router.post("/vessel/:imo", async (req, res, next) => {
     await upsertContactData(imo, req.body);
     res.json({ success: true, message: "Contact data updated" });
   } catch (err) { next(err); }
+});
+
+// ── GET /api/contacts/db-stats ────────────────────────────────────
+// Returns stats about the built-in port agent database
+router.get("/db-stats", (req, res) => {
+  try {
+    const stats = getDBStats();
+    res.json({ success: true, data: stats });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
 module.exports = router;

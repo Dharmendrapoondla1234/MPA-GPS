@@ -451,3 +451,18 @@
   .tb-btn-heatmap { display: none; }
   .tb-btn-compare { display: none; }
 }
+/* ── Port Agent Intelligence button ────────────────────────────── */
+.tb-btn-intel {
+  display: flex; align-items: center; gap: 5px;
+  border-color: rgba(0,229,255,0.25) !important;
+}
+.tb-btn-intel.active,
+.tb-btn-intel:hover {
+  color: #00e5ff !important;
+  border-color: rgba(0,229,255,0.6) !important;
+  background: rgba(0,229,255,0.08) !important;
+  box-shadow: 0 0 10px rgba(0,229,255,0.15);
+}
+.tb-btn-label {
+  font-size: 9px; font-weight: 800; letter-spacing: 0.8px;
+}

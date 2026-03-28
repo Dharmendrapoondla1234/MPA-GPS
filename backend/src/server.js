@@ -76,6 +76,7 @@ app.use("/api/ai", aiTrajRoutes);
 app.use("/api/weather", weatherRoutes);
 app.use("/api", vesselRoutes); // covers /vessels, /arrivals, /departures, /port-activity, /stats
 app.use("/api/contacts", contactRoutes); // vessel contact enrichment
+app.use("/api", contactRoutes);           // spec endpoint: GET /api/vessel-contact
 
 // ── DEBUG: sample raw + converted coords ─────────────────────
 // ── DEBUG: vessels endpoint — shows raw BQ vs normalized output ──────────────

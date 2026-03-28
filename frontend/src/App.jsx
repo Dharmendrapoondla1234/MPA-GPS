@@ -11,10 +11,11 @@ import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import "./styles/App.css";
 
-const VesselComparison      = lazy(() => import("./components/Vesselcomparison"));
-const LiveAlertsFeed        = lazy(() => import("./components/Livealertsfeed"));
-const PortCongestionHeatmap = lazy(() => import("./components/Portcongestionheatmap"));
-const ThemePreferences      = lazy(() => import("./components/Themepreferences"));
+const VesselComparison           = lazy(() => import("./components/Vesselcomparison"));
+const LiveAlertsFeed             = lazy(() => import("./components/Livealertsfeed"));
+const PortCongestionHeatmap      = lazy(() => import("./components/Portcongestionheatmap"));
+const ThemePreferences           = lazy(() => import("./components/Themepreferences"));
+const PortAgentIntelligencePanel = lazy(() => import("./components/PortAgentIntelligencePanel"));
 
 const IS_MOBILE = () => window.innerWidth <= 768;
 
@@ -93,11 +94,12 @@ export default function App() {
   const [predictRoute,  setPredictRoute]  = useState(null);
   const [panelOpen,     setPanelOpen]     = useState(!IS_MOBILE());
   const [portPanelOpen, setPortPanelOpen] = useState(false);
-  const [compareOpen,   setCompareOpen]   = useState(false);
-  const [alertsOpen,    setAlertsOpen]    = useState(false);
-  const [alertCount,    setAlertCount]    = useState(0);
-  const [heatmapOpen,   setHeatmapOpen]   = useState(false);
-  const [prefsOpen,     setPrefsOpen]     = useState(false);
+  const [compareOpen,     setCompareOpen]     = useState(false);
+  const [alertsOpen,      setAlertsOpen]       = useState(false);
+  const [alertCount,      setAlertCount]       = useState(0);
+  const [heatmapOpen,     setHeatmapOpen]      = useState(false);
+  const [prefsOpen,       setPrefsOpen]        = useState(false);
+  const [agentIntelOpen,  setAgentIntelOpen]   = useState(false);
   const mapRef = useRef(null);
 
   const { vessels: rawVessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
@@ -180,10 +182,11 @@ export default function App() {
   }, []);
 
   // Stable panel toggles — one panel open at a time
-  const openCompare  = useCallback(() => { setCompareOpen(p => !p); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
-  const openAlerts   = useCallback(() => { setAlertsOpen(p => !p);  setCompareOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
-  const openHeatmap  = useCallback(() => { setHeatmapOpen(p => !p); setCompareOpen(false); setAlertsOpen(false);  setPrefsOpen(false); }, []);
-  const openPrefs    = useCallback(() => { setPrefsOpen(p => !p);   setCompareOpen(false); setAlertsOpen(false);  setHeatmapOpen(false); }, []);
+  const openCompare    = useCallback(() => { setCompareOpen(p => !p);    setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); setAgentIntelOpen(false); }, []);
+  const openAlerts     = useCallback(() => { setAlertsOpen(p => !p);     setCompareOpen(false); setHeatmapOpen(false); setPrefsOpen(false); setAgentIntelOpen(false); }, []);
+  const openHeatmap    = useCallback(() => { setHeatmapOpen(p => !p);    setCompareOpen(false); setAlertsOpen(false);  setPrefsOpen(false); setAgentIntelOpen(false); }, []);
+  const openPrefs      = useCallback(() => { setPrefsOpen(p => !p);      setCompareOpen(false); setAlertsOpen(false);  setHeatmapOpen(false); setAgentIntelOpen(false); }, []);
+  const openAgentIntel = useCallback(() => { setAgentIntelOpen(p => !p); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
 
   // Stable inline handlers — previously created new functions on every render
   const handleTogglePanel      = useCallback(() => setPanelOpen(p => !p), []);
@@ -215,10 +218,11 @@ export default function App() {
         lastUpdated={lastUpdated} user={user} onLogout={handleLogout}
         onSearchEnter={handleSearchEnter}
         portPanelOpen={portPanelOpen} onTogglePortPanel={handleTogglePortPanel}
-        compareOpen={compareOpen}  onToggleCompare={openCompare}
-        alertsOpen={alertsOpen}    onToggleAlerts={openAlerts}   alertCount={alertCount}
-        heatmapOpen={heatmapOpen}  onToggleHeatmap={openHeatmap}
-        prefsOpen={prefsOpen}      onTogglePrefs={openPrefs}
+        compareOpen={compareOpen}      onToggleCompare={openCompare}
+        alertsOpen={alertsOpen}        onToggleAlerts={openAlerts}   alertCount={alertCount}
+        heatmapOpen={heatmapOpen}      onToggleHeatmap={openHeatmap}
+        prefsOpen={prefsOpen}          onTogglePrefs={openPrefs}
+        agentIntelOpen={agentIntelOpen} onToggleAgentIntel={openAgentIntel}
       />
 
       <ErrorBanner message={error} onRetry={refresh} />
@@ -313,6 +317,17 @@ export default function App() {
           )}
         </Suspense>
       </div>
+
+      {/* Port Agent Intelligence — modal overlay, outside dock */}
+      <Suspense fallback={null}>
+        {agentIntelOpen && (
+          <PortAgentIntelligencePanel
+            isOpen={agentIntelOpen}
+            onClose={() => setAgentIntelOpen(false)}
+            selectedVessel={selectedVessel}
+          />
+        )}
+      </Suspense>
 
     </div>
   );
