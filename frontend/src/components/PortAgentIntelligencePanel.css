@@ -332,3 +332,33 @@
   padding: 2px 6px; border-radius: 8px; border: 1px solid;
   background: transparent;
 }
+
+
+/* ── Partial data warning banner ── */
+.pai-warn-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(253, 150, 68, 0.12);
+  border: 1px solid rgba(253, 150, 68, 0.4);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #fd9644;
+  margin-bottom: 12px;
+}
+.pai-warn-banner button {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #fd9644;
+  color: #fd9644;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.pai-warn-banner button:hover {
+  background: rgba(253, 150, 68, 0.2);
+}

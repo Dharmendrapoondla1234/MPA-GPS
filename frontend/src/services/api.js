@@ -17,6 +17,15 @@ function cacheTTL(url) {
   return CACHE_TTL.default;
 }
 
+// Timeout constants (ms)
+const TIMEOUT_DEFAULT  = 25_000;
+const TIMEOUT_CONTACTS = 90_000; // enrichment pipeline can take up to ~60s
+
+function timeoutForPath(path) {
+  if (path.includes("/vessel-contact") || path.includes("/contacts")) return TIMEOUT_CONTACTS;
+  return TIMEOUT_DEFAULT;
+}
+
 async function call(path, { bustCache = false, method = "GET", body } = {}) {
   const url = `${BASE}${path}`;
 
@@ -30,6 +39,8 @@ async function call(path, { bustCache = false, method = "GET", body } = {}) {
   }
 
   const promise = (async () => {
+    const ctrl    = new AbortController();
+    const timer   = setTimeout(() => ctrl.abort(), timeoutForPath(path));
     try {
       const token   = getCurrentUser()?.token;
       const headers = {
@@ -42,6 +53,7 @@ async function call(path, { bustCache = false, method = "GET", body } = {}) {
       const res = await fetch(url, {
         method,
         headers,
+        signal: ctrl.signal,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
 
@@ -70,10 +82,15 @@ async function call(path, { bustCache = false, method = "GET", body } = {}) {
       if (method === "GET") respCache.set(url, { data, ts: Date.now(), etag: res.headers.get("etag") || null });
       return data;
     } catch (err) {
+      if (err.name === "AbortError")
+        throw new Error("Request timed out — the enrichment pipeline took too long. Please try again.");
       if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))
         throw new Error("Connecting to server… will retry automatically");
       throw err;
-    } finally { if (method === "GET") inFlight.delete(url); }
+    } finally {
+      clearTimeout(timer);
+      if (method === "GET") inFlight.delete(url);
+    }
   })();
 
   if (method === "GET") inFlight.set(url, promise);
@@ -184,16 +201,17 @@ export async function triggerVesselEnrichment(imo, {
  * Returns the standardized format from the requirements doc.
  */
 export async function fetchVesselContactSpec(imo, {
-  mmsi, name, currentPort, nextPort, vesselType,
+  mmsi, name, currentPort, nextPort, vesselType, enrich, bustCache = false,
 } = {}) {
   const p = new URLSearchParams();
-  if (imo)         p.set("imo",         String(imo));
-  if (mmsi)        p.set("mmsi",        String(mmsi));
-  if (name)        p.set("name",        name);
-  if (currentPort) p.set("currentPort", currentPort);
-  if (nextPort)    p.set("nextPort",    nextPort);
-  if (vesselType)  p.set("vesselType",  vesselType);
-  return call(`/vessel-contact?${p}`);
+  if (imo)             p.set("imo",         String(imo));
+  if (mmsi)            p.set("mmsi",        String(mmsi));
+  if (name)            p.set("name",        name);
+  if (currentPort)     p.set("currentPort", currentPort);
+  if (nextPort)        p.set("nextPort",    nextPort);
+  if (vesselType)      p.set("vesselType",  vesselType);
+  if (enrich === false) p.set("enrich",     "false");
+  return call(`/vessel-contact?${p}`, { bustCache });
 }
 
 // ── AI PREDICTION ─────────────────────────────────────────────────

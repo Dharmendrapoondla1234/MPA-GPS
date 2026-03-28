@@ -284,6 +284,7 @@ const PortAgentIntelligencePanel = memo(function PortAgentIntelligencePanel({
   const doSearch = useCallback(async (params) => {
     setLoading(true);
     setError(null);
+    setResult(null);
     try {
       const data = await fetchVesselContactSpec(params.imo, {
         mmsi:        params.mmsi,
@@ -292,9 +293,30 @@ const PortAgentIntelligencePanel = memo(function PortAgentIntelligencePanel({
         nextPort:    params.nextPort,
         vesselType:  params.vesselType,
       });
+      if (!data || (data.success === false)) {
+        throw new Error(data?.error || "No data returned from server");
+      }
       setResult(data);
     } catch (err) {
-      setError(err.message || "Failed to fetch contacts");
+      const msg = err.message || "Failed to fetch contacts";
+      // On timeout, retry once without enrichment (faster — only BigQuery)
+      if (msg.includes("timed out") && params.imo && !params._retried) {
+        try {
+          const fallback = await fetchVesselContactSpec(params.imo, {
+            mmsi:        params.mmsi,
+            name:        params.name,
+            currentPort: params.currentPort,
+            nextPort:    params.nextPort,
+            vesselType:  params.vesselType,
+            enrich:      false,
+          });
+          if (fallback && fallback.success !== false) {
+            setResult({ ...fallback, _partial: true });
+            return;
+          }
+        } catch { /* fall through to error */ }
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -378,6 +400,14 @@ const PortAgentIntelligencePanel = memo(function PortAgentIntelligencePanel({
 
           {result && !loading && (
             <div className="pai-result-body">
+
+              {/* Partial data warning */}
+              {result._partial && (
+                <div className="pai-warn-banner">
+                  ⚡ Showing cached data only — AI enrichment timed out. Results may be incomplete.
+                  <button onClick={() => query && doSearch(query)}>Retry with AI</button>
+                </div>
+              )}
 
               {/* Vessel header */}
               <div className="pai-vessel-bar">

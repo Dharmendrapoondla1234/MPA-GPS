@@ -8,6 +8,17 @@ const { enrichVesselContact, batchEnrichArrivals, enrichPortAgents } = require("
 const { getDBStats } = require("../services/portAgentDB");
 const logger   = require("../utils/logger");
 
+// ── Timeout helper ────────────────────────────────────────────────
+const ENRICH_TIMEOUT_MS = 70_000; // 70s — enrichment pipeline has 10 steps
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const race = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+  });
+  return Promise.race([promise, race]).finally(() => clearTimeout(timer));
+}
+
 // ── Normalizers ───────────────────────────────────────────────────
 function normalizeCompany(c) {
   if (!c) return null;
@@ -76,9 +87,11 @@ async function resolveContacts({ imo, mmsi, name, enrich, currentPort, nextPort,
   if ((!hasGoodData || forceRefresh) && enrich && imo) {
     logger.info(`[contacts] AI enrichment IMO ${imo}...`);
     try {
-      enrichedData = await enrichVesselContact(imo, {
-        vesselName: name, currentPort, nextPort, vesselType, forceRefresh,
-      });
+      enrichedData = await withTimeout(
+        enrichVesselContact(imo, { vesselName: name, currentPort, nextPort, vesselType, forceRefresh }),
+        ENRICH_TIMEOUT_MS,
+        `enrichment IMO ${imo}`
+      );
     } catch (err) { logger.warn(`[contacts] enrichment error:`, err.message); }
   }
 
@@ -86,11 +99,11 @@ async function resolveContacts({ imo, mmsi, name, enrich, currentPort, nextPort,
   let portAgents = enrichedData?.port_agents || bqData?.port_agents || [];
   if (!portAgents.length && (currentPort || nextPort) && enrich) {
     try {
-      portAgents = await enrichPortAgents({
-        portName: currentPort || nextPort,
-        portCode: currentPort || nextPort,
-        vesselType: vesselType || null,
-      });
+      portAgents = await withTimeout(
+        enrichPortAgents({ portName: currentPort || nextPort, portCode: currentPort || nextPort, vesselType: vesselType || null }),
+        30_000,
+        "port agent enrichment"
+      );
     } catch (err) { logger.warn("[contacts] port agent error:", err.message); }
   }
 
