@@ -1,31 +1,35 @@
-// backend/src/services/contactEnricher.js — MPA AI Contact Enricher v5
+// backend/src/services/contactEnricher.js — MPA AI Contact Enricher v6
 //
-// PIPELINE:
+// FULL MULTI-SOURCE PIPELINE:
 // STEP 1  Equasis           — IMO-verified owner/manager/ISM (conf 0.92)
-// STEP 2  AI Web Search     — Claude + web_search for email/phone (conf 0.75)
-// STEP 3  Website Scrape    — Company contact page (conf 0.85)
-// STEP 4  Google CSE        — Search snippet extraction (conf 0.65)
-// STEP 5  VesselFinder      — Company name fallback (conf 0.40)
-// STEP 6  Port Agent DB     — Static seed lookup by LOCODE/name
-// STEP 7  AI Port Agents    — Claude searches for agents not in DB
-// STEP 8  Agent Org         — Enrich appointed ship agent/husbandry org (conf 0.75)
-// STEP 9  Master Contact    — Flag state / ISM channel for vessel master (conf 0.60)
-// STEP 10 BigQuery Save     — Write enriched data + agents to BQ tables
+// STEP 2  MarineTraffic     — Vessel details + company name (conf 0.80)
+// STEP 3  VesselFinder      — Owner/operator name fallback  (conf 0.75)
+// STEP 4  AI IMO Lookup     — Claude searches all maritime DBs by IMO (conf 0.70)
+// STEP 5  AI Company Search — Claude finds email/phone/website for company (conf 0.75)
+// STEP 6  Website Scrape    — Direct scrape of company contact page (conf 0.85)
+// STEP 7  Google CSE        — Email/phone from search snippets (conf 0.65)
+// STEP 8  LinkedIn Search   — Company LinkedIn profile via AI (conf 0.60)
+// STEP 9  Port Agent DB     — Static seed lookup by LOCODE/name
+// STEP 10 AI Port Agents    — Claude searches for agents not in DB
+// STEP 11 Agent Org         — Husbandry/ship agent organisation
+// STEP 12 Master Contact    — Captain contact channel info
+// STEP 13 BigQuery Save     — Persist enriched data
 "use strict";
 require("dotenv").config();
-const { BigQuery }            = require("@google-cloud/bigquery");
-const Anthropic               = require("@anthropic-ai/sdk");
-const logger                  = require("../utils/logger");
+const { BigQuery }  = require("@google-cloud/bigquery");
+const Anthropic     = require("@anthropic-ai/sdk");
+const logger        = require("../utils/logger");
 const { lookupPortAgents, rankAgents } = require("./portAgentDB");
 
 const PROJECT     = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
 const DATASET     = process.env.BIGQUERY_DATASET    || "MPA";
 const BQ_LOCATION = process.env.BIGQUERY_LOCATION   || "asia-southeast1";
+const MODEL       = "claude-sonnet-4-5-20251001";
 
 // ── BigQuery client ────────────────────────────────────────────────
 let bq;
 const _creds = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-if (_creds?.trim().startsWith("{")) {
+if (_creds && _creds.trim().startsWith("{")) {
   try {
     const c = JSON.parse(_creds);
     bq = new BigQuery({ credentials: c, projectId: c.project_id || PROJECT, location: BQ_LOCATION });
@@ -48,13 +52,14 @@ function cacheGet(map, k, ttl) {
 }
 function cacheSet(map, k, d) { map.set(k, { data: d, ts: Date.now() }); return d; }
 
-// ── Extractors ─────────────────────────────────────────────────────
+// ── Shared utilities ───────────────────────────────────────────────
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const PHONE_RE = /(?:\+?[\d\s\-().]{7,20})/g;
 
 function extractEmails(text) {
   return [...new Set((text || "").match(EMAIL_RE) || [])].filter(e =>
-    !e.includes("example") && !e.includes("yourdomain") && e.length < 80
+    !e.includes("example") && !e.includes("yourdomain") &&
+    !e.includes("@2x") && !e.includes(".png") && e.length < 80
   );
 }
 function extractPhones(text) {
@@ -62,524 +67,483 @@ function extractPhones(text) {
     .map(p => p.trim()).filter(p => p.replace(/\D/g, "").length >= 7);
 }
 
-// ═════════════════════════════════════════════════════════════════
-// STEP 1: EQUASIS  (fully rewritten — fixes cookie handling + URL + HTML parsing)
-// ═════════════════════════════════════════════════════════════════
-let _equasisCookies  = null;
-let _equasisCookieTs = 0;
-const EQUASIS_COOKIE_TTL = 4 * 60 * 60 * 1000;
-const EQ_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const EQ_BASE = "https://www.equasis.org/EquasisWeb";
+function safeJson(text) {
+  if (!text) return null;
+  try {
+    const m = text.match(/\{[\s\S]*\}/);
+    return m ? JSON.parse(m[0]) : null;
+  } catch { return null; }
+}
 
-// Helper: collect ALL Set-Cookie headers (Node 18+ supports getSetCookie())
+function withTimeout(promise, ms) {
+  let t;
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => { t = setTimeout(() => rej(new Error("step timeout")), ms); }),
+  ]).finally(() => clearTimeout(t));
+}
+
+async function safeFetch(url, opts = {}, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      signal: ctrl.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/json,*/*",
+        ...opts.headers,
+      },
+      ...opts,
+    });
+  } finally { clearTimeout(t); }
+}
+
 function getAllCookies(res) {
   if (typeof res.headers.getSetCookie === "function") {
     return res.headers.getSetCookie().join("; ");
   }
-  // Fallback for older Node
-  const raw = res.headers.get("set-cookie") || "";
-  return raw.split(/,(?=[^ ].*?=)/).map(c => c.split(";")[0].trim()).join("; ");
+  return (res.headers.get("set-cookie") || "")
+    .split(/,(?=[^ ].*?=)/).map(c => c.split(";")[0].trim()).join("; ");
 }
 
+// ═════════════════════════════════════════════════════════════════
+// STEP 1: EQUASIS (IMO-verified owner/manager/ISM)
+// ═════════════════════════════════════════════════════════════════
+const EQ_BASE = "https://www.equasis.org/EquasisWeb";
+let _eqCookies = null, _eqCookieTs = 0;
+const EQ_TTL   = 4 * 60 * 60 * 1000;
+
 async function equasisLogin() {
-  if (_equasisCookies && Date.now() - _equasisCookieTs < EQUASIS_COOKIE_TTL) return _equasisCookies;
-  const email = process.env.EQUASIS_EMAIL, password = process.env.EQUASIS_PASSWORD;
-  if (!email || !password) { logger.warn("[equasis] EQUASIS_EMAIL / EQUASIS_PASSWORD not set in env"); return null; }
+  if (_eqCookies && Date.now() - _eqCookieTs < EQ_TTL) return _eqCookies;
+  const email = process.env.EQUASIS_EMAIL, pass = process.env.EQUASIS_PASSWORD;
+  if (!email || !pass) { logger.warn("[equasis] EQUASIS_EMAIL/PASSWORD not set in environment"); return null; }
   try {
-    // 1. Get initial session cookie from home page
-    const pageRes = await fetch(`${EQ_BASE}/public/HomePage`, {
-      headers: { "User-Agent": EQ_UA, "Accept": "text/html,application/xhtml+xml" },
-    });
+    const pageRes = await safeFetch(`${EQ_BASE}/public/HomePage`, {}, 10000);
     const pageCookies = getAllCookies(pageRes);
 
-    // 2. POST login — follow redirects so we land on the authed home page
-    const loginRes = await fetch(`${EQ_BASE}/authen/HomePage?fs=Search`, {
+    const loginRes = await safeFetch(`${EQ_BASE}/authen/HomePage?fs=Search`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "Cookie": pageCookies,
-        "User-Agent": EQ_UA,
         "Referer": `${EQ_BASE}/public/HomePage`,
-        "Accept": "text/html,application/xhtml+xml",
       },
-      body: new URLSearchParams({ j_email: email, j_password: password, submit: "Login" }),
+      body: new URLSearchParams({ j_email: email, j_password: pass, submit: "Login" }),
       redirect: "follow",
-    });
+    }, 15000);
 
     const loginCookies = getAllCookies(loginRes);
-    // Merge: page cookies + login cookies (session cookie lives in login response)
     const allCookies = [pageCookies, loginCookies].filter(Boolean).join("; ");
-
-    // Verify login succeeded by checking response body
-    const loginBody = await loginRes.text();
-    const loggedIn  = loginBody.toLowerCase().includes("logout") ||
-                      loginBody.toLowerCase().includes("welcome") ||
-                      loginRes.url.includes("authen");
-
-    if (!loggedIn) {
-      logger.warn("[equasis] Login failed — wrong credentials or Equasis changed its form");
-      return null;
-    }
-
-    _equasisCookies  = allCookies;
-    _equasisCookieTs = Date.now();
-    logger.info("[equasis] ✅ Login OK");
+    const body = await loginRes.text();
+    const ok = body.toLowerCase().includes("logout") ||
+               body.toLowerCase().includes("welcome") ||
+               loginRes.url.includes("authen");
+    if (!ok) { logger.warn("[equasis] Login failed — check credentials or Equasis is blocking"); return null; }
+    _eqCookies = allCookies; _eqCookieTs = Date.now();
+    logger.info("[equasis] Login OK");
     return allCookies;
   } catch (err) { logger.warn("[equasis] Login error:", err.message); return null; }
 }
 
-// Parse Equasis ship info HTML — handles their table-based layout
 function parseEquasisHtml(html) {
-  // Strip tags helper for a captured group
   const strip = s => (s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-
-  // Equasis renders company info in a pattern like:
-  // <td ...>Registered owner</td> ... <td ...><a ...>COMPANY NAME</a></td>
-  // We look for the label then grab the next non-empty text content
   function extractAfterLabel(label) {
-    // Match label text then capture everything up to the next </tr>
-    const re = new RegExp(label + "[\s\S]{0,300}?<td[^>]*>([\s\S]{3,200}?)<\/td>", "i");
+    const re = new RegExp(label + "[\\s\\S]{0,400}?<td[^>]*>([\\s\\S]{3,300}?)<\\/td>", "i");
     const m = re.exec(html);
     if (!m) return null;
     const val = strip(m[1]);
-    // Skip if it looks like a UI element, not a company name
-    if (!val || val.length < 3 || val === "-" || /^(n\/a|none|unknown)$/i.test(val)) return null;
+    if (!val || val.length < 3 || /^(-|n\/a|none|unknown)$/i.test(val)) return null;
     return val;
   }
-
-  const owner    = extractAfterLabel("Registered owner");
-  const manager  = extractAfterLabel("ISM Manager") || extractAfterLabel("ISM manager");
-  const shipMgr  = extractAfterLabel("Ship manager");
-  const operator = extractAfterLabel("Operator");
-  const flag     = extractAfterLabel("Flag");
-
-  // Address: look for country/address block near owner
-  const addrM = /Address[\s\S]{0,200}?<td[^>]*>([\s\S]{5,300}?)<\/td>/i.exec(html);
-  const address = addrM ? strip(addrM[1]) : null;
-
-  return { owner, manager, shipMgr, operator, flag, address };
+  return {
+    owner:    extractAfterLabel("Registered owner"),
+    manager:  extractAfterLabel("ISM [Mm]anager") || extractAfterLabel("ISM Manager"),
+    shipMgr:  extractAfterLabel("Ship manager"),
+    operator: extractAfterLabel("Operator"),
+    flag:     extractAfterLabel("Flag"),
+    address:  strip((/Address[\s\S]{0,300}?<td[^>]*>([\s\S]{5,400}?)<\/td>/i.exec(html) || [])[1] || ""),
+  };
 }
 
 async function fetchFromEquasis(imo) {
   const cookies = await equasisLogin();
   if (!cookies) return null;
-
-  const hdrs = {
-    "Cookie": cookies,
-    "User-Agent": EQ_UA,
-    "Accept": "text/html,application/xhtml+xml",
-  };
-
+  const hdrs = { "Cookie": cookies, "Accept": "text/html,application/xhtml+xml" };
   try {
-    // Strategy A: POST to restricted/Search (the correct Equasis ship search)
-    const searchRes = await fetch(`${EQ_BASE}/restricted/Search?fs=HomePage`, {
+    // Strategy A: POST restricted/Search
+    const sRes = await safeFetch(`${EQ_BASE}/restricted/Search?fs=HomePage`, {
       method: "POST",
       headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
         "Referer": `${EQ_BASE}/authen/HomePage?fs=Search` },
       body: new URLSearchParams({ P_ENTREE_HOME: imo, checkbox_ship: "on", P_PAGE_SHIP: 1 }),
       redirect: "follow",
-    });
-    let html = searchRes.ok ? await searchRes.text() : "";
+    }, 15000);
+    let html = sRes.ok ? await sRes.text() : "";
 
-    // Strategy B: POST to ShipInfo with P_IMO (alternative endpoint)
+    // Strategy B: POST ShipInfo
     if (!html.includes("Registered owner") && !html.includes("ISM")) {
-      const infoRes = await fetch(`${EQ_BASE}/authen/ShipInfo`, {
+      const r2 = await safeFetch(`${EQ_BASE}/authen/ShipInfo`, {
         method: "POST",
         headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
           "Referer": `${EQ_BASE}/authen/HomePage?fs=ByShip` },
         body: new URLSearchParams({ P_IMO: imo }),
         redirect: "follow",
-      });
-      if (infoRes.ok) html = await infoRes.text();
+      }, 12000);
+      if (r2.ok) html = await r2.text();
     }
 
-    // Strategy C: GET ShipInfo (legacy endpoint that may still work)
+    // Strategy C: GET ShipInfo legacy
     if (!html.includes("Registered owner") && !html.includes("ISM")) {
-      const getRes = await fetch(
-        `${EQ_BASE}/authen/ShipInfo?fs=ByShip&P_IMO=${imo}`,
-        { headers: { ...hdrs, "Referer": `${EQ_BASE}/authen/HomePage?fs=ByShip` }, redirect: "follow" }
-      );
-      if (getRes.ok) html = await getRes.text();
+      const r3 = await safeFetch(`${EQ_BASE}/authen/ShipInfo?fs=ByShip&P_IMO=${imo}`,
+        { headers: { ...hdrs, "Referer": `${EQ_BASE}/authen/HomePage?fs=ByShip` }, redirect: "follow" }, 12000);
+      if (r3.ok) html = await r3.text();
     }
 
     if (!html.includes("Registered owner") && !html.includes("ISM")) {
-      logger.warn(`[equasis] No ship data found in response for IMO ${imo}`);
+      logger.warn(`[equasis] No ship data found for IMO ${imo}`);
       return null;
     }
 
-    const parsed = parseEquasisHtml(html);
-    if (!parsed.owner && !parsed.manager) {
-      logger.warn(`[equasis] HTML parsed but no owner/manager extracted for IMO ${imo}`);
+    const p = parseEquasisHtml(html);
+    if (!p.owner && !p.manager) {
+      logger.warn(`[equasis] Could not parse company from HTML for IMO ${imo}`);
       return null;
     }
-
-    logger.info(`[equasis] ✅ IMO ${imo}: owner="${parsed.owner}" manager="${parsed.manager}"`);
-    return {
-      owner_name:    parsed.owner,
-      manager_name:  parsed.manager,
-      ship_manager:  parsed.shipMgr,
-      operator_name: parsed.operator,
-      address:       parsed.address,
-      flag:          parsed.flag,
-      source:        "equasis",
-      confidence:    0.92,
-    };
+    logger.info(`[equasis] IMO ${imo}: owner="${p.owner}" manager="${p.manager}"`);
+    return { owner_name: p.owner, manager_name: p.manager, ship_manager: p.shipMgr,
+             operator_name: p.operator, address: p.address, flag: p.flag,
+             source: "equasis", confidence: 0.92 };
   } catch (err) { logger.warn("[equasis] fetch error:", err.message); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 2: AI WEB SEARCH
+// STEP 2: MARINETRAFFIC (vessel details + owner name)
 // ═════════════════════════════════════════════════════════════════
-async function aiSearchCompanyContacts(companyName, country) {
-  if (!companyName || !process.env.ANTHROPIC_API_KEY) return null;
+async function fetchFromMarineTraffic(imo) {
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5-20251001", max_tokens: 600,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content:
-        `Find official contact information for shipping company: "${companyName}"${country ? ` (${country})` : ""}.
-Return ONLY valid JSON, no markdown:
-{"website":null,"email":null,"email_ops":null,"phone":null,"phone_alt":null,"address":null,"linkedin":null,"confidence":0.7}
-Rules: verified data only, null for unverified. confidence: 0.9=official site, 0.7=directory, 0.5=uncertain.` }],
-    });
-    const text = response.content.find(b => b.type === "text")?.text;
-    if (!text) return null;
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const data = JSON.parse(m[0]);
-    logger.info(`[ai-search] ✅ "${companyName}": email=${data.email}`);
-    return { ...data, source: "ai_web_search" };
-  } catch (err) { logger.warn("[ai-search] error:", err.message?.slice(0, 80)); return null; }
+    const res = await safeFetch(
+      `https://www.marinetraffic.com/en/ais/details/ships/imo:${imo}`,
+      { headers: { "Referer": "https://www.marinetraffic.com/" } }, 12000
+    );
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    // Try JSON-LD structured data first
+    const ldMatch = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/i.exec(html);
+    if (ldMatch) {
+      try {
+        const ld = JSON.parse(ldMatch[1]);
+        if (ld.name || ld.owner) {
+          return { vessel_name: ld.name || null, owner_name: ld.owner || null,
+                   flag: ld.flag || null, source: "marinetraffic", confidence: 0.80 };
+        }
+      } catch { /* continue */ }
+    }
+
+    // Scrape visible text
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    const ownerM   = /(?:Registered Owner|Ship Owner)[:\s]+([A-Z][A-Z\s&.,'\-]{3,60})/i.exec(text);
+    const managerM = /(?:Manager|ISM Manager)[:\s]+([A-Z][A-Z\s&.,'\-]{3,60})/i.exec(text);
+    const flagM    = /(?:Flag)[:\s]+([A-Z][A-Za-z\s]{2,40})/i.exec(text);
+    const nameM    = /(?:Vessel Name|Ship Name)[:\s]+([A-Z][A-Z\s0-9\-]{2,40})/i.exec(text);
+
+    if (!ownerM && !managerM) return null;
+    logger.info(`[marinetraffic] IMO ${imo}: owner="${ownerM?.[1]}"`);
+    return { vessel_name: nameM?.[1]?.trim() || null, owner_name: ownerM?.[1]?.trim() || null,
+             manager_name: managerM?.[1]?.trim() || null, flag: flagM?.[1]?.trim() || null,
+             source: "marinetraffic", confidence: 0.78 };
+  } catch (err) { logger.warn("[marinetraffic] error:", err.message?.slice(0, 60)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 2b: AI LOOKUP BY IMO (when Equasis fails and no vessel name)
+// STEP 3: VESSELFINDER (owner/operator fallback)
 // ═════════════════════════════════════════════════════════════════
-async function aiLookupByIMO(imo) {
-  if (!imo || !process.env.ANTHROPIC_API_KEY) return null;
+async function fetchFromVesselFinder(imo) {
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5-20251001", max_tokens: 800,
+    // Public API endpoint
+    const apiRes = await safeFetch(
+      `https://www.vesselfinder.com/api/pub/vesselDetails?mmsi=&imo=${imo}`,
+      { headers: { "Referer": "https://www.vesselfinder.com/" } }, 8000
+    );
+    if (apiRes.ok) {
+      const json = await apiRes.json().catch(() => null);
+      if (json) {
+        const name  = json?.AIS?.NAME || json?.vessel?.name || null;
+        const owner = json?.vessel?.company || null;
+        const flag  = json?.AIS?.FLAG || json?.vessel?.flag || null;
+        if (name || owner) {
+          logger.info(`[vesselfinder] IMO ${imo}: name="${name}" owner="${owner}"`);
+          return { vessel_name: name, owner_name: owner, flag, source: "vesselfinder", confidence: 0.70 };
+        }
+      }
+    }
+
+    // Vessel detail page scrape
+    const pageRes = await safeFetch(
+      `https://www.vesselfinder.com/vessels/details/${imo}`,
+      { headers: { "Referer": "https://www.vesselfinder.com/" } }, 10000
+    );
+    if (!pageRes.ok) return null;
+    const text = (await pageRes.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    const ownerM = /(?:Owner|Company)[:\s]+([A-Z][A-Z\s&.,'\-]{3,60})/i.exec(text);
+    const nameM  = /(?:Vessel|Ship)\s*Name[:\s]+([A-Z][A-Z\s0-9\-]{2,40})/i.exec(text);
+    if (!ownerM && !nameM) return null;
+    logger.info(`[vesselfinder] page IMO ${imo}: owner="${ownerM?.[1]}"`);
+    return { vessel_name: nameM?.[1]?.trim() || null, owner_name: ownerM?.[1]?.trim() || null,
+             source: "vesselfinder", confidence: 0.65 };
+  } catch (err) { logger.warn("[vesselfinder] error:", err.message?.slice(0, 60)); return null; }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// STEP 4: AI IMO LOOKUP — Claude searches all maritime sources
+// ═════════════════════════════════════════════════════════════════
+async function aiLookupByIMO(imo, vesselName) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const resp = await withTimeout(anthropic.messages.create({
+      model: MODEL, max_tokens: 1000,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
-        `Search for the vessel with IMO number ${imo}. Find its registered owner company, operator, and any contact information.
-Return ONLY valid JSON (no markdown):
-{"vessel_name":null,"owner_name":null,"operator_name":null,"flag":null,"website":null,"email":null,"phone":null,"address":null,"confidence":0.6}
-Rules: Use verified maritime databases (equasis, marinetraffic, fleetmon, vesseltracker). null for unverified fields.` }],
-    });
-    const text = response.content.find(b => b.type === "text")?.text;
-    if (!text) return null;
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const data = JSON.parse(m[0]);
-    logger.info(`[ai-imo] ✅ IMO ${imo}: owner="${data.owner_name}" vessel="${data.vessel_name}"`);
-    return data;
+        `Search for IMO number ${imo}${vesselName ? ` vessel "${vesselName}"` : ""} across maritime databases.
+Check: MarineTraffic, VesselFinder, FleetMon, Equasis, VesselTracker, ShipSpotting, Lloyd's List.
+Find: registered owner company name, ISM manager, ship manager, operator, flag state, and contact details.
+
+Return ONLY valid JSON (no markdown, no text before or after):
+{"vessel_name":null,"owner_name":null,"manager_name":null,"ship_manager":null,"operator_name":null,"flag":null,"website":null,"email":null,"phone":null,"address":null,"confidence":0.65,"sources_checked":[]}` }],
+    }), 45000);
+    const text = resp.content.find(b => b.type === "text")?.text;
+    const data = safeJson(text);
+    if (!data || (!data.vessel_name && !data.owner_name)) return null;
+    logger.info(`[ai-imo] IMO ${imo}: vessel="${data.vessel_name}" owner="${data.owner_name}"`);
+    return { ...data, source: "ai_imo_search" };
   } catch (err) { logger.warn("[ai-imo] error:", err.message?.slice(0, 80)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 3: WEBSITE SCRAPE
+// STEP 5: AI COMPANY CONTACT SEARCH (email, phone, website)
+// ═════════════════════════════════════════════════════════════════
+async function aiSearchCompanyContacts(companyName, country) {
+  if (!companyName || !process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const resp = await withTimeout(anthropic.messages.create({
+      model: MODEL, max_tokens: 800,
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      messages: [{ role: "user", content:
+        `Find official contact information for shipping company: "${companyName}"${country ? ` (${country})` : ""}.
+Search: official website, maritime directories (BIMCO, Intercargo, Intertanko), company registries, Google.
+Look for: official email, operations email, phone number, website URL, registered office address, LinkedIn page.
+
+Return ONLY valid JSON (no markdown):
+{"website":null,"email":null,"email_ops":null,"phone":null,"phone_alt":null,"address":null,"linkedin":null,"confidence":0.7}
+Rules: verified only, null for uncertain. confidence: 0.9=official site, 0.75=directory, 0.6=uncertain.` }],
+    }), 40000);
+    const text = resp.content.find(b => b.type === "text")?.text;
+    const data = safeJson(text);
+    if (!data) return null;
+    logger.info(`[ai-company] "${companyName}": email=${data.email} web=${data.website}`);
+    return { ...data, source: "ai_web_search" };
+  } catch (err) { logger.warn("[ai-company] error:", err.message?.slice(0, 80)); return null; }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// STEP 6: WEBSITE SCRAPE (direct contact page scraping)
 // ═════════════════════════════════════════════════════════════════
 async function scrapeContactPage(websiteUrl) {
   if (!websiteUrl) return null;
   try {
     const base = new URL(websiteUrl).origin;
-    const urls = [`${base}/contact`, `${base}/contact-us`, `${base}/contacts`, `${base}/en/contact`, websiteUrl];
+    const urls = [`${base}/contact`, `${base}/contact-us`, `${base}/contacts`,
+                  `${base}/en/contact`, `${base}/about/contact`, websiteUrl];
     for (const url of urls) {
       try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 5000);
-        const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal }).finally(() => clearTimeout(t));
+        const res = await safeFetch(url, {}, 6000);
         if (!res.ok) continue;
-        const text = (await res.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-        const emails = extractEmails(text), phones = extractPhones(text);
+        const text = (await res.text()).replace(/<[^>]+>/g, " ");
+        const emails = extractEmails(text);
+        const phones = extractPhones(text);
         if (emails.length || phones.length) {
-          return { email: emails[0]||null, email_ops: emails[1]||null, phone: phones[0]||null, source: "website_scrape", confidence: 0.85 };
+          logger.info(`[scrape] ${url}: email=${emails[0]} phone=${phones[0]}`);
+          return { email: emails[0] || null, email_ops: emails[1] || null, phone: phones[0] || null };
         }
-      } catch { /* next */ }
+      } catch { /* try next url */ }
     }
-  } catch (err) { logger.warn("[scrape] error:", err.message?.slice(0, 60)); }
-  return null;
+    return null;
+  } catch (err) { logger.warn("[scrape] error:", err.message?.slice(0, 60)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 4: GOOGLE CSE
+// STEP 7: GOOGLE CSE (search snippet extraction)
 // ═════════════════════════════════════════════════════════════════
 async function googleSearchContacts(companyName) {
-  const key = process.env.GOOGLE_CSE_KEY, cx = process.env.GOOGLE_CSE_CX;
-  if (!key || !cx) return null;
+  const apiKey = process.env.GOOGLE_CSE_API_KEY;
+  const cx     = process.env.GOOGLE_CSE_ID;
+  if (!apiKey || !cx) return null;
   try {
-    const q   = encodeURIComponent(`"${companyName}" shipping maritime contact email`);
-    const res = await fetch(`https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${q}&num=5`);
+    const q = encodeURIComponent(`"${companyName}" shipping contact email phone`);
+    const res = await safeFetch(
+      `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${q}&num=5`, {}, 8000);
     if (!res.ok) return null;
     const json = await res.json();
-    const text = (json.items || []).map(i => `${i.title} ${i.snippet} ${i.link}`).join(" ");
-    const emails = extractEmails(text), phones = extractPhones(text);
-    if (!emails.length) return null;
-    return { email: emails[0], phone: phones[0]||null, source: "google_cse", confidence: 0.65 };
+    const snippets = (json.items || []).map(i => `${i.title} ${i.snippet}`).join(" ");
+    const emails = extractEmails(snippets);
+    const phones = extractPhones(snippets);
+    if (!emails.length && !phones.length) return null;
+    logger.info(`[google-cse] "${companyName}": email=${emails[0]}`);
+    return { email: emails[0] || null, phone: phones[0] || null, confidence: 0.65 };
   } catch (err) { logger.warn("[google-cse] error:", err.message?.slice(0, 60)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 5: VESSELFINDER FALLBACK
+// STEP 8: LINKEDIN SEARCH (via Claude AI web search)
 // ═════════════════════════════════════════════════════════════════
-async function vesselFinderFallback(imo) {
+async function linkedinSearch(companyName, country) {
+  if (!companyName || !process.env.ANTHROPIC_API_KEY) return null;
   try {
-    const ctrl = new AbortController();
-    setTimeout(() => ctrl.abort(), 5000);
-    const res = await fetch(`https://www.vesselfinder.com/api/pub/vesselDetails?imo=${imo}`,
-      { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const name = json?.AIS?.DESTINATION || json?.vessel?.manager || null;
-    return name ? { owner_name: name, source: "vesselfinder", confidence: 0.40 } : null;
-  } catch { return null; }
-}
-
-// ═════════════════════════════════════════════════════════════════
-// STEPS 6+7: PORT AGENT INTELLIGENCE
-// First checks static DB, then AI if no results
-// ═════════════════════════════════════════════════════════════════
-async function resolvePortAgents({ portName, portCode, vesselType, ownerName, portContext }) {
-  const lookupKey = portCode || portName;
-  if (!lookupKey) return [];
-
-  const cacheKey = `agents_${lookupKey}_${vesselType || ""}`;
-  const cached   = cacheGet(portAgentCache, cacheKey, PORT_AGENT_TTL);
-  if (cached) return cached.map(a => ({ ...a, port_context: portContext }));
-
-  // STEP 6: Static DB lookup
-  let agents = lookupPortAgents(lookupKey, vesselType);
-  if (agents.length) {
-    agents = rankAgents(agents, vesselType, 3);
-    logger.info(`[port-agents] DB hit for "${lookupKey}": ${agents.length} agents`);
-    cacheSet(portAgentCache, cacheKey, agents);
-    return agents.map(a => ({ ...a, port_context: portContext }));
-  }
-
-  // STEP 7: AI fallback for unknown ports
-  if (!process.env.ANTHROPIC_API_KEY) return [];
-  try {
-    logger.info(`[port-agents] AI search for "${portName || portCode}"`);
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5-20251001", max_tokens: 1200,
+    const resp = await withTimeout(anthropic.messages.create({
+      model: MODEL, max_tokens: 400,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
-        `Find shipping/port agents at: "${portName || portCode}"${vesselType ? ` for ${vesselType}` : ""}${ownerName ? ` (ship owner: ${ownerName})` : ""}.
-Return ONLY a valid JSON array, no markdown:
-[{"agent_name":null,"agency_company":"Name","port_code":"${portCode||""}","port_name":"${portName||""}","email":null,"email_ops":null,"phone":null,"phone_24h":null,"vhf_channel":null,"website":null,"vessel_types_served":"ALL","services":["husbandry"],"confidence":0.7,"source":"directory"}]
-Return [] if nothing verified. Maximum 3 agents.` }],
-    });
-    const text = response.content.find(b => b.type === "text")?.text;
-    if (!text) return [];
-    const m = text.match(/\[[\s\S]*\]/);
-    if (!m) return [];
-    const aiAgents = JSON.parse(m[0]);
-    if (!Array.isArray(aiAgents) || !aiAgents.length) return [];
-    logger.info(`[port-agents] AI found ${aiAgents.length} for "${lookupKey}"`);
-    cacheSet(portAgentCache, cacheKey, aiAgents);
-    return aiAgents.map(a => ({ ...a, port_context: portContext, data_source: a.source || "ai_enriched" }));
-  } catch (err) {
-    logger.warn("[port-agents] AI error:", err.message?.slice(0, 80));
-    return [];
-  }
+        `Find the LinkedIn company page URL for shipping company "${companyName}"${country ? ` (${country})` : ""}.
+Also note their official website if found during search.
+Return ONLY valid JSON: {"linkedin_url":null,"website":null,"found":false}` }],
+    }), 20000);
+    const text = resp.content.find(b => b.type === "text")?.text;
+    const data = safeJson(text);
+    if (!data?.linkedin_url && !data?.website) return null;
+    logger.info(`[linkedin] "${companyName}": ${data.linkedin_url}`);
+    return data;
+  } catch (err) { logger.warn("[linkedin] error:", err.message?.slice(0, 60)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 8: BIGQUERY SAVE
+// STEPS 9+10: PORT AGENTS (static DB + AI fallback)
 // ═════════════════════════════════════════════════════════════════
-async function saveToBigQuery(imo, data) {
+async function resolvePortAgents({ portName, portCode, vesselType, ownerName, portContext }) {
+  const cacheKey = `pa_${portCode || portName}_${vesselType || "any"}`;
+  const cached   = cacheGet(portAgentCache, cacheKey, PORT_AGENT_TTL);
+  if (cached) return cached;
+
   try {
-    const now = new Date().toISOString();
-    const ds  = bq.dataset(DATASET);
-
-    // Check tables exist
-    const tableExists = async (name) => {
-      try { await ds.table(name).getMetadata(); return true; } catch { return false; }
-    };
-
-    if (await tableExists("d_shipping_companies") && (data.owner_name || data.email)) {
-      const cid = `enriched_${imo}_owner`;
-      await ds.table("d_shipping_companies").insert([{
-        company_id: cid, company_name: data.owner_name || null,
-        company_type: "OWNER", primary_email: data.email || null,
-        secondary_email: data.email_ops || null, phone_primary: data.phone || null,
-        website: data.website || null, registered_address: data.address || null,
-        data_source: data.source || "enriched", last_verified_at: now,
-        created_at: now, updated_at: now,
-      }], { skipInvalidRows: true });
-
-      if (await tableExists("d_vessel_company_map")) {
-        await ds.table("d_vessel_company_map").insert([{
-          imo_number: imo, owner_company_id: cid,
-          data_source: data.source || "enriched", last_verified_at: now,
-          created_at: now, updated_at: now,
-        }], { skipInvalidRows: true });
-      }
+    // STEP 9: Static DB
+    let agents = lookupPortAgents({ portCode, portName, vesselType });
+    if (agents && agents.length) {
+      const ranked = rankAgents(agents, { vesselType, ownerName });
+      ranked.forEach(a => { a.port_context = portContext; a.data_source = a.data_source || "port_agent_db"; });
+      return cacheSet(portAgentCache, cacheKey, ranked);
     }
 
-    if (await tableExists("d_port_agents") && data.port_agents?.length) {
-      for (const a of data.port_agents) {
-        try {
-          await ds.table("d_port_agents").insert([{
-            agent_id:           a.agent_id || `ai_${a.port_code}_${Date.now()}`,
-            agent_name:         a.agent_name || null,
-            agency_company:     a.agency_company || null,
-            port_code:          a.port_code || null,
-            port_name:          a.port_name || null,
-            email_primary:      a.email || a.email_primary || null,
-            email_ops:          a.email_ops || null,
-            phone_main:         a.phone || a.phone_main || null,
-            phone_24h:          a.phone_24h || null,
-            vhf_channel:        a.vhf_channel || null,
-            vessel_type_served: a.vessel_type_served || a.vessel_types_served || "ALL",
-            is_active:          true,
-            data_source:        a.data_source || "enriched",
-            last_verified_at:   now, created_at: now, updated_at: now,
-          }], { skipInvalidRows: true });
-        } catch { /* non-fatal */ }
-      }
-    }
+    // STEP 10: AI port agent search
+    if (!process.env.ANTHROPIC_API_KEY) return cacheSet(portAgentCache, cacheKey, []);
+    const resp = await withTimeout(anthropic.messages.create({
+      model: MODEL, max_tokens: 1400,
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      messages: [{ role: "user", content:
+        `Find port agents / ship agents at port "${portName || portCode}"${vesselType ? ` for ${vesselType} vessels` : ""}.
+Search shipping directories, port authority websites, FONASBA agent lists, and agent company websites.
+Include major international agents (GAC, Inchcape, Wilhelmsen, Gulf Agency, Mariner Logistics) and local agents.
 
-    if (await tableExists("d_contact_audit_log")) {
-      await ds.table("d_contact_audit_log").insert([{
-        log_id: `log_${imo}_${Date.now()}`, imo_number: imo,
-        field_changed: "full_enrichment",
-        new_value: JSON.stringify({ email: data.email, phone: data.phone, source: data.source }),
-        changed_by: "contact_enricher_v4", change_source: data.source,
-        changed_at: now,
-      }], { skipInvalidRows: true });
-    }
-
-    logger.info(`[bq-save] ✅ IMO ${imo} saved`);
+Return ONLY a valid JSON array (no markdown, no text outside the array):
+[{"agent_name":null,"agency_company":null,"port_code":"${portCode || ""}","port_name":"${portName || ""}","email_primary":null,"email_ops":null,"phone_main":null,"phone_24h":null,"vhf_channel":null,"vessel_types_served":"ALL","services":[],"website":null,"port_context":"${portContext || "current"}","confidence":0.65,"data_source":"ai_web_search"}]` }],
+    }), 45000);
+    const text = resp.content.find(b => b.type === "text")?.text;
+    let arr = null;
+    try { const m = text && text.match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : null; } catch { arr = null; }
+    const result = Array.isArray(arr) ? arr.filter(a => a.agency_company || a.agent_name) : [];
+    result.forEach(a => { a.port_context = portContext; });
+    logger.info(`[ai-agents] ${portName}: ${result.length} agents found`);
+    return cacheSet(portAgentCache, cacheKey, result);
   } catch (err) {
-    logger.warn("[bq-save] non-fatal error:", err.message?.slice(0, 80));
+    logger.warn("[port-agents] error:", err.message?.slice(0, 80));
+    return cacheSet(portAgentCache, cacheKey, []);
   }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 8: AGENT ORGANISATION ENRICHMENT
-// Identifies and enriches the vessel's appointed husbandry/ship agent
-// organisation — the company that handles the vessel's port calls,
-// crew changes, provisions, and clearance on behalf of the owner.
-// Different from ad-hoc port agents; this is the standing appointment.
+// STEP 11: AGENT ORGANISATION ENRICHMENT
 // ═════════════════════════════════════════════════════════════════
 async function enrichAgentOrganisation({ ownerName, managerName, vesselName, vesselType, flag, imo }) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
-  const company = managerName || ownerName;
+  const company = ownerName || managerName;
   if (!company && !vesselName) return null;
-
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5-20251001", max_tokens: 800,
+    const resp = await withTimeout(anthropic.messages.create({
+      model: MODEL, max_tokens: 1200,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
-        `Find the appointed ship agent or husbandry agent organisation for this vessel:
-Vessel: "${vesselName || "unknown"}" (IMO: ${imo || "unknown"})
-Owner/Manager: "${company || "unknown"}"
-Flag: "${flag || "unknown"}"
-Type: "${vesselType || "unknown"}"
+        `Find the ship husbandry agent or ship management organisation for:
+Vessel: ${vesselName || "Unknown"} (IMO ${imo})  Owner/Manager: ${company || "Unknown"}
+Vessel Type: ${vesselType || "General"}  Flag: ${flag || "Unknown"}
 
-A ship agent organisation (also called husbandry agent, port agent, or ship chandler network) is the company formally appointed by the owner/manager to handle port calls, crew, provisions, and customs on their behalf globally or regionally.
-
-Examples: GAC, Wilhelmsen Ship Management, Inchcape Shipping Services, Synergy Marine, Columbia Shipmanagement, V.Ships, Thome Ship Management.
-
-Search for: "${company || vesselName} ship agent" OR "${company || vesselName} husbandry agent" OR "${company || vesselName} port agent appointment"
-
-Return ONLY valid JSON, no markdown:
-{
-  "agent_org_name": null,
-  "agent_org_type": "HUSBANDRY_AGENT or SHIP_MANAGER or PORT_AGENT_NETWORK",
-  "agent_org_website": null,
-  "agent_org_email": null,
-  "agent_org_email_ops": null,
-  "agent_org_phone": null,
-  "agent_org_phone_24h": null,
-  "agent_org_address": null,
-  "services": [],
-  "regions_covered": [],
-  "appointment_basis": "STANDING or AD_HOC or UNKNOWN",
-  "confidence": 0.5,
-  "source": "web_search"
-}
-Rules: null for anything unverified. confidence 0.9=official confirmation, 0.7=strong indication, 0.5=likely, 0.3=uncertain.` }],
-    });
-    const text = response.content.find(b => b.type === "text")?.text;
-    if (!text) return null;
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const data = JSON.parse(m[0]);
-    if (!data.agent_org_name) return null;
-    logger.info(`[agent-org] ✅ Found: "${data.agent_org_name}" for "${company || vesselName}"`);
-    return { ...data, source: "ai_web_search" };
-  } catch (err) {
-    logger.warn("[agent-org] error:", err.message?.slice(0, 80));
-    return null;
-  }
+Search for appointed ship agents, husbandry agents, ship chandlers (GAC, Inchcape, Wilhelmsen, Gulf Agency, etc.)
+Return ONLY valid JSON (no markdown):
+{"agent_org_name":null,"agent_org_type":null,"appointment_basis":null,"agent_org_email":null,"agent_org_email_ops":null,"agent_org_phone":null,"agent_org_phone_24h":null,"agent_org_website":null,"agent_org_address":null,"services":[],"regions_covered":[],"confidence":0.6,"source":"ai_web_search"}` }],
+    }), 40000);
+    const text = resp.content.find(b => b.type === "text")?.text;
+    return safeJson(text);
+  } catch (err) { logger.warn("[agent-org] error:", err.message?.slice(0, 80)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 9: VESSEL MASTER / CAPTAIN CONTACT CHANNEL
-// We do NOT expose the captain's personal details (GDPR / maritime
-// privacy). Instead we resolve the correct communication channel:
-//   • Ship manager's crew department (for operational matters)
-//   • Flag state MRCC (for emergencies)
-//   • Satellite comms provider contact (Inmarsat/Iridium)
-//   • Ship's official SAT-C / GMDSS contact if publicly listed
+// STEP 12: VESSEL MASTER / CAPTAIN CONTACT CHANNEL
 // ═════════════════════════════════════════════════════════════════
 async function enrichMasterContact({ ownerName, managerName, shipManager, flag, imo, vesselName }) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
-  const mgr = shipManager || managerName || ownerName;
-
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5-20251001", max_tokens: 700,
+    const resp = await withTimeout(anthropic.messages.create({
+      model: MODEL, max_tokens: 800,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       messages: [{ role: "user", content:
-        `Find the correct communication channel to reach the vessel master / captain of:
-Vessel: "${vesselName || "unknown"}" (IMO: ${imo || "unknown"})
-Ship Manager / ISM Manager: "${mgr || "unknown"}"
-Flag State: "${flag || "unknown"}"
+        `For vessel IMO ${imo} (${vesselName || "Unknown"}) flagged in ${flag || "Unknown"}, find captain/crew contact channels.
+Owner/ISM Manager: ${ownerName || managerName || shipManager || "Unknown"}
+Find: crew management company contact, MRCC for this flag state, satellite phone access info.
+Return ONLY valid JSON (no markdown):
+{"master_contact_note":null,"preferred_channel":null,"contact_protocol":null,"crew_dept_company":null,"crew_dept_email":null,"crew_dept_phone":null,"mrcc_name":null,"mrcc_country":null,"mrcc_email":null,"mrcc_phone":null,"sat_phone_public":null,"radio_call_sign":null,"inmarsat_number":null,"confidence":0.5,"source":"ai_web_search"}` }],
+    }), 35000);
+    const text = resp.content.find(b => b.type === "text")?.text;
+    return safeJson(text);
+  } catch (err) { logger.warn("[master-contact] error:", err.message?.slice(0, 80)); return null; }
+}
 
-IMPORTANT: Do NOT look for or return personal contact details of the captain.
-Return the OFFICIAL CHANNELS only:
-1. Ship manager's crew/operations department contact (who relays messages to the master)
-2. Flag state MRCC (Maritime Rescue Coordination Centre) for emergencies
-3. Any publicly listed ship satellite phone / Inmarsat number (if in public directories)
-4. Vessel's official radio call sign if findable
+// ═════════════════════════════════════════════════════════════════
+// STEP 13: SAVE TO BIGQUERY (fire-and-forget)
+// ═════════════════════════════════════════════════════════════════
+async function saveToBigQuery(imo, data) {
+  try {
+    const ds  = bq.dataset(DATASET);
+    const now = new Date().toISOString();
+    const tableExists = async name => { try { await ds.table(name).getMetadata(); return true; } catch { return false; } };
 
-Search: "${mgr || vesselName} crew department contact" AND "MRCC ${flag || ""} emergency contact"
-
-Return ONLY valid JSON, no markdown:
-{
-  "master_contact_note": "Brief explanation of how to reach the master",
-  "crew_dept_company": null,
-  "crew_dept_email": null,
-  "crew_dept_phone": null,
-  "mrcc_name": null,
-  "mrcc_email": null,
-  "mrcc_phone": null,
-  "mrcc_country": null,
-  "sat_phone_public": null,
-  "radio_call_sign": null,
-  "inmarsat_number": null,
-  "preferred_channel": "SHIP_MANAGER or PORT_AGENT or MRCC or SATPHONE",
-  "contact_protocol": "Standard protocol note, e.g. contact via ship manager ops dept",
-  "confidence": 0.5,
-  "source": "web_search"
-}` }],
-    });
-    const text = response.content.find(b => b.type === "text")?.text;
-    if (!text) return null;
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const data = JSON.parse(m[0]);
-    logger.info(`[master-contact] ✅ channel="${data.preferred_channel}" for IMO ${imo}`);
-    return { ...data, source: "ai_web_search" };
-  } catch (err) {
-    logger.warn("[master-contact] error:", err.message?.slice(0, 80));
-    return null;
-  }
+    if (await tableExists("d_shipping_companies") && (data.owner_name || data.email)) {
+      const companyId = `enriched_${imo}_owner`;
+      await ds.table("d_shipping_companies").insert([{
+        company_id: companyId, company_name: data.owner_name || null, company_type: "OWNER",
+        primary_email: data.email || null, secondary_email: data.email_ops || null,
+        phone_primary: data.phone || null, phone_secondary: data.phone_alt || null,
+        website: data.website || null, linkedin: data.linkedin || null,
+        registered_address: data.address || null, data_source: data.source || "enriched",
+        last_verified_at: now, created_at: now, updated_at: now,
+      }]).catch(() => {});
+      if (await tableExists("d_vessel_company_map")) {
+        await ds.table("d_vessel_company_map").insert([{
+          imo_number: imo, vessel_name: data.vessel_name || null,
+          owner_company_id: companyId, data_source: data.source || "enriched",
+          last_verified_at: now, created_at: now, updated_at: now,
+        }]).catch(() => {});
+      }
+    }
+    if (await tableExists("d_port_agents") && data.port_agents?.length) {
+      const rows = data.port_agents.map(a => ({
+        agent_id: `ai_${a.port_code || "xx"}_${Date.now()}`,
+        agent_name: a.agent_name || null, agency_company: a.agency_company || null,
+        port_code: a.port_code || null, port_name: a.port_name || null,
+        email_primary: a.email_primary || null, phone_main: a.phone_main || null,
+        vessel_type_served: a.vessel_types_served || "ALL", is_active: true,
+        data_source: "ai_web_search", created_at: now, updated_at: now,
+      }));
+      await ds.table("d_port_agents").insert(rows).catch(() => {});
+    }
+  } catch (err) { logger.warn("[bq-save] non-fatal:", err.message?.slice(0, 80)); }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -595,56 +559,83 @@ async function enrichVesselContact(imo, {
   if (!forceRefresh) {
     const cached = cacheGet(enrichCache, cacheKey, ENRICH_TTL);
     if (cached) { logger.debug(`[enricher] cache hit IMO ${imo}`); return cached; }
-  } else {
-    enrichCache.delete(cacheKey);
+  } else { enrichCache.delete(cacheKey); }
+
+  logger.info(`[enricher] ══ START IMO ${imo} (${vesselName || "?"}) ══`);
+  const r = { imo_number: imo, vessel_name: vesselName || null, flag: flag || null };
+
+  // STEP 1: Equasis
+  const eq = await fetchFromEquasis(imo).catch(() => null);
+  if (eq) {
+    Object.assign(r, { owner_name: eq.owner_name, manager_name: eq.manager_name,
+      ship_manager: eq.ship_manager, operator_name: eq.operator_name,
+      address: eq.address, flag: r.flag || eq.flag, source: "equasis", confidence: eq.confidence });
   }
 
-  logger.info(`[enricher] Pipeline START: IMO ${imo} (${vesselName || "unknown"})`);
-  const r = { imo_number: imo, vessel_name: vesselName, flag };
+  // STEP 2: MarineTraffic (if still no owner)
+  if (!r.owner_name) {
+    const mt = await fetchFromMarineTraffic(imo).catch(() => null);
+    if (mt) {
+      r.owner_name   = r.owner_name   || mt.owner_name;
+      r.manager_name = r.manager_name || mt.manager_name;
+      r.vessel_name  = r.vessel_name  || mt.vessel_name || vesselName;
+      r.flag         = r.flag         || mt.flag;
+      r.confidence   = Math.max(r.confidence || 0, mt.confidence || 0);
+      r.source       = r.source ? `${r.source}+marinetraffic` : "marinetraffic";
+    }
+  }
 
-  // STEP 1
-  const eq = await fetchFromEquasis(imo);
-  if (eq) Object.assign(r, { owner_name: eq.owner_name, manager_name: eq.manager_name,
-    ship_manager: eq.ship_manager, operator_name: eq.operator_name,
-    address: eq.address, flag: r.flag || eq.flag, source: "equasis", confidence: eq.confidence });
+  // STEP 3: VesselFinder (if still no owner)
+  if (!r.owner_name) {
+    const vf = await fetchFromVesselFinder(imo).catch(() => null);
+    if (vf) {
+      r.owner_name  = r.owner_name  || vf.owner_name;
+      r.vessel_name = r.vessel_name || vf.vessel_name || vesselName;
+      r.flag        = r.flag        || vf.flag;
+      r.confidence  = Math.max(r.confidence || 0, vf.confidence || 0);
+      r.source      = r.source ? `${r.source}+vesselfinder` : "vesselfinder";
+    }
+  }
 
-  // STEP 2b: If Equasis returned nothing and we have no name, use AI to look up by IMO
-  if (!r.owner_name && !r.manager_name) {
-    const imoData = await aiLookupByIMO(imo);
-    if (imoData) {
-      r.owner_name    = r.owner_name    || imoData.owner_name    || null;
-      r.operator_name = r.operator_name || imoData.operator_name || null;
-      r.vessel_name   = r.vessel_name   || imoData.vessel_name   || vesselName || null;
-      r.flag          = r.flag          || imoData.flag           || null;
-      r.website       = r.website       || imoData.website        || null;
-      r.email         = r.email         || imoData.email          || null;
-      r.phone         = r.phone         || imoData.phone          || null;
-      r.address       = r.address       || imoData.address        || null;
-      r.confidence    = Math.max(r.confidence || 0, imoData.confidence || 0);
+  // STEP 4: AI IMO lookup (always fills remaining gaps)
+  if (!r.owner_name || !r.vessel_name) {
+    const aiImo = await aiLookupByIMO(imo, r.vessel_name || vesselName).catch(() => null);
+    if (aiImo) {
+      r.owner_name    = r.owner_name    || aiImo.owner_name;
+      r.manager_name  = r.manager_name  || aiImo.manager_name;
+      r.ship_manager  = r.ship_manager  || aiImo.ship_manager;
+      r.operator_name = r.operator_name || aiImo.operator_name;
+      r.vessel_name   = r.vessel_name   || aiImo.vessel_name || vesselName;
+      r.flag          = r.flag          || aiImo.flag;
+      r.website       = r.website       || aiImo.website;
+      r.email         = r.email         || aiImo.email;
+      r.phone         = r.phone         || aiImo.phone;
+      r.address       = r.address       || aiImo.address;
+      r.confidence    = Math.max(r.confidence || 0, aiImo.confidence || 0);
       r.source        = r.source ? `${r.source}+ai_imo` : "ai_imo";
     }
   }
 
-  // STEP 2
-  const company = r.owner_name || r.manager_name || vesselName;
-  if (company) {
-    const ai = await aiSearchCompanyContacts(company, r.flag || flag);
-    if (ai) {
-      r.website   = r.website   || ai.website;
-      r.email     = r.email     || ai.email;
-      r.email_ops = r.email_ops || ai.email_ops;
-      r.phone     = r.phone     || ai.phone;
-      r.phone_alt = r.phone_alt || ai.phone_alt;
-      r.address   = r.address   || ai.address;
-      r.linkedin  = r.linkedin  || ai.linkedin;
-      r.confidence= Math.max(r.confidence || 0, (ai.confidence || 0) * 0.9);
+  // STEP 5: AI company contact search
+  const company = r.owner_name || r.manager_name || r.vessel_name || vesselName;
+  if (company && (!r.email || !r.website)) {
+    const aiCo = await aiSearchCompanyContacts(company, r.flag || flag).catch(() => null);
+    if (aiCo) {
+      r.website   = r.website   || aiCo.website;
+      r.email     = r.email     || aiCo.email;
+      r.email_ops = r.email_ops || aiCo.email_ops;
+      r.phone     = r.phone     || aiCo.phone;
+      r.phone_alt = r.phone_alt || aiCo.phone_alt;
+      r.address   = r.address   || aiCo.address;
+      r.linkedin  = r.linkedin  || aiCo.linkedin;
+      r.confidence= Math.max(r.confidence || 0, (aiCo.confidence || 0) * 0.9);
       r.source    = r.source ? `${r.source}+ai_search` : "ai_search";
     }
   }
 
-  // STEP 3
+  // STEP 6: Website scrape
   if (r.website && (!r.email || !r.phone)) {
-    const sc = await scrapeContactPage(r.website);
+    const sc = await scrapeContactPage(r.website).catch(() => null);
     if (sc) {
       r.email     = r.email     || sc.email;
       r.email_ops = r.email_ops || sc.email_ops;
@@ -653,66 +644,60 @@ async function enrichVesselContact(imo, {
     }
   }
 
-  // STEP 4
+  // STEP 7: Google CSE
   if (company && !r.email) {
-    const gc = await googleSearchContacts(company);
+    const gc = await googleSearchContacts(company).catch(() => null);
     if (gc) {
-      r.email = gc.email; r.phone = r.phone || gc.phone;
+      r.email      = gc.email;
+      r.phone      = r.phone || gc.phone;
       r.confidence = r.confidence || gc.confidence;
-      r.source = `${r.source || ""}+google_cse`.replace(/^\+/, "");
+      r.source     = `${r.source || ""}+google_cse`.replace(/^\+/, "");
     }
   }
 
-  // STEP 5
-  if (!r.owner_name && !r.manager_name) {
-    const vf = await vesselFinderFallback(imo);
-    if (vf) { r.owner_name = vf.owner_name; r.confidence = vf.confidence; r.source = "vesselfinder"; }
+  // STEP 8: LinkedIn
+  if (company && !r.linkedin) {
+    const li = await linkedinSearch(company, r.flag || flag).catch(() => null);
+    if (li) {
+      r.linkedin = r.linkedin || li.linkedin_url;
+      r.website  = r.website  || li.website;
+      r.source   = `${r.source || ""}+linkedin`.replace(/^\+/, "");
+    }
   }
 
-  // STEPS 6+7: Port agents for current and next port
+  // STEPS 9+10: Port Agents
   const portAgents = [];
-  for (const [portKey, context] of [
-    [currentPort, "current"],
-    [nextPort,    "next"],
-  ]) {
+  for (const [portKey, context] of [[currentPort, "current"], [nextPort, "next"]]) {
     if (!portKey) continue;
     const agents = await resolvePortAgents({
       portName: portKey, portCode: portKey,
-      vesselType: vesselType || null,
-      ownerName: r.owner_name || null,
-      portContext: context,
-    });
+      vesselType: vesselType || null, ownerName: r.owner_name || null, portContext: context,
+    }).catch(() => []);
     portAgents.push(...agents);
   }
 
-  // STEP 8: Agent organisation enrichment
+  // STEP 11: Agent Organisation
   const agentOrg = await enrichAgentOrganisation({
-    ownerName:   r.owner_name   || null,
-    managerName: r.manager_name || null,
-    vesselName,
-    vesselType:  vesselType     || null,
-    flag:        r.flag || flag || null,
-    imo,
-  });
+    ownerName: r.owner_name || null, managerName: r.manager_name || null,
+    vesselName: r.vessel_name || vesselName, vesselType: vesselType || null,
+    flag: r.flag || flag || null, imo,
+  }).catch(() => null);
 
-  // STEP 9: Vessel master / captain contact channel
+  // STEP 12: Master Contact
   const masterContact = await enrichMasterContact({
-    ownerName:   r.owner_name   || null,
-    managerName: r.manager_name || null,
-    shipManager: r.ship_manager || null,
-    flag:        r.flag || flag || null,
-    imo,
-    vesselName,
-  });
+    ownerName: r.owner_name || null, managerName: r.manager_name || null,
+    shipManager: r.ship_manager || null, flag: r.flag || flag || null,
+    imo, vesselName: r.vessel_name || vesselName,
+  }).catch(() => null);
 
-  // STEP 10: Save (fire-and-forget)
-  if (r.owner_name || r.email) {
-    saveToBigQuery(imo, { ...r, port_agents: portAgents });
-  }
+  // STEP 13: Save
+  if (r.owner_name || r.email) saveToBigQuery(imo, { ...r, port_agents: portAgents });
+
+  logger.info(`[enricher] ══ DONE IMO ${imo} — owner="${r.owner_name}" source="${r.source}" ══`);
 
   const final = {
     imo_number:  imo,
-    vessel_name: vesselName,
+    vessel_name: r.vessel_name || vesselName || null,
     owner: {
       company_name:       r.owner_name    || null,
       company_type:       "OWNER",
@@ -725,50 +710,41 @@ async function enrichVesselContact(imo, {
       linkedin:           r.linkedin      || null,
       data_source:        r.source        || null,
     },
-    operator:     r.operator_name ? { company_name: r.operator_name, company_type: "OPERATOR", data_source: "equasis" } : null,
-    manager:      r.manager_name  ? { company_name: r.manager_name,  company_type: "MANAGER",  data_source: "equasis" } : null,
-    ship_manager: r.ship_manager  ? { company_name: r.ship_manager,  company_type: "SHIP_MANAGER", data_source: "equasis" } : null,
-    port_agents: portAgents,
+    operator:     r.operator_name ? { company_name: r.operator_name, company_type: "OPERATOR", data_source: r.source } : null,
+    manager:      r.manager_name  ? { company_name: r.manager_name,  company_type: "MANAGER",  data_source: r.source } : null,
+    ship_manager: r.ship_manager  ? { company_name: r.ship_manager,  company_type: "SHIP_MANAGER", data_source: r.source } : null,
+    port_agents:  portAgents,
     agent_org: agentOrg ? {
-      company_name:       agentOrg.agent_org_name        || null,
-      company_type:       agentOrg.agent_org_type        || "HUSBANDRY_AGENT",
-      appointment_basis:  agentOrg.appointment_basis     || null,
-      primary_email:      agentOrg.agent_org_email       || null,
-      ops_email:          agentOrg.agent_org_email_ops   || null,
-      phone:              agentOrg.agent_org_phone       || null,
-      phone_24h:          agentOrg.agent_org_phone_24h   || null,
-      website:            agentOrg.agent_org_website     || null,
-      registered_address: agentOrg.agent_org_address     || null,
-      services:           agentOrg.services              || [],
-      regions_covered:    agentOrg.regions_covered       || [],
-      confidence:         agentOrg.confidence            || null,
-      data_source:        agentOrg.source                || "ai_web_search",
+      company_name: agentOrg.agent_org_name || null, company_type: agentOrg.agent_org_type || "HUSBANDRY_AGENT",
+      appointment_basis: agentOrg.appointment_basis || null,
+      primary_email: agentOrg.agent_org_email || null, ops_email: agentOrg.agent_org_email_ops || null,
+      phone: agentOrg.agent_org_phone || null, phone_24h: agentOrg.agent_org_phone_24h || null,
+      website: agentOrg.agent_org_website || null, registered_address: agentOrg.agent_org_address || null,
+      services: agentOrg.services || [], regions_covered: agentOrg.regions_covered || [],
+      confidence: agentOrg.confidence || null, data_source: agentOrg.source || "ai_web_search",
     } : null,
     master_contact: masterContact ? {
-      contact_note:       masterContact.master_contact_note  || null,
-      preferred_channel:  masterContact.preferred_channel    || null,
-      contact_protocol:   masterContact.contact_protocol     || null,
+      contact_note: masterContact.master_contact_note || null,
+      preferred_channel: masterContact.preferred_channel || null,
+      contact_protocol: masterContact.contact_protocol || null,
       crew_dept: masterContact.crew_dept_company ? {
-        company:          masterContact.crew_dept_company     || null,
-        email:            masterContact.crew_dept_email       || null,
-        phone:            masterContact.crew_dept_phone       || null,
+        company: masterContact.crew_dept_company || null,
+        email:   masterContact.crew_dept_email   || null,
+        phone:   masterContact.crew_dept_phone   || null,
       } : null,
       mrcc: masterContact.mrcc_name ? {
-        name:             masterContact.mrcc_name             || null,
-        country:          masterContact.mrcc_country          || null,
-        email:            masterContact.mrcc_email            || null,
-        phone:            masterContact.mrcc_phone            || null,
+        name: masterContact.mrcc_name || null, country: masterContact.mrcc_country || null,
+        email: masterContact.mrcc_email || null, phone: masterContact.mrcc_phone || null,
       } : null,
-      sat_phone_public:   masterContact.sat_phone_public      || null,
-      radio_call_sign:    masterContact.radio_call_sign        || null,
-      inmarsat_number:    masterContact.inmarsat_number        || null,
-      privacy_note:       "Direct personal contact details of the vessel master are not provided. Use the channels above to reach the vessel or its responsible parties.",
-      confidence:         masterContact.confidence             || null,
-      data_source:        masterContact.source                 || "ai_web_search",
+      sat_phone_public: masterContact.sat_phone_public || null,
+      radio_call_sign:  masterContact.radio_call_sign  || null,
+      inmarsat_number:  masterContact.inmarsat_number  || null,
+      privacy_note: "Direct personal contact of vessel master not provided. Use the channels above.",
+      confidence: masterContact.confidence || null, data_source: masterContact.source || "ai_web_search",
     } : null,
     enrichment: {
       source:      r.source     || "none",
-      confidence:  r.confidence || (r.owner_name || r.email ? 0.4 : 0),
+      confidence:  r.confidence || (r.owner_name ? 0.4 : 0),
       enriched_at: new Date().toISOString(),
     },
   };
@@ -777,15 +753,12 @@ async function enrichVesselContact(imo, {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STANDALONE: enrichPortAgents (for /agents endpoint)
+// STANDALONE: enrichPortAgents  /  BATCH
 // ═════════════════════════════════════════════════════════════════
 async function enrichPortAgents({ portName, portCode, vesselType }) {
   return resolvePortAgents({ portName, portCode, vesselType, portContext: "current" });
 }
 
-// ═════════════════════════════════════════════════════════════════
-// BATCH enrichment
-// ═════════════════════════════════════════════════════════════════
 async function batchEnrichArrivals(limit = 20) {
   logger.info(`[batch] Starting (limit=${limit})`);
   try {

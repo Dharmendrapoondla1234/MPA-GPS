@@ -169,7 +169,8 @@ export async function fetchVesselContacts(imo, {
   if (currentPort) p.set("currentPort", currentPort);
   if (nextPort)    p.set("nextPort",    nextPort);
   if (vesselType)  p.set("vesselType",  vesselType);
-  return call(`/contacts/vessel/${encodeURIComponent(imo)}?${p}`, { bustCache });
+  // Use spec endpoint instead — richer response, same data
+  return call(`/vessel-contact?imo=${encodeURIComponent(imo)}&${p}`, { bustCache });
 }
 
 /**
