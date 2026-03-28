@@ -77,14 +77,19 @@ function agentToSpec(a) {
 }
 
 async function resolveContacts({ imo, mmsi, name, enrich, currentPort, nextPort, vesselType, forceRefresh }) {
+  // Normalise identifiers — ensure integers
+  const imoInt  = imo  ? parseInt(imo,  10) || null : null;
+  const mmsiInt = mmsi ? parseInt(mmsi, 10) || null : null;
+
   // Try BigQuery first
   let bqData = null;
-  try { bqData = await getVesselContacts({ imo, mmsi, name }); } catch {}
+  try { bqData = await getVesselContacts({ imo: imoInt, mmsi: mmsiInt, name }); } catch {}
 
   const hasGoodData = bqData?.owner?.company_name || bqData?.owner?.email;
   let enrichedData  = null;
 
-  if ((!hasGoodData || forceRefresh) && enrich && imo) {
+  if ((!hasGoodData || forceRefresh) && enrich && (imoInt || mmsiInt || name)) {
+    const imo = imoInt; // shadow outer for enrichment calls below
     logger.info(`[contacts] AI enrichment IMO ${imo}...`);
     try {
       enrichedData = await withTimeout(

@@ -181,9 +181,25 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchVesselContacts(imo || 0, {
+      const raw = await fetchVesselContacts(imo || 0, {
         mmsi, name, currentPort, nextPort, vesselType, bustCache,
       });
+      // Normalise spec endpoint shape → panel shape
+      const data = raw ? {
+        ...raw,
+        // spec uses "operator" for owner info — map to "owner" for backward compat
+        owner:        raw.owner       || (raw.operator ? { ...raw.operator, company_name: raw.operator.name, primary_email: raw.operator.contact?.email, phone_primary: raw.operator.contact?.phone, website: raw.operator.contact?.website, data_source: raw.operator.data_source } : null),
+        operator:     raw.operator    ? { company_name: raw.operator.name,    data_source: raw.operator.data_source }    : null,
+        manager:      raw.manager     ? { company_name: raw.manager.name,     data_source: raw.manager.data_source }     : null,
+        ship_manager: raw.ship_manager? { company_name: raw.ship_manager.name,data_source: raw.ship_manager.data_source }: null,
+        vessel_name:  raw.vessel?.name || null,
+        enrichment: raw.enrichment ? {
+          source:       raw.enrichment.source,
+          confidence:   raw.enrichment.confidence,
+          last_checked: raw.enrichment.last_checked,
+          pipeline_ran: raw.enrichment.pipeline_ran,
+        } : null,
+      } : null;
       setContacts(data);
       setAgents(data?.port_agents || []);
 

@@ -148,6 +148,31 @@ Rules: verified data only, null for unverified. confidence: 0.9=official site, 0
 }
 
 // ═════════════════════════════════════════════════════════════════
+// STEP 2b: AI LOOKUP BY IMO (when Equasis fails and no vessel name)
+// ═════════════════════════════════════════════════════════════════
+async function aiLookupByIMO(imo) {
+  if (!imo || !process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5", max_tokens: 800,
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      messages: [{ role: "user", content:
+        `Search for the vessel with IMO number ${imo}. Find its registered owner company, operator, and any contact information.
+Return ONLY valid JSON (no markdown):
+{"vessel_name":null,"owner_name":null,"operator_name":null,"flag":null,"website":null,"email":null,"phone":null,"address":null,"confidence":0.6}
+Rules: Use verified maritime databases (equasis, marinetraffic, fleetmon, vesseltracker). null for unverified fields.` }],
+    });
+    const text = response.content.find(b => b.type === "text")?.text;
+    if (!text) return null;
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const data = JSON.parse(m[0]);
+    logger.info(`[ai-imo] ✅ IMO ${imo}: owner="${data.owner_name}" vessel="${data.vessel_name}"`);
+    return data;
+  } catch (err) { logger.warn("[ai-imo] error:", err.message?.slice(0, 80)); return null; }
+}
+
+// ═════════════════════════════════════════════════════════════════
 // STEP 3: WEBSITE SCRAPE
 // ═════════════════════════════════════════════════════════════════
 async function scrapeContactPage(websiteUrl) {
@@ -477,6 +502,23 @@ async function enrichVesselContact(imo, {
   if (eq) Object.assign(r, { owner_name: eq.owner_name, manager_name: eq.manager_name,
     ship_manager: eq.ship_manager, operator_name: eq.operator_name,
     address: eq.address, flag: r.flag || eq.flag, source: "equasis", confidence: eq.confidence });
+
+  // STEP 2b: If Equasis returned nothing and we have no name, use AI to look up by IMO
+  if (!r.owner_name && !r.manager_name) {
+    const imoData = await aiLookupByIMO(imo);
+    if (imoData) {
+      r.owner_name    = r.owner_name    || imoData.owner_name    || null;
+      r.operator_name = r.operator_name || imoData.operator_name || null;
+      r.vessel_name   = r.vessel_name   || imoData.vessel_name   || vesselName || null;
+      r.flag          = r.flag          || imoData.flag           || null;
+      r.website       = r.website       || imoData.website        || null;
+      r.email         = r.email         || imoData.email          || null;
+      r.phone         = r.phone         || imoData.phone          || null;
+      r.address       = r.address       || imoData.address        || null;
+      r.confidence    = Math.max(r.confidence || 0, imoData.confidence || 0);
+      r.source        = r.source ? `${r.source}+ai_imo` : "ai_imo";
+    }
+  }
 
   // STEP 2
   const company = r.owner_name || r.manager_name || vesselName;
