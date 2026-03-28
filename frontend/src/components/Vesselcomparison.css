@@ -383,3 +383,48 @@
 .vc-legend-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .vc-legend-label { font-size: 8px; font-weight: 700; color: #3d6a8a; letter-spacing: 0.1em; }
 .vc-legend-range { font-size: 8px; color: #1f3a52; }
+/* ── v8 additions ─────────────────────────────────────────────── */
+.vc-sort-select {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #90a4ae;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+.vc-sort-select:focus { border-color: #00e5ff; color: #e0f7fa; }
+
+.vc-stats-group {
+  margin-bottom: 6px;
+}
+.vc-stats-group-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #455a64;
+  padding: 4px 0 2px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  margin-bottom: 2px;
+}
+.vc-stat-highlight {
+  background: rgba(0,229,255,0.06);
+  border-radius: 3px;
+}
+.vc-star { color: #00e5ff; font-size: 9px; }
+.vc-unit { color: #546e7a; font-size: 9px; }
+
+.vc-picker-flag-filter {
+  width: 100%;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #90a4ae;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  margin-top: 4px;
+  outline: none;
+}
+.vc-picker-flag-filter:focus { border-color: #00e5ff; }

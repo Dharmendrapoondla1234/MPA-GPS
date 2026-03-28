@@ -5,7 +5,7 @@ import { logoutUser } from "../services/api";
 import "./TopBar.css";
 
 export default function TopBar({
-  filters, onFiltersChange, vesselTypes, stats,
+  filters, onFiltersChange, vesselTypes, flagOptions = [], stats,
   nextRefresh, loading, onRefresh, panelOpen, onTogglePanel,
   user, onLogout, onSearchEnter, lastUpdated,
   portPanelOpen, onTogglePortPanel,
@@ -88,6 +88,18 @@ export default function TopBar({
             <option value="fast">🚀 Fast ≥12 kn</option>
           </select>
         </div>
+
+        {/* Flag filter */}
+        {flagOptions.length > 0 && (
+          <div className="tb-filter-group">
+            <label className="tb-filter-label">FLAG</label>
+            <select className="tb-select" value={filters.flag||""}
+              onChange={e=>onFiltersChange({...filters, flag: e.target.value})}>
+              <option value="">All Flags</option>
+              {flagOptions.map(f=><option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+        )}
 
         {/* Stats */}
         <div className="tb-stats">

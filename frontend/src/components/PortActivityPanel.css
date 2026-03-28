@@ -457,3 +457,23 @@
 @media (max-width:768px) {
   .pa-panel { right:8px; left:8px; width:auto; max-height:calc(100vh - 120px); top:60px; }
 }
+/* ── v8 additions: flag filter + download button ─────────────── */
+.pa-flag-filter {
+  max-width: 100px;
+  flex-shrink: 0;
+}
+.pa-download-btn {
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.25);
+  color: #00e5ff;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.pa-download-btn:hover {
+  background: rgba(0,229,255,0.18);
+}

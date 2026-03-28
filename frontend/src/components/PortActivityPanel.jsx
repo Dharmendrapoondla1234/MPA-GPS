@@ -152,6 +152,37 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
     return () => { document.removeEventListener("mousedown", h); document.removeEventListener("touchstart", h); };
   }, [isOpen, onClose]);
 
+  const [flagFilter, setFlagFilter] = useState("");
+
+  // CSV export helper
+  const exportTabCSV = useCallback((list, type) => {
+    const isArr = type === "arrivals";
+    const cols = isArr
+      ? [["IMO","imo_number"],["Vessel","vessel_name"],["Flag","flag"],["From","location_from"],
+         ["To","location_to"],["Arrival Time","arrival_time"],["Berth","berth_grid"],
+         ["Agent","shipping_agent"],["Source","arrival_source"],["Crew","crew_count"]]
+      : [["IMO","imo_number"],["Vessel","vessel_name"],["Flag","flag"],["Next Port","next_port"],
+         ["Departure Time","departure_time"],["Agent","shipping_agent"],
+         ["Source","departure_source"],["Crew","crew_count"]];
+    const header = cols.map(([h])=>h).join(",");
+    const rows   = list.map(v=>cols.map(([,k])=>{
+      const val = bq(v[k]) ?? v[k];
+      return val!=null ? `"${String(val).replace(/"/g,'""')}"` : "";
+    }).join(","));
+    const csv  = [header,...rows].join("\n");
+    const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href=url; a.download=`${type}_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  // Unique flags across arrivals + departures
+  const uniqueFlags = useMemo(() => {
+    const all = [...arrivals, ...departures].map(v => bq(v.flag)).filter(Boolean);
+    return [...new Set(all)].sort();
+  }, [arrivals, departures]);
+
   const stats = useMemo(() => {
     const inPort   = vessels.filter(v => parseFloat(v.speed||0) < 0.5).length;
     const underway = vessels.filter(v => parseFloat(v.speed||0) >= 0.5).length;
@@ -168,6 +199,9 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
 
   const filterList = useCallback((list, timeField) => {
     let out = list;
+    if (flagFilter) {
+      out = out.filter(v => bq(v.flag) === flagFilter);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       out = out.filter(v =>
@@ -184,7 +218,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
       return new Date(tb)-new Date(ta);
     });
     return out;
-  }, [search, sortBy]);
+  }, [search, sortBy, flagFilter]);
 
   const filteredArrivals   = useMemo(() => filterList(arrivals,"arrival_time"), [arrivals,filterList]);
   const filteredDepartures = useMemo(() => filterList([...departures].sort((a,b)=>{
@@ -261,6 +295,23 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
             <option value="time">Latest</option>
             <option value="name">Name</option>
           </select>
+          {/* Flag filter */}
+          <select className="pa-sort-select pa-flag-filter" value={flagFilter} onChange={e=>setFlagFilter(e.target.value)}
+            title="Filter by flag">
+            <option value="">🏴 All flags</option>
+            {uniqueFlags.map(f=><option key={f} value={f}>{f}</option>)}
+          </select>
+          {/* Download CSV */}
+          {(tab==="ARRIVALS"||tab==="DEPARTURES") && (
+            <button className="pa-download-btn"
+              onClick={()=>exportTabCSV(
+                tab==="ARRIVALS" ? filteredArrivals : filteredDepartures,
+                tab==="ARRIVALS" ? "arrivals" : "departures"
+              )}
+              title={`Download ${tab.toLowerCase()} as CSV`}>
+              ⬇
+            </button>
+          )}
         </div>
       )}
 

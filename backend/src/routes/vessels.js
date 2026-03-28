@@ -1,4 +1,4 @@
-// backend/src/routes/vessels.js — MPA Advanced v6
+// backend/src/routes/vessels.js — MPA Advanced v7 (Enhanced Vessel Tracking)
 "use strict";
 const express = require("express");
 const router  = express.Router();
@@ -8,6 +8,8 @@ const {
   getLatestVessels, getVesselHistory, getVesselDetail,
   getRecentArrivals, getRecentDepartures,
   getVesselTypes, getFleetStats, getPortActivity,
+  getVesselByIdentifier, getVesselLastArrival, getUpcomingArrivals,
+  getVesselCompanyDetails,
 } = require("../services/bigquery");
 
 // ── Normalize BigQuery row → clean JS ────────────────────────────
@@ -15,23 +17,14 @@ function bqStr(v)  { if(v==null)return null; if(typeof v==="object"&&"value"in v
 function bqNum(v)  { if(v==null)return null; const n=Number(bqStr(v)||v); return isNaN(n)?null:n; }
 function bqBool(v) { return v===true||v==="true"||v===1; }
 
-// f_vessel_positions_latest now converts radians→degrees in dbt.
-// f_vessel_live_tracking passes degrees through unchanged.
-// The backend must NOT convert again — toLatDeg/toLngDeg pass values straight through.
-// Legacy MPA table also stores degrees, so no conversion needed for that path either.
-const RAD_TO_DEG = 180 / Math.PI;  // kept for reference, not used in normalisation
+const RAD_TO_DEG = 180 / Math.PI;
 function toLatDeg(v) { return bqNum(v); }
 function toLngDeg(v) { return bqNum(v); }
 
-// FIX: Correct SGT timestamps stored as UTC.
-// The AIS source sends Singapore local time (UTC+8) but labels it UTC.
-// Any timestamp that is in the future relative to now has the 8h offset
-// applied — subtract it to get true UTC.
 function correctSgtTimestamp(raw) {
   if (!raw) return null;
   const d = new Date(raw);
   if (isNaN(d.getTime())) return raw;
-  // If timestamp is ahead of now, it was stored in SGT as UTC — subtract 8h
   if (d > new Date()) return new Date(d.getTime() - 8 * 60 * 60 * 1000).toISOString();
   return raw;
 }
@@ -43,18 +36,13 @@ function normalizeVessel(v) {
   const rawHdg = v.heading_deg ?? v.heading;
   const rawCrs = v.course_deg  ?? v.course;
 
-  // FIX: correct SGT → UTC on effective_timestamp before sending to frontend
   const rawTs  = bqStr(v.last_position_at) || bqStr(v.effective_timestamp);
   const effectiveTs = correctSgtTimestamp(rawTs);
 
-  // Always recalculate minutes_since_last_ping from the corrected timestamp.
-  // The dbt-computed value is unreliable: if SGT is stored as UTC the dbt value
-  // is negative (timestamp appears future); after correction it must be recomputed.
   let minutesSincePing = null;
   if (effectiveTs) {
     minutesSincePing = Math.round((Date.now() - new Date(effectiveTs).getTime()) / 60000);
   }
-  // Fallback to dbt value only when we have no timestamp at all
   if (minutesSincePing == null || minutesSincePing < 0) {
     minutesSincePing = Math.max(0, bqNum(v.minutes_since_last_ping) ?? 0);
   }
@@ -67,20 +55,15 @@ function normalizeVessel(v) {
     call_sign:      bqStr(v.call_sign),
     flag:           bqStr(v.flag),
     vessel_type:    bqStr(v.vessel_type),
-    // position — convert radians→degrees
+    // position
     latitude_degrees:  toLatDeg(rawLat),
     longitude_degrees: toLngDeg(rawLng),
     speed:   bqNum(rawSpd) ?? 0,
     heading: bqNum(rawHdg) ?? 0,
     course:  bqNum(rawCrs) ?? 0,
-    // FIX: corrected UTC timestamp
     effective_timestamp: effectiveTs,
-    // FIX: corrected minutes (always positive, recalculated if dbt value was negative)
     minutes_since_last_ping: minutesSincePing,
-    // is_stale: always derive from the recalculated minutesSincePing (corrected timestamp).
-    // Do NOT trust dbt's is_stale or position_is_stale — they're computed from the
-    // uncorrected SGT-as-UTC timestamp and will be wrong (mark live vessels as stale).
-    is_stale: (minutesSincePing || 0) > 120, // LIVE ONLY: stale after 2h (was 6h)
+    is_stale: (minutesSincePing || 0) > 120,
     speed_category:     bqStr(v.speed_category),
     speed_colour_class: bqStr(v.speed_colour_class),
     // static
@@ -124,8 +107,10 @@ function normalizeArrival(v) {
   return {
     imo_number:     bqNum(v.imo_number    ?? v.imoNumber),
     vessel_name:    bqStr(v.vessel_name   ?? v.vesselName),
+    mmsi_number:    bqNum(v.mmsi_number   ?? v.mmsiNumber),
     call_sign:      bqStr(v.call_sign     ?? v.callSign),
     flag:           bqStr(v.flag),
+    vessel_type:    bqStr(v.vessel_type),
     arrival_time:   bqStr(v.arrival_time  ?? v.arrivedTime   ?? v.arrived_time),
     arrival_date:   bqStr(v.arrival_date  ?? v.arrivedDate),
     location_from:  bqStr(v.location_from ?? v.locationFrom  ?? v.location_from),
@@ -137,18 +122,25 @@ function normalizeArrival(v) {
     crew_count:     bqNum(v.crew_count    ?? v.crewCount),
     passenger_count:bqNum(v.passenger_count ?? v.passengerCount),
     is_upcoming:    v.is_upcoming === true || v.is_upcoming === "true",
+    // NEW: company details
+    company_name:    bqStr(v.company_name    ?? v.companyName),
+    contact_person:  bqStr(v.contact_person  ?? v.contactPerson),
+    contact_email:   bqStr(v.contact_email   ?? v.contactEmail),
+    contact_phone:   bqStr(v.contact_phone   ?? v.contactPhone),
+    company_address: bqStr(v.company_address ?? v.companyAddress),
   };
 }
 
 function normalizeDeparture(v) {
-  // Recompute is_upcoming at normalize time so it's never stale from cache
   const depTime = v.departure_time ?? v.departedTime ?? v.departed_time;
   const isUpcoming = depTime ? new Date(typeof depTime === "object" && "value" in depTime ? depTime.value : depTime) > new Date() : false;
   return {
     imo_number:       bqNum(v.imo_number      ?? v.imoNumber),
     vessel_name:      bqStr(v.vessel_name     ?? v.vesselName),
+    mmsi_number:      bqNum(v.mmsi_number     ?? v.mmsiNumber),
     call_sign:        bqStr(v.call_sign       ?? v.callSign),
     flag:             bqStr(v.flag),
+    vessel_type:      bqStr(v.vessel_type),
     departure_time:   bqStr(v.departure_time  ?? v.departedTime  ?? v.departed_time),
     departure_date:   bqStr(v.departure_date  ?? v.departedDate),
     departure_source: bqStr(v.departure_source ?? v.departureSource ?? "AIS_CONFIRMED"),
@@ -157,27 +149,55 @@ function normalizeDeparture(v) {
     crew_count:       bqNum(v.crew_count      ?? v.crewCount),
     passenger_count:  bqNum(v.passenger_count ?? v.passengerCount),
     is_upcoming:      isUpcoming,
+    // NEW: company details
+    company_name:    bqStr(v.company_name    ?? v.companyName),
+    contact_person:  bqStr(v.contact_person  ?? v.contactPerson),
+    contact_email:   bqStr(v.contact_email   ?? v.contactEmail),
+    contact_phone:   bqStr(v.contact_phone   ?? v.contactPhone),
+    company_address: bqStr(v.company_address ?? v.companyAddress),
   };
+}
+
+// ── CSV export helper ─────────────────────────────────────────────
+function toCSV(rows, fields) {
+  const header = fields.join(",");
+  const lines  = rows.map(row =>
+    fields.map(f => {
+      const val = row[f] ?? "";
+      // Wrap in quotes if contains comma, newline, or quote
+      const s = String(val);
+      return /[,"\n\r]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+    }).join(",")
+  );
+  return [header, ...lines].join("\n");
 }
 
 // ── GET /api/vessels ──────────────────────────────────────────────
 router.get("/vessels", validateVesselQuery, async (req, res, next) => {
   try {
-    const { search="", vesselType="", speedMin, speedMax, limit } = req.query;
+    const { search="", vesselType="", speedMin, speedMax, limit,
+            imo, mmsi, flag, callSign } = req.query;
+
+    // NEW: identifier-based direct lookup
+    if (imo || mmsi) {
+      const identifier = { imo, mmsi };
+      const raw = await getVesselByIdentifier(identifier);
+      if (!raw) return res.status(404).json({ success:false, error:"Vessel not found" });
+      const data = Array.isArray(raw) ? raw.map(normalizeVessel) : [normalizeVessel(raw)];
+      return res.json({ success:true, count:data.length, data });
+    }
+
     const raw  = await getLatestVessels({
-      search, vesselType,
+      search, vesselType, flag: flag || "",
+      callSign: callSign || "",
       speedMin: speedMin !== undefined ? parseFloat(speedMin) : null,
       speedMax: speedMax !== undefined ? parseFloat(speedMax) : null,
-      limit: limit ? parseInt(limit) : 3000,  // reduced from 5000 — cuts payload ~40%
+      limit: limit ? parseInt(limit) : 3000,
     });
     const data = raw.map(normalizeVessel);
 
-    const isFiltered = search || vesselType || speedMin || speedMax;
+    const isFiltered = search || vesselType || speedMin || speedMax || flag || callSign;
     if (!isFiltered) {
-      // FIX: ETag was built from data[0].effective_timestamp only.
-      // If the first vessel hadn't changed, 304 was returned even when other
-      // vessels had fresh pings — map appeared frozen.
-      // Now use MAX(last_position_at) across ALL vessels for a reliable ETag.
       let maxTs = 0;
       for (const v of data) {
         const ts = v.effective_timestamp || v.last_position_at;
@@ -185,8 +205,6 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
         const t = new Date(typeof ts === "object" && ts.value ? ts.value : ts).getTime();
         if (!isNaN(t) && t > maxTs) maxTs = t;
       }
-      // cacheSlot rotates every 30s (= backend vessel cache TTL).
-      // Prevents map freezing when vessel coords haven't changed but dbt has new data.
       const cacheSlot = Math.floor(Date.now() / 30_000);
       const etag = `W/"v-${data.length}-${maxTs}-${cacheSlot}"`;
       if (req.headers["if-none-match"] === etag) return res.status(304).end();
@@ -194,18 +212,17 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
       res.set("Cache-Control", "no-store");
     }
 
-    // DEBUG: log a sample vessel so we can verify coords + timestamps in production logs
     if (data.length > 0) {
       const s = data[0];
       logger.info(
         `GET /api/vessels -> ${data.length} vessels | sample: ${s.vessel_name} ` +
         `lat=${s.latitude_degrees} lng=${s.longitude_degrees} ` +
-        `spd=${s.speed} ts=${s.effective_timestamp} stale=${s.is_stale} mins=${s.minutes_since_last_ping}`
+        `spd=${s.speed} ts=${s.effective_timestamp} stale=${s.is_stale}`
       );
     } else {
-      logger.warn('GET /api/vessels -> 0 vessels returned — check BQ filter / dbt model');
+      logger.warn("GET /api/vessels -> 0 vessels returned");
     }
-    // Slim payload: omit null fields to reduce JSON size ~25%
+
     const slim = data.map(v => {
       const out = {};
       for (const [k, val] of Object.entries(v)) {
@@ -217,6 +234,28 @@ router.get("/vessels", validateVesselQuery, async (req, res, next) => {
   } catch(err) { next(err); }
 });
 
+// ── GET /api/vessels/search — advanced multi-field search ─────────
+// Supports: ?imo=&mmsi=&name=&flag=&callSign=
+router.get("/vessels/search", async (req, res, next) => {
+  try {
+    const { imo, mmsi, name, flag, callSign } = req.query;
+    if (!imo && !mmsi && !name && !flag && !callSign) {
+      return res.status(400).json({
+        success:false,
+        error:"Provide at least one search parameter: imo, mmsi, name, flag, or callSign"
+      });
+    }
+
+    const raw = await getVesselByIdentifier({ imo, mmsi, name, flag, callSign });
+    if (!raw || (Array.isArray(raw) && raw.length === 0)) {
+      return res.status(404).json({ success:false, error:"No vessels found matching criteria" });
+    }
+
+    const data = Array.isArray(raw) ? raw.map(normalizeVessel) : [normalizeVessel(raw)];
+    res.json({ success:true, count:data.length, data });
+  } catch(err) { next(err); }
+});
+
 // ── GET /api/vessels/:imo ─────────────────────────────────────────
 router.get("/vessels/:imo", async (req, res, next) => {
   try {
@@ -225,6 +264,44 @@ router.get("/vessels/:imo", async (req, res, next) => {
     const raw = await getVesselDetail(imo);
     if (!raw) return res.status(404).json({ success:false, error:`IMO ${imo} not found` });
     res.json({ success:true, data: normalizeVessel(raw) });
+  } catch(err) { next(err); }
+});
+
+// ── GET /api/vessels/:imo/company — NEW ───────────────────────────
+// Returns shipping company + contact details for vessel
+router.get("/vessels/:imo/company", async (req, res, next) => {
+  try {
+    const { imo } = req.params;
+    if (!imo || isNaN(imo)) return res.status(400).json({ success:false, error:"Invalid IMO" });
+    const raw = await getVesselCompanyDetails(imo);
+    if (!raw) return res.status(404).json({ success:false, error:`Company details not found for IMO ${imo}` });
+    res.json({
+      success: true,
+      data: {
+        imo_number:      bqNum(raw.imo_number),
+        vessel_name:     bqStr(raw.vessel_name),
+        company_name:    bqStr(raw.company_name   ?? raw.shipping_company),
+        contact_person:  bqStr(raw.contact_person ?? raw.contact_name),
+        contact_email:   bqStr(raw.contact_email  ?? raw.email),
+        contact_phone:   bqStr(raw.contact_phone  ?? raw.phone),
+        company_address: bqStr(raw.company_address ?? raw.address),
+        shipping_agent:  bqStr(raw.shipping_agent  ?? raw.agent),
+        agent_email:     bqStr(raw.agent_email),
+        agent_phone:     bqStr(raw.agent_phone),
+      }
+    });
+  } catch(err) { next(err); }
+});
+
+// ── GET /api/vessels/:imo/last-arrival — NEW ──────────────────────
+// Returns most recent historical arrival record for a specific vessel
+router.get("/vessels/:imo/last-arrival", async (req, res, next) => {
+  try {
+    const { imo } = req.params;
+    if (!imo || isNaN(imo)) return res.status(400).json({ success:false, error:"Invalid IMO" });
+    const raw = await getVesselLastArrival(imo);
+    if (!raw) return res.status(404).json({ success:false, error:`No arrival record found for IMO ${imo}` });
+    res.json({ success:true, data: normalizeArrival(raw) });
   } catch(err) { next(err); }
 });
 
@@ -243,7 +320,6 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
       speed:             bqNum(v.speed)   ?? 0,
       heading:           bqNum(v.heading) ?? 0,
       course:            bqNum(v.course)  ?? 0,
-      // FIX: correct SGT timestamp on history points too
       effective_timestamp: correctSgtTimestamp(bqStr(v.effective_timestamp)),
     })).filter(p => p.latitude_degrees && p.longitude_degrees);
 
@@ -318,20 +394,87 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
 });
 
 // ── GET /api/arrivals ─────────────────────────────────────────────
+// Enhanced: supports ?imo=&mmsi=&name=&flag= filters + download
 router.get("/arrivals", async (req, res, next) => {
   try {
-    const limit = parseInt(req.query.limit) || 50;
-    const raw   = await getRecentArrivals(limit);
-    res.json({ success:true, count:raw.length, data: raw.map(normalizeArrival) });
+    const { limit, imo, mmsi, name, flag, download } = req.query;
+    const lim = parseInt(limit) || 50;
+    const raw = await getRecentArrivals(lim);
+    let data = raw.map(normalizeArrival);
+
+    // Apply identifier filters
+    if (imo)   data = data.filter(v => String(v.imo_number||"").includes(imo.trim()));
+    if (mmsi)  data = data.filter(v => String(v.mmsi_number||"").includes(mmsi.trim()));
+    if (name)  data = data.filter(v => (v.vessel_name||"").toLowerCase().includes(name.trim().toLowerCase()));
+    if (flag)  data = data.filter(v => (v.flag||"").toLowerCase().includes(flag.trim().toLowerCase()));
+
+    // CSV download support
+    if (download === "csv") {
+      const fields = ["imo_number","vessel_name","mmsi_number","flag","vessel_type",
+                      "arrival_time","arrival_date","location_from","location_to",
+                      "berth_grid","voyage_purpose","shipping_agent","crew_count",
+                      "passenger_count","arrival_source","company_name","contact_person",
+                      "contact_email","contact_phone"];
+      const csv = toCSV(data, fields);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="arrivals_${new Date().toISOString().slice(0,10)}.csv"`);
+      return res.send(csv);
+    }
+
+    res.json({ success:true, count:data.length, data });
   } catch(err) { next(err); }
 });
 
 // ── GET /api/departures ───────────────────────────────────────────
+// Enhanced: supports ?imo=&mmsi=&name=&flag= filters + download
 router.get("/departures", async (req, res, next) => {
   try {
+    const { limit, imo, mmsi, name, flag, download } = req.query;
+    const lim = parseInt(limit) || 50;
+    const raw = await getRecentDepartures(lim);
+    let data = raw.map(normalizeDeparture);
+
+    // Apply identifier filters
+    if (imo)   data = data.filter(v => String(v.imo_number||"").includes(imo.trim()));
+    if (mmsi)  data = data.filter(v => String(v.mmsi_number||"").includes(mmsi.trim()));
+    if (name)  data = data.filter(v => (v.vessel_name||"").toLowerCase().includes(name.trim().toLowerCase()));
+    if (flag)  data = data.filter(v => (v.flag||"").toLowerCase().includes(flag.trim().toLowerCase()));
+
+    // CSV download support
+    if (download === "csv") {
+      const fields = ["imo_number","vessel_name","mmsi_number","flag","vessel_type",
+                      "departure_time","departure_date","next_port","shipping_agent",
+                      "crew_count","passenger_count","departure_source","is_upcoming",
+                      "company_name","contact_person","contact_email","contact_phone"];
+      const csv = toCSV(data, fields);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="departures_${new Date().toISOString().slice(0,10)}.csv"`);
+      return res.send(csv);
+    }
+
+    res.json({ success:true, count:data.length, data });
+  } catch(err) { next(err); }
+});
+
+// ── GET /api/arrivals/upcoming — NEW ─────────────────────────────
+// Returns scheduled/expected future arrivals
+router.get("/arrivals/upcoming", async (req, res, next) => {
+  try {
     const limit = parseInt(req.query.limit) || 50;
-    const raw   = await getRecentDepartures(limit);
-    res.json({ success:true, count:raw.length, data: raw.map(normalizeDeparture) });
+    const raw   = await getUpcomingArrivals(limit);
+    const data  = raw.map(normalizeArrival);
+
+    if (req.query.download === "csv") {
+      const fields = ["imo_number","vessel_name","mmsi_number","flag","vessel_type",
+                      "arrival_time","arrival_date","location_from","berth_grid",
+                      "voyage_purpose","shipping_agent","company_name","contact_person","contact_email"];
+      const csv = toCSV(data, fields);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="upcoming_arrivals_${new Date().toISOString().slice(0,10)}.csv"`);
+      return res.send(csv);
+    }
+
+    res.json({ success:true, count:data.length, data });
   } catch(err) { next(err); }
 });
 

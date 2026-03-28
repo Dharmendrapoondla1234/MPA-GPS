@@ -1,0 +1,257 @@
+/* VesselContactPanel.css */
+.cp-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel, #0d1b2a);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 200px;
+}
+
+/* ── Tabs ── */
+.cp-tabs {
+  display: flex;
+  align-items: center;
+  background: rgba(0,0,0,0.3);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 0 8px;
+  gap: 2px;
+}
+.cp-tab {
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  background: transparent;
+  border: none;
+  color: #607d8b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.cp-tab:hover  { color: #b0bec5; }
+.cp-tab-active { color: #00e5ff; border-bottom-color: #00e5ff; }
+.cp-tab-icon   { font-size: 13px; }
+.cp-refresh-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #607d8b;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.15s;
+}
+.cp-refresh-btn:hover:not(:disabled) { color: #00e5ff; }
+
+/* ── Content ── */
+.cp-content { padding: 12px; overflow-y: auto; }
+
+.cp-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 0;
+  color: #607d8b;
+  font-size: 12px;
+}
+.cp-spinner {
+  width: 24px; height: 24px;
+  border: 2px solid rgba(0,229,255,0.2);
+  border-top-color: #00e5ff;
+  border-radius: 50%;
+  animation: cp-spin 0.8s linear infinite;
+}
+@keyframes cp-spin { to { transform: rotate(360deg); } }
+
+.cp-error {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(252,92,101,0.1);
+  border: 1px solid rgba(252,92,101,0.25);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #fc5c65;
+}
+.cp-error button {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #fc5c65;
+  color: #fc5c65;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* ── Enrichment meta ── */
+.cp-enrich-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.conf-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.4px;
+}
+.conf-high { background: rgba(38,222,129,0.15); color: #26de81; }
+.conf-mid  { background: rgba(253,150,68,0.15);  color: #fd9644; }
+.conf-low  { background: rgba(252,92,101,0.12);   color: #fc5c65; }
+.cp-last-checked { font-size: 10px; color: #546e7a; }
+
+/* ── Company cards ── */
+.cp-companies { display: flex; flex-direction: column; gap: 10px; }
+
+.cp-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.cp-card-empty {
+  opacity: 0.5;
+}
+.cp-card-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #607d8b;
+  border-left: 3px solid #00e5ff;
+  padding-left: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cp-country-badge {
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
+  color: #90a4ae;
+}
+.cp-company-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e0f7fa;
+  margin-bottom: 6px;
+}
+.cp-address {
+  font-size: 11px;
+  color: #78909c;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.cp-empty-msg {
+  font-size: 11px;
+  color: #546e7a;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+/* ── Contact rows ── */
+.cp-contact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.cp-contact-row:last-of-type { border-bottom: none; }
+.cp-icon  { font-size: 12px; width: 16px; text-align: center; flex-shrink: 0; }
+.cp-contact-body { flex: 1; display: flex; flex-direction: column; }
+.cp-label { font-size: 9px; font-weight: 600; color: #546e7a; letter-spacing: 0.5px; }
+.cp-value { font-size: 12px; color: #b0bec5; }
+.cp-link  { color: #00e5ff; text-decoration: none; }
+.cp-link:hover { text-decoration: underline; }
+.cp-copy-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #546e7a;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.cp-copy-btn:hover { color: #00e5ff; border-color: #00e5ff; }
+
+.cp-source {
+  font-size: 9px;
+  color: #455a64;
+  margin-top: 8px;
+  font-style: italic;
+}
+.cp-verified { color: #26de81; }
+
+/* ── Port agents ── */
+.cp-port-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #00e5ff;
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.2);
+  padding: 3px 10px;
+  border-radius: 12px;
+  display: inline-block;
+  margin-bottom: 10px;
+}
+.cp-agents { display: flex; flex-direction: column; gap: 10px; }
+.cp-agent-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.cp-agent-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.cp-agent-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e0f7fa;
+}
+.cp-agent-company {
+  font-size: 10px;
+  color: #78909c;
+}
+.cp-agent-type {
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(167,139,250,0.15);
+  color: #a78bfa;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* ── No data state ── */
+.cp-no-data {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+  color: #607d8b;
+  font-size: 12px;
+  text-align: center;
+}
+.cp-no-data-icon { font-size: 28px; }
+.cp-no-data-sub  { font-size: 11px; color: #455a64; line-height: 1.6; }
+.cp-no-data-sub a { color: #00e5ff; }

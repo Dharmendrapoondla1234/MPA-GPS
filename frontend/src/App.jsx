@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef,  memo, lazy, Suspense } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo, memo, lazy, Suspense } from "react";
 import AuthPage from "./components/Authpage";
 import TopBar from "./components/TopBar";
 import VesselPanel from "./components/VesselPanel";
@@ -87,7 +87,7 @@ export default function App() {
     return () => clearInterval(freeIntervalRef.current);
   }, [user]);
 
-  const [filters,       setFilters]       = useState({ search: "", vesselType: "", speedRange: "", speedMin: null, speedMax: null });
+  const [filters,       setFilters]       = useState({ search: "", vesselType: "", speedRange: "", speedMin: null, speedMax: null, flag: "" });
   const [selectedVessel,setSelectedVessel]= useState(null);
   const [trailData,     setTrailData]     = useState(null);
   const [predictRoute,  setPredictRoute]  = useState(null);
@@ -100,7 +100,19 @@ export default function App() {
   const [prefsOpen,     setPrefsOpen]     = useState(false);
   const mapRef = useRef(null);
 
-  const { vessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
+  const { vessels: rawVessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
+
+  // Client-side flag filter (flag is not a BigQuery param, applied here)
+  const vessels = useMemo(() => {
+    if (!filters.flag) return rawVessels;
+    return rawVessels.filter(v => v.flag === filters.flag);
+  }, [rawVessels, filters.flag]);
+
+  // Unique flag codes for the TopBar dropdown — derived from live data
+  const flagOptions = useMemo(() => {
+    const flags = [...new Set(rawVessels.map(v => v.flag).filter(Boolean))].sort();
+    return flags;
+  }, [rawVessels]);
 
   // Auto-locate on exact search match
   useEffect(() => {
@@ -197,7 +209,7 @@ export default function App() {
 
       <TopBar
         filters={filters}        onFiltersChange={setFilters}
-        vesselTypes={vesselTypes} stats={stats}
+        vesselTypes={vesselTypes} flagOptions={flagOptions} stats={stats}
         nextRefresh={nextRefresh} loading={loading} onRefresh={refresh}
         panelOpen={panelOpen}     onTogglePanel={handleTogglePanel}
         lastUpdated={lastUpdated} user={user} onLogout={handleLogout}

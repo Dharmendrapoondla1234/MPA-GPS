@@ -139,6 +139,20 @@ export async function fetchPortActivity() {
   return call("/port-activity");
 }
 
+// ── CONTACT ENRICHMENT ────────────────────────────────────────────
+export async function fetchVesselContacts(imo, { mmsi, name } = {}) {
+  const p = new URLSearchParams();
+  if (mmsi) p.set("mmsi", mmsi);
+  if (name) p.set("name", name);
+  return call(`/contacts/vessel/${encodeURIComponent(imo)}?${p}`);
+}
+
+export async function fetchPortAgents(portCode, vesselType = "") {
+  const p = new URLSearchParams({ port: portCode });
+  if (vesselType) p.set("vesselType", vesselType);
+  return call(`/contacts/agents?${p}`);
+}
+
 // ── AI PREDICTION ─────────────────────────────────────────────────
 export async function fetchRoutePrediction(imo) {
   return call(`/predict/${encodeURIComponent(imo)}`);

@@ -5,6 +5,7 @@ import {
   getFlagEmoji, getVesselTypeLabel, getCountryName, calcDistanceNM, getRegionName,
 } from "../utils/vesselUtils";
 import { fetchVesselHistory, fetchRoutePrediction } from "../services/api";
+import VesselContactPanel from "./VesselContactPanel";
 import "./VesselDetailPanel.css";
 
 function bq(val) {
@@ -16,11 +17,12 @@ function bq(val) {
 function safeNum(v){ const n=Number(v); return isNaN(n)?null:n; }
 
 const TABS = [
-  { id:"VESSEL",  icon:"⬡", label:"Vessel"  },
-  { id:"VOYAGE",  icon:"🧭", label:"Voyage"  },
-  { id:"STATUS",  icon:"📊", label:"Status"  },
-  { id:"TRAIL",   icon:"🛤", label:"Trail"   },
-  { id:"PREDICT", icon:"🤖", label:"AI"      },
+  { id:"VESSEL",   icon:"⬡", label:"Vessel"   },
+  { id:"VOYAGE",   icon:"🧭", label:"Voyage"   },
+  { id:"STATUS",   icon:"📊", label:"Status"   },
+  { id:"TRAIL",    icon:"🛤", label:"Trail"    },
+  { id:"PREDICT",  icon:"🤖", label:"AI"       },
+  { id:"CONTACTS", icon:"📞", label:"Contacts" },
 ];
 const HOUR_OPTIONS = [12,24,48,72];
 
@@ -561,6 +563,13 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
             predRouteOn={predRouteOn}
             onLoad={loadPrediction}
             onToggleRoute={togglePredictRoute}
+          />
+        )}
+
+        {tab==="CONTACTS" && (
+          <VesselContactPanel
+            vessel={vessel}
+            portCode={vessel?.next_port_destination || vessel?.location_to}
           />
         )}
       </div>
