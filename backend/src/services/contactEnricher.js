@@ -346,9 +346,14 @@ async function vesselFinderFallback(imo) {
 // STEP 6: Write enriched data to BigQuery
 // ═════════════════════════════════════════════════════════════════
 async function saveToFirestore(imo, data) {
+  // Non-fatal: skip silently if BQ contact tables don't exist yet
   try {
     const now = new Date().toISOString();
     const ds  = bq.dataset(DATASET);
+
+    // Verify tables exist before inserting
+    try { await ds.table("d_shipping_companies").getMetadata(); }
+    catch { logger.warn(`[bq-save] d_shipping_companies table not found — skipping save for IMO ${imo}`); return; }
 
     // Upsert company record
     if (data.owner_name || data.email) {
@@ -437,7 +442,8 @@ async function enrichVesselContact(imo, { vesselName, flag } = {}) {
   }
 
   // ── STEP 2: AI search for email/phone ────────────────────────
-  const companyName = result.owner_name || result.manager_name;
+  // Use vessel name as fallback search term if no company name from Equasis
+  const companyName = result.owner_name || result.manager_name || vesselName;
   if (companyName) {
     const aiData = await aiSearchCompanyContacts(companyName, flag);
     if (aiData) {

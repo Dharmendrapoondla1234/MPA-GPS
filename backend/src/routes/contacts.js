@@ -57,11 +57,16 @@ router.get("/vessel/:imo", async (req, res, next) => {
     let bqData = null;
     try { bqData = await getVesselContacts({ imo, mmsi, name }); } catch {}
 
-    const hasGoodData = bqData?.owner?.email || bqData?.owner?.phone;
+    // Always run enrichment if no company_name found — BQ contact tables may not exist yet
+    const hasGoodData = bqData?.owner?.company_name || bqData?.owner?.email || bqData?.owner?.phone;
     let enrichedData  = null;
     if (!hasGoodData && enrich && imo) {
       logger.info(`[contacts] Running AI enrichment for IMO ${imo}...`);
-      enrichedData = await enrichVesselContact(imo, { vesselName: name });
+      try {
+        enrichedData = await enrichVesselContact(imo, { vesselName: name });
+      } catch (enrichErr) {
+        logger.warn(`[contacts] Enrichment error for IMO ${imo}:`, enrichErr.message);
+      }
     }
 
     const final = enrichedData || bqData || {};
