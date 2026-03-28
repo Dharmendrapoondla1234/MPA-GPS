@@ -209,7 +209,7 @@ Rules:
 - confidence: 0.9 if from official website, 0.7 if from directory, 0.5 if uncertain`;
 
     const response = await anthropic.messages.create({
-      model:      "claude-sonnet-4-20250514",
+      model:      "claude-sonnet-4-5",
       max_tokens: 500,
       tools: [{
         type: "web_search_20250305",
@@ -519,7 +519,8 @@ async function enrichVesselContact(imo, { vesselName, flag } = {}) {
     port_agents: [],
     enrichment: {
       source:      result.source     || "none",
-      confidence:  result.confidence || 0,
+      // FIX: if data was found but confidence is 0, set a minimum of 0.4
+      confidence:  result.confidence || (result.owner_name || result.email ? 0.4 : 0),
       enriched_at: new Date().toISOString(),
     },
   };

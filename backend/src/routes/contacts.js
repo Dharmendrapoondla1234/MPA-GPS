@@ -12,7 +12,8 @@ function normalizeCompany(c) {
     company_name:       c.company_name       || null,
     company_type:       c.company_type       || null,
     email:              c.primary_email      || c.email || null,
-    email_ops:          c.secondary_email    || c.email_ops || null,
+    // FIX: frontend reads email_secondary, not email_ops
+    email_secondary:    c.secondary_email    || c.email_ops || null,
     phone:              c.phone_primary      || c.phone || null,
     phone_secondary:    c.phone_secondary    || c.phone_alt || null,
     website:            c.website            || null,
