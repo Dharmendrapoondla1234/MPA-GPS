@@ -74,29 +74,49 @@ async function equasisLogin() {
   const password = process.env.EQUASIS_PASSWORD;
   if (!email || !password) { console.warn("⚠️  EQUASIS_EMAIL/PASSWORD not set — skipping Equasis"); return null; }
   try {
+    // Step 1: get initial session cookie from public page
     const pageRes = await fetch("https://www.equasis.org/EquasisWeb/public/HomePage", {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; MPA-GPS/2.0)" },
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
     });
-    const cookies = pageRes.headers.get("set-cookie") || "";
+    // Collect ALL set-cookie headers
+    const pageCookies = pageRes.headers.getSetCookie
+      ? pageRes.headers.getSetCookie().join("; ")
+      : (pageRes.headers.get("set-cookie") || "");
+
+    // Step 2: POST login
     const loginRes = await fetch("https://www.equasis.org/EquasisWeb/authen/HomePage?fs=Search", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Cookie: cookies,
-        "User-Agent": "Mozilla/5.0 (compatible; MPA-GPS/2.0)",
+        Cookie: pageCookies,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         Referer: "https://www.equasis.org/EquasisWeb/public/HomePage",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
       body: new URLSearchParams({ j_email: email, j_password: password, submit: "Login" }),
-      redirect: "manual",
+      redirect: "follow",  // follow redirect to get final session cookies
     });
-    const sessionCookie = loginRes.headers.get("set-cookie") || cookies;
-    if (sessionCookie && (loginRes.status === 302 || loginRes.status === 200)) {
-      _equasisCookies = sessionCookie;
+
+    // Collect session cookies from login response
+    const loginCookies = loginRes.headers.getSetCookie
+      ? loginRes.headers.getSetCookie().join("; ")
+      : (loginRes.headers.get("set-cookie") || "");
+
+    // Merge page + login cookies (login may not resend all cookies)
+    const allCookies = [pageCookies, loginCookies].filter(Boolean).join("; ");
+
+    // Verify login by checking response body for welcome message
+    const body = await loginRes.text();
+    const loggedIn = body.toLowerCase().includes("welcome") || body.toLowerCase().includes("logout") || body.toLowerCase().includes("my profile");
+
+    if (loggedIn) {
+      _equasisCookies = allCookies;
       _equasisTs      = Date.now();
       console.log("✅ Equasis login successful");
-      return sessionCookie;
+      return allCookies;
     }
-    console.warn("⚠️  Equasis login failed, status:", loginRes.status);
+
+    console.warn("⚠️  Equasis login failed — response did not contain welcome message");
     return null;
   } catch (e) { console.warn("⚠️  Equasis login error:", e.message); return null; }
 }
@@ -105,19 +125,96 @@ async function fetchEquasis(imo) {
   const cookies = await equasisLogin();
   if (!cookies) return null;
   try {
-    const res = await fetch(
+    // Try multiple URL patterns — Equasis changes these occasionally
+    const shipUrls = [
+      `https://www.equasis.org/EquasisWeb/authen/ShipInfo?fs=ByShip&P_IMO=${imo}`,
       `https://www.equasis.org/EquasisWeb/authen/ShipInfo?fs=Search&P_IMO=${imo}`,
-      { headers: { Cookie: cookies, "User-Agent": "Mozilla/5.0 (compatible; MPA-GPS/2.0)" } }
-    );
-    if (!res.ok) return null;
+      `https://www.equasis.org/EquasisWeb/authen/ShipInfo?P_IMO=${imo}`,
+      `https://www.equasis.org/EquasisWeb/authen/ShipSearch?fs=ByShip&P_IMO=${imo}`,
+    ];
+    let res = null;
+    for (const url of shipUrls) {
+      const r = await fetch(url, {
+        headers: {
+          Cookie: cookies,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          Referer: "https://www.equasis.org/EquasisWeb/authen/HomePage?fs=Search",
+        }
+      });
+      console.log(`  [Equasis] ${r.status} → ${url.split("authen/")[1]}`);
+      if (r.status === 200) { res = r; break; }
+    }
+    if (!res) { console.warn(`  [Equasis] All URLs returned non-200 for IMO ${imo}`); return null; }
     const html = await res.text();
-    const ownerMatch   = html.match(/Registered owner[^<]*<\/[^>]+>[^<]*<[^>]+>([^<]{3,100})</i);
-    const managerMatch = html.match(/ISM[^<]*[Mm]anager[^<]*<\/[^>]+>[^<]*<[^>]+>([^<]{3,100})</i);
-    const owner   = ownerMatch?.[1]?.trim();
-    const manager = managerMatch?.[1]?.trim();
-    if (!owner && !manager) return null;
-    console.log(`  [Equasis] owner="${owner}" manager="${manager}"`);
-    return { owner_name: owner || null, manager_name: manager || null, confidence: 0.90 };
+
+    // DEBUG: log snippet to see actual HTML structure
+    const snippet = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+                        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+                        .replace(/<[^>]+>/g, " ")
+                        .replace(/\s+/g, " ")
+                        .slice(0, 3000);
+    console.log("  [Equasis] HTML text snippet:", snippet.slice(0, 500));
+
+    // Strip all tags to plain text for easier parsing
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+
+    // Extract company name after role label — handles varying HTML structure
+    function extractAfterLabel(label) {
+      // Find the label position in plain text
+      const idx = text.toLowerCase().indexOf(label.toLowerCase());
+      if (idx === -1) return null;
+      // Take the next 300 chars after the label and find first meaningful company name
+      const after = text.slice(idx + label.length, idx + label.length + 400).trim();
+      // Split by common separators and find first non-empty, non-numeric chunk
+      const parts = after.split(/\s{2,}|\|/).map(p => p.trim()).filter(p => p.length > 3);
+      for (const part of parts) {
+        // Skip dates, numbers, short words, address fragments
+        if (/^\d/.test(part)) continue;
+        if (part.length < 4) continue;
+        if (/^(since|from|to|date|imo|role|name|address|details|flag|type|year)/i.test(part)) continue;
+        return part.slice(0, 100);
+      }
+      return null;
+    }
+
+    // Also try regex directly on raw HTML — Equasis uses <td> cells
+    function extractFromHtml(roleLabel) {
+      // Pattern: role label appears in a td, company name in next td
+      const pattern = new RegExp(
+        roleLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+        "[\\s\\S]{0,500}?<td[^>]*>\\s*([A-Z][^<]{3,80}?)\\s*<",
+        "i"
+      );
+      const m = html.match(pattern);
+      if (m?.[1]) return m[1].trim();
+
+      // Alternative: find in stripped text
+      return extractAfterLabel(roleLabel);
+    }
+
+    const owner   = extractFromHtml("Registered owner");
+    const manager = extractFromHtml("ISM Manager") || extractFromHtml("Ship manager");
+    const shipMgr = extractFromHtml("Ship manager/Commercial manager") || extractFromHtml("Commercial manager");
+
+    // Also try to get address
+    const addrMatch = html.match(/Room|Floor|Street|Building|Suite|Avenue|Road[^<]{5,150}/i);
+    const address   = addrMatch?.[0]?.replace(/<[^>]+>/g, "").trim() || null;
+
+    console.log(`  [Equasis] owner="${owner}" manager="${manager}" shipMgr="${shipMgr}"`);
+
+    if (!owner && !manager && !shipMgr) {
+      console.warn("  [Equasis] Could not parse company names from HTML");
+      return null;
+    }
+
+    return {
+      owner_name:   owner   || shipMgr || null,
+      manager_name: manager || null,
+      ship_manager: shipMgr || null,
+      address:      address || null,
+      confidence:   0.90,
+    };
   } catch (e) { console.warn("  [Equasis] error:", e.message); return null; }
 }
 

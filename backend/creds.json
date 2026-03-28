@@ -1,0 +1,1 @@
+﻿{"type":"service_account","project_id":"photons-377606","private_key_id":"YOUR_KEY_ID","private_key":"-----BEGIN RSA PRIVATE KEY-----\nYOUR_KEY\n-----END RSA PRIVATE KEY-----\n","client_email":"YOUR@photons-377606.iam.gserviceaccount.com","client_id":"YOUR_ID","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token"}
