@@ -1,4 +1,4 @@
-// backend/src/services/contactEnricher.js — MPA AI Contact Enricher v4
+// backend/src/services/contactEnricher.js — MPA AI Contact Enricher v5
 //
 // PIPELINE:
 // STEP 1  Equasis           — IMO-verified owner/manager/ISM (conf 0.92)
@@ -8,7 +8,9 @@
 // STEP 5  VesselFinder      — Company name fallback (conf 0.40)
 // STEP 6  Port Agent DB     — Static seed lookup by LOCODE/name
 // STEP 7  AI Port Agents    — Claude searches for agents not in DB
-// STEP 8  BigQuery Save     — Write enriched data + agents to BQ tables
+// STEP 8  Agent Org         — Enrich appointed ship agent/husbandry org (conf 0.75)
+// STEP 9  Master Contact    — Flag state / ISM channel for vessel master (conf 0.60)
+// STEP 10 BigQuery Save     — Write enriched data + agents to BQ tables
 "use strict";
 require("dotenv").config();
 const { BigQuery }            = require("@google-cloud/bigquery");
@@ -326,6 +328,131 @@ async function saveToBigQuery(imo, data) {
 }
 
 // ═════════════════════════════════════════════════════════════════
+// STEP 8: AGENT ORGANISATION ENRICHMENT
+// Identifies and enriches the vessel's appointed husbandry/ship agent
+// organisation — the company that handles the vessel's port calls,
+// crew changes, provisions, and clearance on behalf of the owner.
+// Different from ad-hoc port agents; this is the standing appointment.
+// ═════════════════════════════════════════════════════════════════
+async function enrichAgentOrganisation({ ownerName, managerName, vesselName, vesselType, flag, imo }) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const company = managerName || ownerName;
+  if (!company && !vesselName) return null;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5", max_tokens: 800,
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      messages: [{ role: "user", content:
+        `Find the appointed ship agent or husbandry agent organisation for this vessel:
+Vessel: "${vesselName || "unknown"}" (IMO: ${imo || "unknown"})
+Owner/Manager: "${company || "unknown"}"
+Flag: "${flag || "unknown"}"
+Type: "${vesselType || "unknown"}"
+
+A ship agent organisation (also called husbandry agent, port agent, or ship chandler network) is the company formally appointed by the owner/manager to handle port calls, crew, provisions, and customs on their behalf globally or regionally.
+
+Examples: GAC, Wilhelmsen Ship Management, Inchcape Shipping Services, Synergy Marine, Columbia Shipmanagement, V.Ships, Thome Ship Management.
+
+Search for: "${company || vesselName} ship agent" OR "${company || vesselName} husbandry agent" OR "${company || vesselName} port agent appointment"
+
+Return ONLY valid JSON, no markdown:
+{
+  "agent_org_name": null,
+  "agent_org_type": "HUSBANDRY_AGENT or SHIP_MANAGER or PORT_AGENT_NETWORK",
+  "agent_org_website": null,
+  "agent_org_email": null,
+  "agent_org_email_ops": null,
+  "agent_org_phone": null,
+  "agent_org_phone_24h": null,
+  "agent_org_address": null,
+  "services": [],
+  "regions_covered": [],
+  "appointment_basis": "STANDING or AD_HOC or UNKNOWN",
+  "confidence": 0.5,
+  "source": "web_search"
+}
+Rules: null for anything unverified. confidence 0.9=official confirmation, 0.7=strong indication, 0.5=likely, 0.3=uncertain.` }],
+    });
+    const text = response.content.find(b => b.type === "text")?.text;
+    if (!text) return null;
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const data = JSON.parse(m[0]);
+    if (!data.agent_org_name) return null;
+    logger.info(`[agent-org] ✅ Found: "${data.agent_org_name}" for "${company || vesselName}"`);
+    return { ...data, source: "ai_web_search" };
+  } catch (err) {
+    logger.warn("[agent-org] error:", err.message?.slice(0, 80));
+    return null;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// STEP 9: VESSEL MASTER / CAPTAIN CONTACT CHANNEL
+// We do NOT expose the captain's personal details (GDPR / maritime
+// privacy). Instead we resolve the correct communication channel:
+//   • Ship manager's crew department (for operational matters)
+//   • Flag state MRCC (for emergencies)
+//   • Satellite comms provider contact (Inmarsat/Iridium)
+//   • Ship's official SAT-C / GMDSS contact if publicly listed
+// ═════════════════════════════════════════════════════════════════
+async function enrichMasterContact({ ownerName, managerName, shipManager, flag, imo, vesselName }) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const mgr = shipManager || managerName || ownerName;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5", max_tokens: 700,
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      messages: [{ role: "user", content:
+        `Find the correct communication channel to reach the vessel master / captain of:
+Vessel: "${vesselName || "unknown"}" (IMO: ${imo || "unknown"})
+Ship Manager / ISM Manager: "${mgr || "unknown"}"
+Flag State: "${flag || "unknown"}"
+
+IMPORTANT: Do NOT look for or return personal contact details of the captain.
+Return the OFFICIAL CHANNELS only:
+1. Ship manager's crew/operations department contact (who relays messages to the master)
+2. Flag state MRCC (Maritime Rescue Coordination Centre) for emergencies
+3. Any publicly listed ship satellite phone / Inmarsat number (if in public directories)
+4. Vessel's official radio call sign if findable
+
+Search: "${mgr || vesselName} crew department contact" AND "MRCC ${flag || ""} emergency contact"
+
+Return ONLY valid JSON, no markdown:
+{
+  "master_contact_note": "Brief explanation of how to reach the master",
+  "crew_dept_company": null,
+  "crew_dept_email": null,
+  "crew_dept_phone": null,
+  "mrcc_name": null,
+  "mrcc_email": null,
+  "mrcc_phone": null,
+  "mrcc_country": null,
+  "sat_phone_public": null,
+  "radio_call_sign": null,
+  "inmarsat_number": null,
+  "preferred_channel": "SHIP_MANAGER or PORT_AGENT or MRCC or SATPHONE",
+  "contact_protocol": "Standard protocol note, e.g. contact via ship manager ops dept",
+  "confidence": 0.5,
+  "source": "web_search"
+}` }],
+    });
+    const text = response.content.find(b => b.type === "text")?.text;
+    if (!text) return null;
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const data = JSON.parse(m[0]);
+    logger.info(`[master-contact] ✅ channel="${data.preferred_channel}" for IMO ${imo}`);
+    return { ...data, source: "ai_web_search" };
+  } catch (err) {
+    logger.warn("[master-contact] error:", err.message?.slice(0, 80));
+    return null;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
 // MAIN: enrichVesselContact
 // ═════════════════════════════════════════════════════════════════
 async function enrichVesselContact(imo, {
@@ -411,7 +538,27 @@ async function enrichVesselContact(imo, {
     portAgents.push(...agents);
   }
 
-  // STEP 8: Save (fire-and-forget)
+  // STEP 8: Agent organisation enrichment
+  const agentOrg = await enrichAgentOrganisation({
+    ownerName:   r.owner_name   || null,
+    managerName: r.manager_name || null,
+    vesselName,
+    vesselType:  vesselType     || null,
+    flag:        r.flag || flag || null,
+    imo,
+  });
+
+  // STEP 9: Vessel master / captain contact channel
+  const masterContact = await enrichMasterContact({
+    ownerName:   r.owner_name   || null,
+    managerName: r.manager_name || null,
+    shipManager: r.ship_manager || null,
+    flag:        r.flag || flag || null,
+    imo,
+    vesselName,
+  });
+
+  // STEP 10: Save (fire-and-forget)
   if (r.owner_name || r.email) {
     saveToBigQuery(imo, { ...r, port_agents: portAgents });
   }
@@ -435,6 +582,43 @@ async function enrichVesselContact(imo, {
     manager:      r.manager_name  ? { company_name: r.manager_name,  company_type: "MANAGER",  data_source: "equasis" } : null,
     ship_manager: r.ship_manager  ? { company_name: r.ship_manager,  company_type: "SHIP_MANAGER", data_source: "equasis" } : null,
     port_agents: portAgents,
+    agent_org: agentOrg ? {
+      company_name:       agentOrg.agent_org_name        || null,
+      company_type:       agentOrg.agent_org_type        || "HUSBANDRY_AGENT",
+      appointment_basis:  agentOrg.appointment_basis     || null,
+      primary_email:      agentOrg.agent_org_email       || null,
+      ops_email:          agentOrg.agent_org_email_ops   || null,
+      phone:              agentOrg.agent_org_phone       || null,
+      phone_24h:          agentOrg.agent_org_phone_24h   || null,
+      website:            agentOrg.agent_org_website     || null,
+      registered_address: agentOrg.agent_org_address     || null,
+      services:           agentOrg.services              || [],
+      regions_covered:    agentOrg.regions_covered       || [],
+      confidence:         agentOrg.confidence            || null,
+      data_source:        agentOrg.source                || "ai_web_search",
+    } : null,
+    master_contact: masterContact ? {
+      contact_note:       masterContact.master_contact_note  || null,
+      preferred_channel:  masterContact.preferred_channel    || null,
+      contact_protocol:   masterContact.contact_protocol     || null,
+      crew_dept: masterContact.crew_dept_company ? {
+        company:          masterContact.crew_dept_company     || null,
+        email:            masterContact.crew_dept_email       || null,
+        phone:            masterContact.crew_dept_phone       || null,
+      } : null,
+      mrcc: masterContact.mrcc_name ? {
+        name:             masterContact.mrcc_name             || null,
+        country:          masterContact.mrcc_country          || null,
+        email:            masterContact.mrcc_email            || null,
+        phone:            masterContact.mrcc_phone            || null,
+      } : null,
+      sat_phone_public:   masterContact.sat_phone_public      || null,
+      radio_call_sign:    masterContact.radio_call_sign        || null,
+      inmarsat_number:    masterContact.inmarsat_number        || null,
+      privacy_note:       "Direct personal contact details of the vessel master are not provided. Use the channels above to reach the vessel or its responsible parties.",
+      confidence:         masterContact.confidence             || null,
+      data_source:        masterContact.source                 || "ai_web_search",
+    } : null,
     enrichment: {
       source:      r.source     || "none",
       confidence:  r.confidence || (r.owner_name || r.email ? 0.4 : 0),

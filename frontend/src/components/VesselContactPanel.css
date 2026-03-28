@@ -321,7 +321,17 @@
   font-style: italic;
 }
 
-/* ── No data ── */
+/* ── Privacy notice (master contact tab) ── */
+.cp-privacy-notice {
+  font-size: 11px;
+  color: #fd9644;
+  background: rgba(253,150,68,0.08);
+  border: 1px solid rgba(253,150,68,0.2);
+  border-radius: 5px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
 .cp-no-data {
   display: flex;
   flex-direction: column;

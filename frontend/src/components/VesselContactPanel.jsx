@@ -225,10 +225,14 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
 
   const hasCompanyData = contacts?.owner?.company_name || contacts?.manager?.company_name;
   const agentCount     = agents.length;
+  const agentOrg       = contacts?.agent_org       || null;
+  const masterContact  = contacts?.master_contact  || null;
 
   const tabs = [
-    { id: "company", label: "Owner / Operator", icon: "🏢" },
+    { id: "company", label: "Owner / Operator",    icon: "🏢" },
     { id: "agents",  label: `Port Agents${agentCount ? ` (${agentCount})` : ""}`, icon: "⚓" },
+    { id: "agentorg",label: "Agent Org",            icon: "🏗" },
+    { id: "master",  label: "Master Contact",       icon: "👨‍✈️" },
   ];
 
   return (
@@ -274,7 +278,7 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
             <span>{enriching ? "Running AI enrichment…" : "Fetching contact data…"}</span>
             {enriching && (
               <span className="cp-loading-sub">
-                Equasis → AI web search → company scrape → port agents…
+                Equasis → AI web → scrape → agents → agent org → master channel…
               </span>
             )}
           </div>
@@ -372,6 +376,145 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
                   <AgentCard key={a.agent_id || `${a.agency_company}_${i}`} agent={a} />
                 ))}
               </>
+            )}
+          </div>
+        )}
+
+        {/* ── Agent Organisation tab ── */}
+        {!loading && !enriching && !error && activeTab === "agentorg" && (
+          <div className="cp-companies">
+            {agentOrg ? (
+              <div className="cp-card">
+                <div className="cp-card-title" style={{ borderColor: "#f7b731" }}>
+                  <span>Appointed Agent Organisation</span>
+                  <span className="cp-source-pill">{agentOrg.company_type}</span>
+                  {agentOrg.appointment_basis && (
+                    <span className="cp-source-pill">{agentOrg.appointment_basis}</span>
+                  )}
+                  <SourcePills source={agentOrg.data_source} />
+                </div>
+                <div className="cp-company-name">{agentOrg.company_name}</div>
+                {agentOrg.registered_address && (
+                  <div className="cp-address">📍 {agentOrg.registered_address}</div>
+                )}
+                <ContactRow icon="✉" label="Primary Email" value={agentOrg.primary_email}
+                  href={agentOrg.primary_email ? `mailto:${agentOrg.primary_email}` : null} />
+                <ContactRow icon="✉" label="Ops Email"     value={agentOrg.ops_email}
+                  href={agentOrg.ops_email ? `mailto:${agentOrg.ops_email}` : null} />
+                <ContactRow icon="☎" label="Phone"         value={agentOrg.phone} />
+                <ContactRow icon="🆘" label="24h Emergency" value={agentOrg.phone_24h} />
+                <ContactRow icon="🌐" label="Website"       value={agentOrg.website}
+                  href={agentOrg.website ? (agentOrg.website.startsWith("http") ? agentOrg.website : `https://${agentOrg.website}`) : null} />
+                {agentOrg.services?.length > 0 && (
+                  <div className="cp-agent-services" style={{ marginTop: 8 }}>
+                    {agentOrg.services.map(s => <span key={s} className="cp-service-pill">{s}</span>)}
+                  </div>
+                )}
+                {agentOrg.regions_covered?.length > 0 && (
+                  <div className="cp-agent-services" style={{ marginTop: 6 }}>
+                    {agentOrg.regions_covered.map(r => (
+                      <span key={r} className="cp-service-pill" style={{ background: "rgba(247,183,49,0.1)", color: "#f7b731" }}>{r}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="cp-agent-meta" style={{ marginTop: 8 }}>
+                  {agentOrg.confidence != null && confidenceBadge(agentOrg.confidence)}
+                </div>
+              </div>
+            ) : (
+              <div className="cp-no-data">
+                <div className="cp-no-data-icon">🏗</div>
+                <div>No agent organisation identified.</div>
+                <div className="cp-no-data-sub">
+                  Click <strong>🤖 Re-enrich</strong> to search for the vessel's appointed husbandry agent organisation (e.g. GAC, Wilhelmsen, Inchcape).
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Master Contact tab ── */}
+        {!loading && !enriching && !error && activeTab === "master" && (
+          <div className="cp-companies">
+            <div className="cp-card" style={{ background: "rgba(255,160,60,0.04)", borderColor: "rgba(255,160,60,0.15)" }}>
+              <div className="cp-card-title" style={{ borderColor: "#fd9644" }}>
+                👨‍✈️ Vessel Master / Captain Communication
+              </div>
+              <div className="cp-privacy-notice">
+                🔒 Personal contact details of the vessel master are not disclosed in compliance with maritime privacy standards.
+                Use the official channels below.
+              </div>
+            </div>
+
+            {masterContact ? (
+              <>
+                {masterContact.contact_note && (
+                  <div className="cp-card">
+                    <div className="cp-card-title" style={{ borderColor: "#00e5ff" }}>
+                      Preferred Channel: {masterContact.preferred_channel || "—"}
+                    </div>
+                    <div className="cp-address" style={{ color: "#b0bec5", fontStyle: "normal" }}>
+                      {masterContact.contact_note}
+                    </div>
+                    {masterContact.contact_protocol && (
+                      <div className="cp-address">{masterContact.contact_protocol}</div>
+                    )}
+                  </div>
+                )}
+
+                {masterContact.crew_dept && (
+                  <div className="cp-card">
+                    <div className="cp-card-title" style={{ borderColor: "#26de81" }}>
+                      Ship Manager — Crew / Operations Dept
+                    </div>
+                    {masterContact.crew_dept.company && (
+                      <div className="cp-company-name">{masterContact.crew_dept.company}</div>
+                    )}
+                    <ContactRow icon="✉" label="Email" value={masterContact.crew_dept.email}
+                      href={masterContact.crew_dept.email ? `mailto:${masterContact.crew_dept.email}` : null} />
+                    <ContactRow icon="☎" label="Phone" value={masterContact.crew_dept.phone} />
+                  </div>
+                )}
+
+                {masterContact.mrcc && (
+                  <div className="cp-card">
+                    <div className="cp-card-title" style={{ borderColor: "#fc5c65" }}>
+                      🆘 MRCC — Maritime Rescue Coordination Centre
+                    </div>
+                    <div className="cp-company-name">{masterContact.mrcc.name}</div>
+                    {masterContact.mrcc.country && (
+                      <div className="cp-address">Flag State: {masterContact.mrcc.country}</div>
+                    )}
+                    <ContactRow icon="✉" label="Email" value={masterContact.mrcc.email}
+                      href={masterContact.mrcc.email ? `mailto:${masterContact.mrcc.email}` : null} />
+                    <ContactRow icon="☎" label="Phone" value={masterContact.mrcc.phone} />
+                  </div>
+                )}
+
+                {(masterContact.sat_phone_public || masterContact.radio_call_sign || masterContact.inmarsat_number) && (
+                  <div className="cp-card">
+                    <div className="cp-card-title" style={{ borderColor: "#a78bfa" }}>
+                      📡 Vessel Communications
+                    </div>
+                    <ContactRow icon="📻" label="Radio Call Sign"  value={masterContact.radio_call_sign} />
+                    <ContactRow icon="📡" label="Inmarsat Number"  value={masterContact.inmarsat_number} />
+                    <ContactRow icon="📞" label="Sat Phone (Public)" value={masterContact.sat_phone_public} />
+                  </div>
+                )}
+
+                <div className="cp-agent-meta" style={{ padding: "4px 0" }}>
+                  {masterContact.confidence != null && confidenceBadge(masterContact.confidence)}
+                  {masterContact.data_source && <span className="cp-agent-source">{masterContact.data_source}</span>}
+                </div>
+              </>
+            ) : (
+              <div className="cp-no-data">
+                <div className="cp-no-data-icon">👨‍✈️</div>
+                <div>No master contact channel resolved yet.</div>
+                <div className="cp-no-data-sub">
+                  Click <strong>🤖 Re-enrich</strong> to resolve the ship manager crew department, MRCC, and vessel comms channels.
+                </div>
+              </div>
             )}
           </div>
         )}
