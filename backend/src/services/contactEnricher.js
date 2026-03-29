@@ -24,7 +24,7 @@ const { lookupPortAgents, rankAgents } = require("./portAgentDB");
 const PROJECT     = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
 const DATASET     = process.env.BIGQUERY_DATASET    || "MPA";
 const BQ_LOCATION = process.env.BIGQUERY_LOCATION   || "asia-southeast1";
-const MODEL       = "claude-sonnet-4-5-20251001";
+const MODEL       = "claude-haiku-4-5-20251001"; // corrected model ID
 
 // ── BigQuery client ────────────────────────────────────────────────
 let bq;
@@ -39,6 +39,9 @@ if (_creds && _creds.trim().startsWith("{")) {
 }
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+if (!process.env.ANTHROPIC_API_KEY) {
+  logger.warn("[contactEnricher] ⚠️  ANTHROPIC_API_KEY is not set — all AI enrichment steps will be skipped");
+}
 
 // ── Caches ─────────────────────────────────────────────────────────
 const enrichCache    = new Map();
@@ -190,37 +193,47 @@ function parseEquasisHtml(html) {
   function extractAfterLabel(labelPattern) {
     // Match: <td>LABEL</td> ... <td>VALUE</td> within the same <tr>
     const patterns = [
-      // Inside a table row — label td then value td
-      new RegExp(`<td[^>]*>[^<]*${labelPattern}[^<]*<\/td>\s*<td[^>]*>([\s\S]{2,200}?)<\/td>`, "i"),
-      // With extra cells in between (colspan etc)
-      new RegExp(`${labelPattern}[\s\S]{0,600}?<td[^>]*class="[^"]*info[^"]*"[^>]*>([\s\S]{2,200}?)<\/td>`, "i"),
-      // Fallback: label text anywhere followed by next td
-      new RegExp(`${labelPattern}[\s\S]{0,400}?<td[^>]*>([\s\S]{2,200}?)<\/td>`, "i"),
+      // Standard <td> adjacency (classic Equasis layout)
+      new RegExp(`<td[^>]*>[^<]*${labelPattern}[^<]*<\/td>\\s*<td[^>]*>([\\s\\S]{2,200}?)<\/td>`, "i"),
+      // Equasis v2 — label in <div> then sibling <div> with value
+      new RegExp(`<div[^>]*>[^<]*${labelPattern}[^<]*<\/div>\\s*<div[^>]*>([\\s\\S]{2,200}?)<\/div>`, "i"),
+      // Equasis v2 — label in <span> then value in next <span> or <td>
+      new RegExp(`<span[^>]*>[^<]*${labelPattern}[^<]*<\/span>[^<]*<(?:span|td)[^>]*>([\\s\\S]{2,200}?)<\/(?:span|td)>`, "i"),
+      // Wide fallback — label text then next td with info class
+      new RegExp(`${labelPattern}[\\s\\S]{0,600}?<td[^>]*class="[^"]*info[^"]*"[^>]*>([\\s\\S]{2,200}?)<\/td>`, "i"),
+      // Widest fallback — label text followed by any block element
+      new RegExp(`${labelPattern}[\\s\\S]{0,400}?<(?:td|div|span)[^>]*>([\\s\\S]{2,200}?)<\/(?:td|div|span)>`, "i"),
     ];
     for (const re of patterns) {
       const m = re.exec(html);
       if (!m) continue;
       const val = strip(m[1]);
-      // Skip if too short, placeholder, or contains HTML tags (means we got a nested element we didn't strip)
       if (!val || val.length < 2 || /^[-–]$/.test(val)) continue;
       if (/^(n\/a|none|unknown|not available|-)$/i.test(val)) continue;
-      // Skip if it looks like a UI element (button text, navigation)
       if (/^(search|login|logout|home|back|next|previous|submit)$/i.test(val)) continue;
       return val;
     }
     return null;
   }
 
-  // Also try extracting from <a> tags near company labels (Equasis links company names)
+  // Extract linked company names — Equasis links them as <a href="...Compan...">NAME</a>
   function extractLinkedName(labelPattern) {
-    const re = new RegExp(`${labelPattern}[\s\S]{0,500}?<a[^>]+href="[^"]*[Cc]ompany[^"]*"[^>]*>([^<]{3,100})<\/a>`, "i");
+    // Match company links (href contains "Compan" or "company")
+    const re = new RegExp(`${labelPattern}[\\s\\S]{0,500}?<a[^>]+href="[^"]*[Cc]ompan[^"]*"[^>]*>([^<]{3,100})<\/a>`, "i");
     const m = re.exec(html);
     if (!m) return null;
     const val = strip(m[1]);
     return (val && val.length > 2) ? val : null;
   }
 
-  const owner   = extractLinkedName("Registered owner")   || extractAfterLabel("Registered owner");
+  // Try JSON-LD structured data (some Equasis pages embed it)
+  function extractFromJsonLd(key) {
+    const ldM = /<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i.exec(html);
+    if (!ldM) return null;
+    try { const ld = JSON.parse(ldM[1]); return ld[key] || null; } catch { return null; }
+  }
+
+  const owner   = extractLinkedName("Registered owner")   || extractAfterLabel("Registered owner")   || extractFromJsonLd("owner");
   const manager = extractLinkedName("ISM Manager")        || extractAfterLabel("ISM Manager") || extractAfterLabel("ISM manager");
   const shipMgr = extractLinkedName("Ship manager")       || extractAfterLabel("Ship manager");
   const operator= extractLinkedName("Operator")           || extractAfterLabel("(?<!ISM )[Oo]perator");
@@ -464,9 +477,14 @@ async function fetchFromEquasis(imo) {
     const p = parseEquasisHtml(html);
     if (!p.owner && !p.manager) {
       logger.warn(`[equasis] HTML found but could not extract company for IMO ${imo}`);
-      // Log more of the html for debugging
+      // Log 1000 chars of stripped text + a snippet of raw HTML around known label keywords
       const dbg = html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,500);
       logger.info(`[equasis] debug text: ${dbg}`);
+      // Also log 200 chars of raw HTML around "owner" keyword if present
+      const ownerIdx = html.toLowerCase().indexOf("owner");
+      if (ownerIdx > -1) {
+        logger.info(`[equasis] raw HTML around 'owner' (±200): ${html.slice(Math.max(0, ownerIdx-50), ownerIdx+200)}`);
+      }
       return null;
     }
     logger.info(`[equasis] ✅ IMO ${imo}: owner="${p.owner}" manager="${p.manager}" flag="${p.flag}"`);
@@ -635,7 +653,7 @@ Return ONLY valid JSON (no markdown, no text before or after):
     if (!data.vessel_name && !data.owner_name) return null;
     logger.info(`[ai-imo] IMO ${imo}: vessel="${data.vessel_name}" owner="${data.owner_name}"`);
     return { ...data, source: "ai_imo_search" };
-  } catch (err) { logger.warn("[ai-imo] error:", err.message || String(err)); return null; }
+  } catch (err) { logger.warn("[ai-imo] error:", err?.status, err?.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -665,7 +683,7 @@ Rules: verified only, null for uncertain. confidence: 0.9=official site, 0.75=di
     if (data.email && data.email.includes("example")) data.email = null;
     logger.info(`[ai-company] "${companyName}": email=${data.email} web=${data.website}`);
     return { ...data, source: "ai_web_search" };
-  } catch (err) { logger.warn("[ai-company] error:", err.message || String(err)); return null; }
+  } catch (err) { logger.warn("[ai-company] error:", err?.status, err?.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -735,7 +753,7 @@ Return ONLY valid JSON: {"linkedin_url":null,"website":null,"found":false}` }],
     if (!data?.linkedin_url && !data?.website) return null;
     logger.info(`[linkedin] "${companyName}": ${data.linkedin_url}`);
     return data;
-  } catch (err) { logger.warn("[linkedin] error:", err.message || String(err)); return null; }
+  } catch (err) { logger.warn("[linkedin] error:", err?.status, err?.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -803,7 +821,7 @@ Return ONLY valid JSON (no markdown):
     }), 40000);
     const text = resp.content.find(b => b.type === "text")?.text;
     return safeJson(text);
-  } catch (err) { logger.warn("[agent-org] error:", err.message || String(err)); return null; }
+  } catch (err) { logger.warn("[agent-org] error:", err?.status, err?.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -824,7 +842,7 @@ Return ONLY valid JSON (no markdown):
     }), 35000);
     const text = resp.content.find(b => b.type === "text")?.text;
     return safeJson(text);
-  } catch (err) { logger.warn("[master-contact] error:", err.message || String(err)); return null; }
+  } catch (err) { logger.warn("[master-contact] error:", err?.status, err?.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
