@@ -257,54 +257,117 @@ async function fetchFromEquasis(imo) {
 
     if (searchRes.ok) {
       const searchHtml = await searchRes.text();
+      const searchText = searchHtml.replace(/<[^>]+>/g," ").replace(/\s+/g," ");
+      logger.info(`[equasis] A1 search text (0-400): ${searchText.slice(0, 400)}`);
 
-      // Step A2: If search returned a list page (multiple results), find the ship link and follow it
-      // Equasis ship info links look like: href="...restricted/ShipInfo?fs=Search..."
-      const shipLinkM = /href="([^"]*restricted\/ShipInfo[^"]*)"/.exec(searchHtml);
-      if (shipLinkM) {
-        const shipUrl = shipLinkM[1].startsWith("http")
-          ? shipLinkM[1]
-          : `https://www.equasis.org${shipLinkM[1]}`;
-        logger.info(`[equasis] A2 following ship link: ${shipUrl}`);
-        const shipRes = await safeFetch(shipUrl, {
-          headers: { ...hdrs, "Referer": searchRes.url || refA },
-          redirect: "follow",
-        }, 12000);
-        if (shipRes.ok) html = await shipRes.text();
-      } else if (searchHtml.includes("Registered owner") || searchHtml.includes("ISM")) {
-        // Search result IS the ship page directly
+      // Case 1: Search returned ship detail page directly
+      if (searchHtml.includes("Registered owner") || searchHtml.includes("ISM Manager")) {
         html = searchHtml;
+        logger.info(`[equasis] A1 returned ship detail directly`);
+      }
+
+      // Case 2: Search returned a results list — Equasis uses a FORM POST (not <a> link)
+      // The form has action="restricted/ShipInfo?fs=Search" and hidden field with P_SHIP_ID or similar
+      if (!html) {
+        // Extract the form action and all hidden inputs
+        const formActionM = /action="([^"]*ShipInfo[^"]*)"/.exec(searchHtml) ||
+                            /action="([^"]*restricted[^"]*)"/.exec(searchHtml);
+        if (formActionM) {
+          const formAction = formActionM[1].startsWith("http")
+            ? formActionM[1] : `https://www.equasis.org${formActionM[1]}`;
+
+          // Collect all hidden input fields from the form
+          const hiddenInputs = {};
+          let m;
+          const inputRe = /<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"[^>]*>/gi;
+          while ((m = inputRe.exec(searchHtml)) !== null) hiddenInputs[m[1]] = m[2];
+          // Also try reversed name/value attribute order
+          const inputRe2 = /<input[^>]+name="([^"]+)"[^>]+type="hidden"[^>]+value="([^"]*)"[^>]*>/gi;
+          while ((m = inputRe2.exec(searchHtml)) !== null) hiddenInputs[m[1]] = m[2];
+
+          logger.info(`[equasis] A2 form POST to: ${formAction} with fields: ${JSON.stringify(hiddenInputs)}`);
+          const formRes = await safeFetch(formAction, {
+            method: "POST",
+            headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
+              "Referer": searchRes.url },
+            body: new URLSearchParams({ ...hiddenInputs, submit: "View" }),
+            redirect: "follow",
+          }, 12000);
+          logger.info(`[equasis] A2 form result: status=${formRes.status} url=${formRes.url}`);
+          if (formRes.ok) html = await formRes.text();
+        }
+
+        // Case 3: Look for direct <a> links to ship page  
+        if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
+          const hrefPatterns = [
+            /href="([^"]*restricted\/ShipInfo[^"]*)"/,
+            /href="([^"]*ShipInfo[^"]*fs=Search[^"]*)"/,
+            /href="([^"]*ShipInfo[^"]*P_IMO[^"]*)"/,
+          ];
+          for (const pat of hrefPatterns) {
+            const linkM = pat.exec(searchHtml);
+            if (!linkM) continue;
+            const shipUrl = linkM[1].startsWith("http")
+              ? linkM[1] : `https://www.equasis.org${linkM[1]}`;
+            logger.info(`[equasis] A3 following href: ${shipUrl}`);
+            const shipRes = await safeFetch(shipUrl, {
+              headers: { ...hdrs, "Referer": searchRes.url }, redirect: "follow",
+            }, 12000);
+            if (shipRes.ok) { html = await shipRes.text(); break; }
+          }
+        }
       }
     }
 
-    // ── STRATEGY B: POST directly to restricted/ShipInfo?fs=Search ──
-    if (!html.includes("Registered owner") && !html.includes("ISM")) {
-      logger.info(`[equasis] Strategy B: POST restricted/ShipInfo?fs=Search`);
-      const r2 = await safeFetch(`${EQ_BASE}/restricted/ShipInfo?fs=Search`, {
+    // ── STRATEGY B: Search then immediately GET ShipInfo with P_IMO ─
+    // Equasis session may remember last search — try GET after establishing session
+    if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
+      logger.info(`[equasis] Strategy B: GET restricted/ShipInfo?fs=Search&P_IMO=${imo}`);
+      const r2 = await safeFetch(
+        `${EQ_BASE}/restricted/ShipInfo?fs=Search&P_IMO=${imo}`,
+        { headers: { ...hdrs, "Referer": `${EQ_BASE}/restricted/Search?fs=HomePage` }, redirect: "follow" },
+        12000
+      );
+      logger.info(`[equasis] B: status=${r2.status} url=${r2.url}`);
+      if (r2.ok) {
+        const b2html = await r2.text();
+        const b2text = b2html.replace(/<[^>]+>/g," ").replace(/\s+/g," ");
+        logger.info(`[equasis] B text (0-400): ${b2text.slice(0, 400)}`);
+        if (b2html.includes("Registered owner") || b2html.includes("ISM")) html = b2html;
+      }
+    }
+
+    // ── STRATEGY C: POST ByShip search form directly ─────────────────
+    if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
+      logger.info(`[equasis] Strategy C: POST ByShip search`);
+      const r3 = await safeFetch(`${EQ_BASE}/restricted/Search?fs=ByShip`, {
         method: "POST",
         headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
           "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage` },
-        body: new URLSearchParams({ P_IMO: String(imo), fs: "Search" }),
+        body: new URLSearchParams({ P_IMO: String(imo), P_SEARCH_TYPE: "IMO", submit: "Search" }),
         redirect: "follow",
       }, 12000);
-      logger.info(`[equasis] B: status=${r2.status} url=${r2.url}`);
-      if (r2.ok) html = await r2.text();
-    }
-
-    // ── STRATEGY C: GET restricted/ShipInfo?fs=Search&P_IMO=xxx ────
-    if (!html.includes("Registered owner") && !html.includes("ISM")) {
-      logger.info(`[equasis] Strategy C: GET restricted/ShipInfo?fs=Search&P_IMO=${imo}`);
-      const r3 = await safeFetch(
-        `${EQ_BASE}/restricted/ShipInfo?fs=Search&P_IMO=${imo}`,
-        { headers: { ...hdrs, "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage` }, redirect: "follow" },
-        12000
-      );
       logger.info(`[equasis] C: status=${r3.status} url=${r3.url}`);
-      if (r3.ok) html = await r3.text();
+      if (r3.ok) {
+        const c3html = await r3.text();
+        const c3text = c3html.replace(/<[^>]+>/g," ").replace(/\s+/g," ");
+        logger.info(`[equasis] C text (0-400): ${c3text.slice(0, 400)}`);
+        if (c3html.includes("Registered owner") || c3html.includes("ISM")) html = c3html;
+        // Also check for ship link in results
+        if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
+          const lm = /href="([^"]*ShipInfo[^"]*)"/.exec(c3html) ||
+                     /action="([^"]*ShipInfo[^"]*)"/.exec(c3html);
+          if (lm) {
+            const lu = lm[1].startsWith("http") ? lm[1] : `https://www.equasis.org${lm[1]}`;
+            const lr = await safeFetch(lu, { headers: { ...hdrs, "Referer": r3.url }, redirect: "follow" }, 12000);
+            if (lr.ok) html = await lr.text();
+          }
+        }
+      }
     }
 
-    // ── STRATEGY D: POST to authen/ShipInfo (legacy) ────────────────
-    if (!html.includes("Registered owner") && !html.includes("ISM")) {
+    // ── STRATEGY D: legacy authen/ShipInfo POST ──────────────────────
+    if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
       logger.info(`[equasis] Strategy D: POST authen/ShipInfo`);
       const r4 = await safeFetch(`${EQ_BASE}/authen/ShipInfo`, {
         method: "POST",
@@ -314,7 +377,11 @@ async function fetchFromEquasis(imo) {
         redirect: "follow",
       }, 12000);
       logger.info(`[equasis] D: status=${r4.status} url=${r4.url}`);
-      if (r4.ok) html = await r4.text();
+      if (r4.ok) {
+        const d4html = await r4.text();
+        if (d4html.includes("Registered owner") || d4html.includes("ISM")) html = d4html;
+        else logger.info(`[equasis] D text (0-300): ${d4html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,300)}`);
+      }
     }
 
     // Log a snippet so we can debug what Equasis actually returned
