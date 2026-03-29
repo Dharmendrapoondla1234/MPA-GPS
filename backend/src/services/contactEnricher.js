@@ -179,7 +179,7 @@ async function equasisLogin() {
     _eqCookieTs = Date.now();
     logger.info(`[equasis] Login OK — cookies: ${allCookies.slice(0, 120)}`);
     return allCookies;
-  } catch (err) { logger.warn("[equasis] Login error:", err.message); return null; }
+  } catch (err) { logger.warn(`[equasis] Login error: ${err?.message || String(err)}`); return null; }
 }
 
 function parseEquasisHtml(html) {
@@ -494,7 +494,7 @@ async function fetchFromEquasis(imo) {
       source: "equasis", confidence: 0.92,
     };
   } catch (err) {
-    logger.warn("[equasis] fetch error:", err.message);
+    logger.warn(`[equasis] fetch error: ${err?.message || String(err)}`);
     return null;
   }
 }
@@ -553,7 +553,7 @@ async function fetchFromMarineTraffic(imo) {
       flag:         flagVal || null,
       source: "marinetraffic", confidence: 0.78,
     };
-  } catch (err) { logger.warn("[marinetraffic] error:", err.message?.slice(0, 60)); return null; }
+  } catch (err) { logger.warn(`[marinetraffic] error: ${err?.message?.slice(0,120) || String(err).slice(0,120)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -624,7 +624,7 @@ async function fetchFromVesselFinder(imo) {
     }
 
     return null;
-  } catch (err) { logger.warn("[vesselfinder] error:", err.message?.slice(0, 60)); return null; }
+  } catch (err) { logger.warn(`[vesselfinder] error: ${err?.message?.slice(0,120) || String(err).slice(0,120)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -653,7 +653,7 @@ Return ONLY valid JSON (no markdown, no text before or after):
     if (!data.vessel_name && !data.owner_name) return null;
     logger.info(`[ai-imo] IMO ${imo}: vessel="${data.vessel_name}" owner="${data.owner_name}"`);
     return { ...data, source: "ai_imo_search" };
-  } catch (err) { logger.warn("[ai-imo] error:", err?.status, err?.message || String(err)); return null; }
+  } catch (err) { logger.warn(`[ai-imo] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -683,7 +683,7 @@ Rules: verified only, null for uncertain. confidence: 0.9=official site, 0.75=di
     if (data.email && data.email.includes("example")) data.email = null;
     logger.info(`[ai-company] "${companyName}": email=${data.email} web=${data.website}`);
     return { ...data, source: "ai_web_search" };
-  } catch (err) { logger.warn("[ai-company] error:", err?.status, err?.message || String(err)); return null; }
+  } catch (err) { logger.warn(`[ai-company] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -709,7 +709,7 @@ async function scrapeContactPage(websiteUrl) {
       } catch { /* try next url */ }
     }
     return null;
-  } catch (err) { logger.warn("[scrape] error:", err.message?.slice(0, 60)); return null; }
+  } catch (err) { logger.warn(`[scrape] error: ${err?.message?.slice(0,120) || String(err).slice(0,120)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -731,7 +731,7 @@ async function googleSearchContacts(companyName) {
     if (!emails.length && !phones.length) return null;
     logger.info(`[google-cse] "${companyName}": email=${emails[0]}`);
     return { email: emails[0] || null, phone: phones[0] || null, confidence: 0.65 };
-  } catch (err) { logger.warn("[google-cse] error:", err.message?.slice(0, 60)); return null; }
+  } catch (err) { logger.warn(`[google-cse] error: ${err?.message?.slice(0,120) || String(err).slice(0,120)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -753,7 +753,7 @@ Return ONLY valid JSON: {"linkedin_url":null,"website":null,"found":false}` }],
     if (!data?.linkedin_url && !data?.website) return null;
     logger.info(`[linkedin] "${companyName}": ${data.linkedin_url}`);
     return data;
-  } catch (err) { logger.warn("[linkedin] error:", err?.status, err?.message || String(err)); return null; }
+  } catch (err) { logger.warn(`[linkedin] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -794,7 +794,7 @@ Return ONLY a valid JSON array (no markdown, no text outside the array):
     logger.info(`[ai-agents] ${portName}: ${result.length} agents found`);
     return cacheSet(portAgentCache, cacheKey, result);
   } catch (err) {
-    logger.warn("[port-agents] error:", err.message?.slice(0, 80));
+    logger.warn(`[port-agents] error: ${err?.message?.slice(0,120) || String(err).slice(0,120)}`);
     return cacheSet(portAgentCache, cacheKey, []);
   }
 }
@@ -821,7 +821,7 @@ Return ONLY valid JSON (no markdown):
     }), 40000);
     const text = resp.content.find(b => b.type === "text")?.text;
     return safeJson(text);
-  } catch (err) { logger.warn("[agent-org] error:", err?.status, err?.message || String(err)); return null; }
+  } catch (err) { logger.warn(`[agent-org] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -842,7 +842,7 @@ Return ONLY valid JSON (no markdown):
     }), 35000);
     const text = resp.content.find(b => b.type === "text")?.text;
     return safeJson(text);
-  } catch (err) { logger.warn("[master-contact] error:", err?.status, err?.message || String(err)); return null; }
+  } catch (err) { logger.warn(`[master-contact] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -893,7 +893,7 @@ async function enrichVesselContact(imo, {
   vesselName, flag, currentPort, nextPort, vesselType,
   forceRefresh = false,
 } = {}) {
-  if (!imo) return null;
+  if (!imo || imo <= 0) return null; // guard: imo=0/null would collide in cache
 
   const cacheKey = `enrich_${imo}`;
   if (!forceRefresh) {

@@ -14,9 +14,15 @@ const logger = createLogger({
   format: format.combine(
     format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
     format.errors({ stack: true }),
+    format.splat(),
     format.printf(({ timestamp, level, message, stack, ...meta }) => {
-      const metaStr = Object.keys(meta).length
-        ? " " + JSON.stringify(meta)
+      // Render any extra splat/meta args so logger.warn("label:", value) prints both
+      const metaKeys = Object.keys(meta).filter(k => k !== "service");
+      const metaStr = metaKeys.length
+        ? " " + metaKeys.map(k => {
+            const v = meta[k];
+            return typeof v === "object" ? JSON.stringify(v) : String(v ?? "");
+          }).join(" ")
         : "";
       return stack
         ? `[${timestamp}] ${level.toUpperCase()}: ${message}\n${stack}`
@@ -28,9 +34,14 @@ const logger = createLogger({
       format: format.combine(
         format.colorize({ all: true }),
         format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
+        format.splat(),
         format.printf(({ timestamp, level, message, ...meta }) => {
-          const metaStr = Object.keys(meta).length
-            ? " " + JSON.stringify(meta)
+          const metaKeys = Object.keys(meta).filter(k => k !== "service");
+          const metaStr = metaKeys.length
+            ? " " + metaKeys.map(k => {
+                const v = meta[k];
+                return typeof v === "object" ? JSON.stringify(v) : String(v ?? "");
+              }).join(" ")
             : "";
           return `[${timestamp}] ${level}: ${message}${metaStr}`;
         }),

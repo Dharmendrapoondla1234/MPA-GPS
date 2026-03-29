@@ -88,16 +88,18 @@ async function resolveContacts({ imo, mmsi, name, enrich, currentPort, nextPort,
   const hasGoodData = bqData?.owner?.company_name || bqData?.owner?.email;
   let enrichedData  = null;
 
-  if ((!hasGoodData || forceRefresh) && enrich && (imoInt || mmsiInt || name)) {
-    const imo = imoInt; // shadow outer for enrichment calls below
-    logger.info(`[contacts] AI enrichment IMO ${imo}...`);
+  // Only enrich when we have a real positive IMO — never enrich with null/0
+  // (enriching with imo=null/0 would cache-collide for all vessels without an IMO)
+  const enrichableImo = imoInt && imoInt > 0 ? imoInt : null;
+  if ((!hasGoodData || forceRefresh) && enrich && (enrichableImo || mmsiInt || name)) {
+    logger.info(`[contacts] AI enrichment IMO ${enrichableImo || "(name/mmsi)"}...`);
     try {
       enrichedData = await withTimeout(
-        enrichVesselContact(imo, { vesselName: name, currentPort, nextPort, vesselType, forceRefresh }),
+        enrichVesselContact(enrichableImo, { vesselName: name, currentPort, nextPort, vesselType, forceRefresh }),
         ENRICH_TIMEOUT_MS,
-        `enrichment IMO ${imo}`
+        `enrichment IMO ${enrichableImo}`
       );
-    } catch (err) { logger.warn(`[contacts] enrichment error:`, err.message); }
+    } catch (err) { logger.warn(`[contacts] enrichment error: ${err.message}`); }
   }
 
   // Port agents: enriched > BQ > standalone AI search

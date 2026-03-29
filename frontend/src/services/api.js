@@ -164,13 +164,17 @@ export async function fetchVesselContacts(imo, {
   mmsi, name, currentPort, nextPort, vesselType, bustCache = false,
 } = {}) {
   const p = new URLSearchParams();
+  // Only include imo when it is a real positive integer — never 0 or null
+  const imoSafe = imo && Number.isInteger(Number(imo)) && Number(imo) > 0 ? Number(imo) : null;
+  if (imoSafe)     p.set("imo",         String(imoSafe));
   if (mmsi)        p.set("mmsi",        String(mmsi));
   if (name)        p.set("name",        name);
   if (currentPort) p.set("currentPort", currentPort);
   if (nextPort)    p.set("nextPort",    nextPort);
   if (vesselType)  p.set("vesselType",  vesselType);
+  if (!imoSafe && !mmsi && !name) return null; // nothing to identify vessel
   // Use spec endpoint instead — richer response, same data
-  return call(`/vessel-contact?imo=${encodeURIComponent(imo)}&${p}`, { bustCache });
+  return call(`/vessel-contact?${p}`, { bustCache });
 }
 
 /**

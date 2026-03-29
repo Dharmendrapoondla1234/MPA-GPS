@@ -168,12 +168,21 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
   const [error,     setError]     = useState(null);
   const [activeTab, setActiveTab] = useState("company");
 
-  const imo         = vessel?.imo_number;
-  const mmsi        = vessel?.mmsi_number;
-  const name        = vessel?.vessel_name;
+  const imo         = vessel?.imo_number || null;
+  const mmsi        = vessel?.mmsi_number || null;
+  const name        = vessel?.vessel_name || null;
   const currentPort = portCode || vessel?.location_to || vessel?.port_name || null;
   const nextPort    = vessel?.next_port_destination || vessel?.destination || null;
   const vesselType  = vessel?.vessel_type || null;
+
+  // Reset panel state immediately when the selected vessel changes — prevents
+  // stale data from a previous vessel showing while new data loads
+  useEffect(() => {
+    setContacts(null);
+    setAgents([]);
+    setError(null);
+    setLoading(false);
+  }, [imo, mmsi, name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load contacts — uses api.js call() with caching + auth headers
   const load = useCallback(async (bustCache = false) => {
@@ -181,7 +190,8 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
     setLoading(true);
     setError(null);
     try {
-      const raw = await fetchVesselContacts(imo || 0, {
+      // Pass imo as null when absent — never 0 (imo=0 would cache-collide across vessels)
+      const raw = await fetchVesselContacts(imo, {
         mmsi, name, currentPort, nextPort, vesselType, bustCache,
       });
       // Normalise spec endpoint shape → panel shape
