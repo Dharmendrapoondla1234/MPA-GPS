@@ -15,7 +15,8 @@ const VesselComparison           = lazy(() => import("./components/Vesselcompari
 const LiveAlertsFeed             = lazy(() => import("./components/Livealertsfeed"));
 const PortCongestionHeatmap      = lazy(() => import("./components/Portcongestionheatmap"));
 const ThemePreferences           = lazy(() => import("./components/Themepreferences"));
-const PortAgentIntelligencePanel = lazy(() => import("./components/PortAgentIntelligencePanel"));
+const PortAgentIntelligencePanel      = lazy(() => import("./components/PortAgentIntelligencePanel"));
+const UniversalVesselContactFinder    = lazy(() => import("./components/UniversalVesselContactFinder"));
 
 const IS_MOBILE = () => window.innerWidth <= 768;
 
@@ -100,6 +101,7 @@ export default function App() {
   const [heatmapOpen,     setHeatmapOpen]      = useState(false);
   const [prefsOpen,       setPrefsOpen]        = useState(false);
   const [agentIntelOpen,  setAgentIntelOpen]   = useState(false);
+  const [contactIntelOpen, setContactIntelOpen] = useState(false);
   const mapRef = useRef(null);
 
   const { vessels: rawVessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
@@ -186,7 +188,8 @@ export default function App() {
   const openAlerts     = useCallback(() => { setAlertsOpen(p => !p);     setCompareOpen(false); setHeatmapOpen(false); setPrefsOpen(false); setAgentIntelOpen(false); }, []);
   const openHeatmap    = useCallback(() => { setHeatmapOpen(p => !p);    setCompareOpen(false); setAlertsOpen(false);  setPrefsOpen(false); setAgentIntelOpen(false); }, []);
   const openPrefs      = useCallback(() => { setPrefsOpen(p => !p);      setCompareOpen(false); setAlertsOpen(false);  setHeatmapOpen(false); setAgentIntelOpen(false); }, []);
-  const openAgentIntel = useCallback(() => { setAgentIntelOpen(p => !p); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
+  const openAgentIntel = useCallback(() => { setAgentIntelOpen(p => !p); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); setContactIntelOpen(false); }, []);
+  const openContactIntel = useCallback(() => { setContactIntelOpen(p => !p); setAgentIntelOpen(false); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
 
   // Stable inline handlers — previously created new functions on every render
   const handleTogglePanel      = useCallback(() => setPanelOpen(p => !p), []);
@@ -324,6 +327,17 @@ export default function App() {
           <PortAgentIntelligencePanel
             isOpen={agentIntelOpen}
             onClose={() => setAgentIntelOpen(false)}
+            selectedVessel={selectedVessel}
+          />
+        )}
+      </Suspense>
+
+      {/* Universal Vessel Contact Intelligence — modal overlay */}
+      <Suspense fallback={null}>
+        {contactIntelOpen && (
+          <UniversalVesselContactFinder
+            isOpen={contactIntelOpen}
+            onClose={() => setContactIntelOpen(false)}
             selectedVessel={selectedVessel}
           />
         )}
