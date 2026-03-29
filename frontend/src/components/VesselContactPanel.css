@@ -533,3 +533,44 @@
 .cp-intel-icon  { font-size: 14px; }
 .cp-intel-title { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #00e5ff; text-transform: uppercase; }
 .cp-intel-badge { margin-left: auto; font-size: 9px; color: #607d8b; background: rgba(96,125,139,0.1); border-radius: 3px; padding: 2px 6px; }
+/* ── Inline contact display ─────────────────────────────────────── */
+.cp-contact-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+.cp-value-email {
+  color: #00e5ff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+.cp-value-web {
+  color: #7ab4d4;
+  font-size: 11px;
+  word-break: break-all;
+}
+.cp-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  color: #00e5ff;
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cp-action-btn:hover {
+  background: rgba(0, 229, 255, 0.18);
+  border-color: rgba(0, 229, 255, 0.4);
+  color: #fff;
+}

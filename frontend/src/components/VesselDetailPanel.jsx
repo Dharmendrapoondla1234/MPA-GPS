@@ -6,6 +6,7 @@ import {
 } from "../utils/vesselUtils";
 import { fetchVesselHistory, fetchRoutePrediction } from "../services/api";
 import VesselContactPanel from "./VesselContactPanel";
+import { StarButton } from "./PreferredShipsGrid";
 import "./VesselDetailPanel.css";
 
 function bq(val) {
@@ -174,7 +175,10 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
             {flag       && <span className="dp-flag-badge">{getCountryName(flag)}</span>}
           </div>
         </div>
-        <button className="dp-close" onClick={onClose}>✕</button>
+        <div className="dp-head-actions">
+          <StarButton vessel={vessel} className="dp-star-btn" />
+          <button className="dp-close" onClick={onClose}>✕</button>
+        </div>
       </div>
 
       {/* ══ STATUS STRIP ══ */}

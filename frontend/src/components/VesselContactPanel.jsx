@@ -48,16 +48,45 @@ function CopyBtn({ value, label }) {
   );
 }
 
-function ContactRow({ icon, label, value, href }) {
+function ContactRow({ icon, label, value, href, type }) {
   if (!value) return null;
+  // type: "email" | "phone" | "web" | "text"
+  const isEmail = type === "email" || (href && href.startsWith("mailto:"));
+  const isPhone = type === "phone";
+  const isWeb   = type === "web"   || (href && href.startsWith("http"));
+
   return (
     <div className="cp-contact-row">
       <span className="cp-icon">{icon}</span>
       <div className="cp-contact-body">
         <span className="cp-label">{label}</span>
-        {href
-          ? <a className="cp-value cp-link" href={href} target="_blank" rel="noopener noreferrer">{value}</a>
-          : <span className="cp-value">{value}</span>}
+        {isEmail && (
+          <div className="cp-contact-inline">
+            <span className="cp-value cp-value-email">{value}</span>
+            <a className="cp-action-btn" href={`mailto:${value}`} title="Open email client">
+              ✉ Mail
+            </a>
+          </div>
+        )}
+        {isPhone && (
+          <div className="cp-contact-inline">
+            <span className="cp-value">{value}</span>
+            <a className="cp-action-btn" href={`tel:${value.replace(/\s/g,"")}`} title="Call">
+              ☎ Call
+            </a>
+          </div>
+        )}
+        {isWeb && (
+          <div className="cp-contact-inline">
+            <span className="cp-value cp-value-web">{value}</span>
+            <a className="cp-action-btn" href={href} target="_blank" rel="noopener noreferrer" title="Open website">
+              🌐 Open
+            </a>
+          </div>
+        )}
+        {!isEmail && !isPhone && !isWeb && (
+          <span className="cp-value">{value}</span>
+        )}
       </div>
       <CopyBtn value={value} label={label} />
     </div>
@@ -79,12 +108,12 @@ function CompanyCard({ title, company, accent }) {
       </div>
       <div className="cp-company-name">{company.company_name}</div>
       {company.registered_address && <div className="cp-address">📍 {company.registered_address}</div>}
-      <ContactRow icon="✉" label="Email"     value={company.email}           href={company.email ? `mailto:${company.email}` : null} />
-      <ContactRow icon="✉" label="Alt Email" value={company.email_secondary} href={company.email_secondary ? `mailto:${company.email_secondary}` : null} />
-      <ContactRow icon="☎" label="Phone"     value={company.phone} />
-      <ContactRow icon="☎" label="Alt Phone" value={company.phone_secondary} />
-      {company.website && <ContactRow icon="🌐" label="Website" value={company.website} href={company.website.startsWith("http") ? company.website : `https://${company.website}`} />}
-      {company.linkedin && <ContactRow icon="💼" label="LinkedIn" value="View Profile" href={company.linkedin} />}
+      <ContactRow icon="✉" label="Email"     value={company.email}           type="email" />
+      <ContactRow icon="✉" label="Alt Email" value={company.email_secondary} type="email" />
+      <ContactRow icon="☎" label="Phone"     value={company.phone}           type="phone" />
+      <ContactRow icon="☎" label="Alt Phone" value={company.phone_secondary} type="phone" />
+      {company.website && <ContactRow icon="🌐" label="Website" value={company.website} href={company.website.startsWith("http") ? company.website : `https://${company.website}`} type="web" />}
+      {company.linkedin && <ContactRow icon="💼" label="LinkedIn" value="View Profile" href={company.linkedin} type="web" />}
       {company.last_verified_at && <div className="cp-verified-date">✓ Verified {new Date(company.last_verified_at).toLocaleDateString()}</div>}
     </div>
   );
@@ -107,14 +136,14 @@ function AgentCard({ agent }) {
         )}
       </div>
       {agent.port_name && <div className="cp-agent-port">⚓ {agent.port_name}{agent.port_code ? ` (${agent.port_code})` : ""}</div>}
-      <ContactRow icon="✉" label="Email"   value={agent.email}     href={agent.email ? `mailto:${agent.email}` : null} />
+      <ContactRow icon="✉" label="Email"   value={agent.email}     type="email" />
       {agent.email_ops && agent.email_ops !== agent.email && (
-        <ContactRow icon="✉" label="Ops Email" value={agent.email_ops} href={`mailto:${agent.email_ops}`} />
+        <ContactRow icon="✉" label="Ops Email" value={agent.email_ops} type="email" />
       )}
-      <ContactRow icon="☎" label="Phone"   value={agent.phone} />
-      {agent.phone_24h && <ContactRow icon="🆘" label="24h" value={agent.phone_24h} />}
+      <ContactRow icon="☎" label="Phone"   value={agent.phone}    type="phone" />
+      {agent.phone_24h && <ContactRow icon="🆘" label="24h" value={agent.phone_24h} type="phone" />}
       {agent.vhf_channel && <ContactRow icon="📡" label="VHF" value={agent.vhf_channel} />}
-      {agent.website && <ContactRow icon="🌐" label="Website" value={agent.website} href={agent.website.startsWith("http") ? agent.website : `https://${agent.website}`} />}
+      {agent.website && <ContactRow icon="🌐" label="Website" value={agent.website} href={agent.website.startsWith("http") ? agent.website : `https://${agent.website}`} type="web" />}
       <div className="cp-agent-meta">
         {agent.confidence != null && confidenceBadge(agent.confidence)}
         {agent.data_source && <span className="cp-agent-source">{agent.data_source}</span>}

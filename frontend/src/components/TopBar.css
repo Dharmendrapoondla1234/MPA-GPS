@@ -261,6 +261,9 @@
 .tb-btn-alerts.active  { color: #ff3355;  border-color: rgba(255,51,85,0.45);   background: rgba(255,51,85,0.10);  }
 .tb-btn-heatmap.active { color: #fd9644;  border-color: rgba(253,150,68,0.45);  background: rgba(253,150,68,0.10); }
 .tb-btn-prefs.active   { color: #7cdcff;  border-color: rgba(124,220,255,0.45); background: rgba(124,220,255,0.10);}
+.tb-btn-preferred { position: relative; }
+.tb-btn-preferred.active { color: #ffaa00; border-color: rgba(255,170,0,0.45); background: rgba(255,170,0,0.12); }
+.tb-btn-preferred:hover  { color: #ffaa00; border-color: rgba(255,170,0,0.3);  background: rgba(255,170,0,0.08); }
 
 .tb-divider-v {
   width: 1px; height: 18px;

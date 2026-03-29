@@ -445,3 +445,11 @@
   .dp-hero { padding:10px 12px 10px; }
   .dp-speed-num { font-size:38px; }
 }
+/* ── Star button in panel header ────────────────────────────────── */
+.dp-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+ 

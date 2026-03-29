@@ -9,6 +9,7 @@ export default function TopBar({
   nextRefresh, loading, onRefresh, panelOpen, onTogglePanel,
   user, onLogout, onSearchEnter, lastUpdated,
   portPanelOpen, onTogglePortPanel,
+  preferredOpen, onTogglePreferred, preferredCount,
   compareOpen, onToggleCompare,
   alertsOpen,  onToggleAlerts,  alertCount,
   heatmapOpen, onToggleHeatmap,
@@ -171,6 +172,18 @@ export default function TopBar({
           </button>
 
           <div className="tb-divider-v" />
+
+          <button
+            className={`tb-btn tb-btn-preferred ${preferredOpen?"active":""}`}
+            onClick={onTogglePreferred}
+            title="Preferred Ships"
+            style={{position:"relative"}}
+          >
+            <span style={{fontSize:"14px",lineHeight:1}}>★</span>
+            {preferredCount > 0 && (
+              <span className="tb-pref-badge">{preferredCount}</span>
+            )}
+          </button>
 
           <button className={`tb-btn tb-btn-compare ${compareOpen?"active":""}`} onClick={onToggleCompare} title="Vessel Comparison">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

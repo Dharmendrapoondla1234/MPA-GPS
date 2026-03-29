@@ -9,6 +9,7 @@ import ErrorBanner from "./components/ErrorBanner";
 import PortActivityPanel from "./components/PortActivityPanel";
 import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
+import PreferredShipsGrid from "./components/PreferredShipsGrid";
 import "./styles/App.css";
 
 const VesselComparison           = lazy(() => import("./components/Vesselcomparison"));
@@ -221,6 +222,8 @@ export default function App() {
         lastUpdated={lastUpdated} user={user} onLogout={handleLogout}
         onSearchEnter={handleSearchEnter}
         portPanelOpen={portPanelOpen} onTogglePortPanel={handleTogglePortPanel}
+        preferredOpen={preferredOpen}   onTogglePreferred={() => setPreferredOpen(p => !p)}
+        preferredCount={JSON.parse(localStorage.getItem("mpa_preferred_ships")||"[]").length}
         compareOpen={compareOpen}      onToggleCompare={openCompare}
         alertsOpen={alertsOpen}        onToggleAlerts={openAlerts}   alertCount={alertCount}
         heatmapOpen={heatmapOpen}      onToggleHeatmap={openHeatmap}
@@ -285,7 +288,19 @@ export default function App() {
           <div className="app-mobile-backdrop" onClick={handleCloseDetail} style={{ zIndex: 45 }} />
         )}
 
-        <div className={`app-right-panel ${selectedVessel ? "open" : "closed"}`}>
+        <div
+          className={`app-right-panel ${selectedVessel ? "open" : "closed"}`}
+          style={selectedVessel ? { width: panelWidth, minWidth: panelWidth } : {}}
+          ref={panelRef}
+        >
+          {/* Drag-to-resize handle on the left edge */}
+          {selectedVessel && (
+            <div
+              className="app-panel-resize-handle"
+              onMouseDown={startResize}
+              title="Drag to resize panel"
+            />
+          )}
           <MemoVesselDetailPanel
             vessel={selectedVessel}    onClose={handleCloseDetail}
             onShowTrail={setTrailData} onShowPredictRoute={setPredictRoute}
@@ -293,6 +308,14 @@ export default function App() {
         </div>
 
       </div>
+
+      {/* ── Preferred Ships Grid ── */}
+      <PreferredShipsGrid
+        vessels={vessels}
+        onSelectVessel={handleSelectVessel}
+        isOpen={preferredOpen}
+        onClose={() => setPreferredOpen(false)}
+      />
 
       <div className={`app-bottom-dock${dockOpen ? " open" : ""}`}>
         <Suspense fallback={null}>
