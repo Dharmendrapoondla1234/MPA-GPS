@@ -6,6 +6,11 @@ const router   = express.Router();
 const { getVesselContacts, getPortAgents, upsertContactData } = require("../services/contacts");
 const { enrichVesselContact, batchEnrichArrivals, enrichPortAgents } = require("../services/contactEnricher");
 const { getDBStats } = require("../services/portAgentDB");
+const {
+  upsertCompanyContact,
+  upsertPortAgentContact,
+  upsertEquasisData,
+} = require("../services/bigquery");
 const logger   = require("../utils/logger");
 
 // ── Timeout helper ────────────────────────────────────────────────
@@ -19,7 +24,41 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, race]).finally(() => clearTimeout(timer));
 }
 
-// ── Normalizers ───────────────────────────────────────────────────
+// ── Helper: persist enriched data to BigQuery in background ───────
+function persistContactsToBQ(imo, final, portAgents) {
+  if (!imo) return;
+  // Persist each company type
+  const companies = [
+    { ...(final.owner        || {}), company_type: "owner"        },
+    { ...(final.operator     || {}), company_type: "operator"     },
+    { ...(final.manager      || {}), company_type: "ism_manager"  },
+    { ...(final.ship_manager || {}), company_type: "ship_manager" },
+  ];
+  for (const c of companies) {
+    if (c.company_name) {
+      upsertCompanyContact(String(imo), c).catch(() => {});
+    }
+  }
+  // Persist Equasis summary
+  if (final.owner?.company_name || final.vessel_name) {
+    upsertEquasisData(String(imo), {
+      vessel_name:      final.vessel_name || "",
+      owner_name:       final.owner?.company_name || "",
+      operator_name:    final.operator?.company_name || "",
+      ship_manager:     final.ship_manager?.company_name || "",
+      ism_manager:      final.manager?.company_name || "",
+      registered_owner: final.owner?.company_name || "",
+      flag:             final.flag || "",
+      vessel_type:      final.vessel_type || "",
+    }).catch(() => {});
+  }
+  // Persist port agents
+  for (const agent of portAgents || []) {
+    if (agent.port_code || agent.port_name) {
+      upsertPortAgentContact(agent.port_code || agent.port_name, agent).catch(() => {});
+    }
+  }
+}
 function normalizeCompany(c) {
   if (!c) return null;
   return {
@@ -142,6 +181,9 @@ router.get("/vessel-contact", async (req, res, next) => {
       imo, mmsi, name, enrich, currentPort, nextPort, vesselType,
     });
 
+    // Persist enriched data to BigQuery (non-blocking)
+    if (enrichedData && imo) persistContactsToBQ(imo, final, portAgents);
+
     const nc = normalizeCompany(owner);
 
     res.json({
@@ -205,6 +247,9 @@ router.get("/vessel/:imo", async (req, res, next) => {
     const { final, owner, portAgents, enrichedData, bqData } = await resolveContacts({
       imo, mmsi, name, enrich, currentPort, nextPort, vesselType, forceRefresh,
     });
+
+    // Persist enriched data to BigQuery (non-blocking)
+    if (enrichedData && imo) persistContactsToBQ(imo, final, portAgents);
 
     res.json({
       success: true,

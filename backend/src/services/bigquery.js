@@ -574,4 +574,271 @@ module.exports = {
   getPortActivity,
   healthCheck,
   warmCache,
+  // Preferred ships
+  getPreferredShips,
+  addPreferredShip,
+  removePreferredShip,
+  clearPreferredShips,
+  // Equasis data
+  upsertEquasisData,
+  getEquasisData,
+  // Company contacts
+  upsertCompanyContact,
+  getCompanyContacts,
+  // Port agent contacts
+  upsertPortAgentContact,
+  getPortAgentContacts,
 };
+
+// ════════════════════════════════════════════════════════════════
+//  PREFERRED SHIPS  (per-user watchlist stored in BigQuery)
+// ════════════════════════════════════════════════════════════════
+const T_PREFERRED = `\`${PROJECT}.${DATASET}.MPA_Preferred_Ships\``;
+const T_EQUASIS   = `\`${PROJECT}.${DATASET}.MPA_Equasis_Data\``;
+const T_CONTACTS  = `\`${PROJECT}.${DATASET}.MPA_Company_Contacts\``;
+const T_PORT_AGENTS = `\`${PROJECT}.${DATASET}.MPA_Port_Agent_Contacts\``;
+
+/* CREATE TABLE DDL (run once in BigQuery console):
+
+CREATE TABLE IF NOT EXISTS `photons-377606.MPA.MPA_Preferred_Ships` (
+  user_id STRING NOT NULL,
+  imo_number STRING NOT NULL,
+  vessel_name STRING,
+  vessel_type STRING,
+  flag STRING,
+  added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE TABLE IF NOT EXISTS `photons-377606.MPA.MPA_Equasis_Data` (
+  imo_number STRING NOT NULL,
+  vessel_name STRING,
+  owner_name STRING,
+  operator_name STRING,
+  ship_manager STRING,
+  ism_manager STRING,
+  registered_owner STRING,
+  flag STRING,
+  gross_tonnage INT64,
+  year_built INT64,
+  vessel_type STRING,
+  fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE TABLE IF NOT EXISTS `photons-377606.MPA.MPA_Company_Contacts` (
+  imo_number STRING NOT NULL,
+  company_name STRING,
+  company_type STRING,
+  email STRING,
+  email_secondary STRING,
+  phone STRING,
+  phone_secondary STRING,
+  website STRING,
+  registered_address STRING,
+  linkedin STRING,
+  confidence FLOAT64,
+  data_source STRING,
+  last_verified_at TIMESTAMP,
+  upserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE TABLE IF NOT EXISTS `photons-377606.MPA.MPA_Port_Agent_Contacts` (
+  port_code STRING NOT NULL,
+  agency_company STRING,
+  agent_name STRING,
+  email STRING,
+  email_ops STRING,
+  phone STRING,
+  phone_24h STRING,
+  vhf_channel STRING,
+  website STRING,
+  vessel_type_served STRING,
+  confidence FLOAT64,
+  data_source STRING,
+  upserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
+*/
+
+async function getPreferredShips(userId) {
+  if (!userId) return [];
+  try {
+    const [rows] = await bigquery.query({
+      query: `SELECT imo_number, vessel_name, vessel_type, flag, added_at
+              FROM ${T_PREFERRED}
+              WHERE user_id = '${sanitize(userId)}'
+              ORDER BY added_at DESC LIMIT 50`,
+      location: BQ_LOCATION,
+    });
+    return rows;
+  } catch (e) {
+    logger.warn("[BQ] getPreferredShips:", e.message);
+    return [];
+  }
+}
+
+async function addPreferredShip(userId, vessel) {
+  if (!userId || !vessel?.imo_number) return;
+  const imo  = sanitize(String(vessel.imo_number));
+  const name = sanitize(vessel.vessel_name || "");
+  const type = sanitize(vessel.vessel_type || "");
+  const flag = sanitize(vessel.flag || "");
+  try {
+    // upsert: delete old row then insert
+    await bigquery.query({
+      query: `DELETE FROM ${T_PREFERRED} WHERE user_id='${sanitize(userId)}' AND imo_number='${imo}'`,
+      location: BQ_LOCATION,
+    });
+    await bigquery.query({
+      query: `INSERT INTO ${T_PREFERRED} (user_id, imo_number, vessel_name, vessel_type, flag, added_at)
+              VALUES ('${sanitize(userId)}', '${imo}', '${name}', '${type}', '${flag}', CURRENT_TIMESTAMP())`,
+      location: BQ_LOCATION,
+    });
+  } catch (e) {
+    logger.warn("[BQ] addPreferredShip:", e.message);
+    throw e;
+  }
+}
+
+async function removePreferredShip(userId, imo) {
+  if (!userId || !imo) return;
+  try {
+    await bigquery.query({
+      query: `DELETE FROM ${T_PREFERRED} WHERE user_id='${sanitize(userId)}' AND imo_number='${sanitize(String(imo))}'`,
+      location: BQ_LOCATION,
+    });
+  } catch (e) {
+    logger.warn("[BQ] removePreferredShip:", e.message);
+    throw e;
+  }
+}
+
+async function clearPreferredShips(userId) {
+  if (!userId) return;
+  try {
+    await bigquery.query({
+      query: `DELETE FROM ${T_PREFERRED} WHERE user_id='${sanitize(userId)}'`,
+      location: BQ_LOCATION,
+    });
+  } catch (e) {
+    logger.warn("[BQ] clearPreferredShips:", e.message);
+    throw e;
+  }
+}
+
+// ─ Equasis data store ─────────────────────────────────────────────
+async function upsertEquasisData(imo, data) {
+  if (!imo) return;
+  const s = (v) => sanitize(String(v || ""));
+  try {
+    await bigquery.query({
+      query: `DELETE FROM ${T_EQUASIS} WHERE imo_number='${s(imo)}'`,
+      location: BQ_LOCATION,
+    });
+    await bigquery.query({
+      query: `INSERT INTO ${T_EQUASIS}
+        (imo_number, vessel_name, owner_name, operator_name, ship_manager, ism_manager,
+         registered_owner, flag, gross_tonnage, year_built, vessel_type, fetched_at)
+        VALUES ('${s(imo)}','${s(data.vessel_name)}','${s(data.owner_name)}',
+                '${s(data.operator_name)}','${s(data.ship_manager)}','${s(data.ism_manager)}',
+                '${s(data.registered_owner)}','${s(data.flag)}',
+                ${parseInt(data.gross_tonnage)||0}, ${parseInt(data.year_built)||0},
+                '${s(data.vessel_type)}', CURRENT_TIMESTAMP())`,
+      location: BQ_LOCATION,
+    });
+  } catch (e) {
+    logger.warn("[BQ] upsertEquasisData:", e.message);
+  }
+}
+
+async function getEquasisData(imo) {
+  if (!imo) return null;
+  try {
+    const [rows] = await bigquery.query({
+      query: `SELECT * FROM ${T_EQUASIS} WHERE imo_number='${sanitize(String(imo))}' LIMIT 1`,
+      location: BQ_LOCATION,
+    });
+    return rows[0] || null;
+  } catch (e) {
+    logger.warn("[BQ] getEquasisData:", e.message);
+    return null;
+  }
+}
+
+// ─ Company contacts store ─────────────────────────────────────────
+async function upsertCompanyContact(imo, contact) {
+  if (!imo) return;
+  const s = (v) => sanitize(String(v || ""));
+  try {
+    await bigquery.query({
+      query: `DELETE FROM ${T_CONTACTS} WHERE imo_number='${s(imo)}' AND company_name='${s(contact.company_name)}'`,
+      location: BQ_LOCATION,
+    });
+    await bigquery.query({
+      query: `INSERT INTO ${T_CONTACTS}
+        (imo_number, company_name, company_type, email, email_secondary, phone,
+         phone_secondary, website, registered_address, linkedin, confidence, data_source,
+         last_verified_at, upserted_at)
+        VALUES ('${s(imo)}','${s(contact.company_name)}','${s(contact.company_type)}',
+                '${s(contact.email)}','${s(contact.email_secondary)}','${s(contact.phone)}',
+                '${s(contact.phone_secondary)}','${s(contact.website)}',
+                '${s(contact.registered_address)}','${s(contact.linkedin)}',
+                ${parseFloat(contact.confidence)||0},'${s(contact.data_source)}',
+                CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())`,
+      location: BQ_LOCATION,
+    });
+  } catch (e) {
+    logger.warn("[BQ] upsertCompanyContact:", e.message);
+  }
+}
+
+async function getCompanyContacts(imo) {
+  if (!imo) return [];
+  try {
+    const [rows] = await bigquery.query({
+      query: `SELECT * FROM ${T_CONTACTS} WHERE imo_number='${sanitize(String(imo))}' ORDER BY upserted_at DESC`,
+      location: BQ_LOCATION,
+    });
+    return rows;
+  } catch (e) {
+    logger.warn("[BQ] getCompanyContacts:", e.message);
+    return [];
+  }
+}
+
+// ─ Port agent contacts store ──────────────────────────────────────
+async function upsertPortAgentContact(portCode, agent) {
+  if (!portCode) return;
+  const s = (v) => sanitize(String(v || ""));
+  try {
+    await bigquery.query({
+      query: `DELETE FROM ${T_PORT_AGENTS} WHERE port_code='${s(portCode)}' AND agency_company='${s(agent.agency_company)}'`,
+      location: BQ_LOCATION,
+    });
+    await bigquery.query({
+      query: `INSERT INTO ${T_PORT_AGENTS}
+        (port_code, agency_company, agent_name, email, email_ops, phone, phone_24h,
+         vhf_channel, website, vessel_type_served, confidence, data_source, upserted_at)
+        VALUES ('${s(portCode)}','${s(agent.agency_company)}','${s(agent.agent_name)}',
+                '${s(agent.email)}','${s(agent.email_ops)}','${s(agent.phone)}',
+                '${s(agent.phone_24h)}','${s(agent.vhf_channel)}','${s(agent.website)}',
+                '${s(agent.vessel_type_served||"ALL")}',${parseFloat(agent.confidence)||0},
+                '${s(agent.data_source)}', CURRENT_TIMESTAMP())`,
+      location: BQ_LOCATION,
+    });
+  } catch (e) {
+    logger.warn("[BQ] upsertPortAgentContact:", e.message);
+  }
+}
+
+async function getPortAgentContacts(portCode) {
+  if (!portCode) return [];
+  try {
+    const [rows] = await bigquery.query({
+      query: `SELECT * FROM ${T_PORT_AGENTS} WHERE port_code='${sanitize(portCode)}' ORDER BY confidence DESC`,
+      location: BQ_LOCATION,
+    });
+    return rows;
+  } catch (e) {
+    logger.warn("[BQ] getPortAgentContacts:", e.message);
+    return [];
+  }
+}

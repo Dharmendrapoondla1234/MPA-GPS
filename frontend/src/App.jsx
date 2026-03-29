@@ -9,7 +9,7 @@ import ErrorBanner from "./components/ErrorBanner";
 import PortActivityPanel from "./components/PortActivityPanel";
 import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
-import PreferredShipsGrid from "./components/PreferredShipsGrid";
+import PreferredShipsGrid, { loadPreferredFromAPI, usePreferred } from "./components/PreferredShipsGrid";
 import "./styles/App.css";
 
 const VesselComparison           = lazy(() => import("./components/Vesselcomparison"));
@@ -103,9 +103,49 @@ export default function App() {
   const [prefsOpen,       setPrefsOpen]        = useState(false);
   const [agentIntelOpen,  setAgentIntelOpen]   = useState(false);
   const [contactIntelOpen, setContactIntelOpen] = useState(false);
+  const [preferredOpen,   setPreferredOpen]    = useState(false);
   const mapRef = useRef(null);
 
+  // ── Right-panel drag-to-resize ────────────────────────────────
+  const panelRef      = useRef(null);
+  const [panelWidth, setPanelWidth] = useState(420);
+  const resizeDragging = useRef(false);
+  const resizeStartX   = useRef(0);
+  const resizeStartW   = useRef(0);
+
+  const startResize = useCallback((e) => {
+    e.preventDefault();
+    resizeDragging.current = true;
+    resizeStartX.current   = e.clientX;
+    resizeStartW.current   = panelRef.current?.offsetWidth || panelWidth;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor     = "ew-resize";
+  }, [panelWidth]);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizeDragging.current) return;
+      const delta = resizeStartX.current - e.clientX; // panel is on right → drag left = wider
+      const newW  = Math.min(800, Math.max(320, resizeStartW.current + delta));
+      setPanelWidth(newW);
+    };
+    const onUp = () => {
+      if (!resizeDragging.current) return;
+      resizeDragging.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor     = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup",   onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup",   onUp);
+    };
+  }, []);
+
   const { vessels: rawVessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
+  const preferredList  = usePreferred();
+  const preferredCount = preferredList.length;
 
   // Client-side flag filter (flag is not a BigQuery param, applied here)
   const vessels = useMemo(() => {
@@ -165,6 +205,8 @@ export default function App() {
 
   const handleLogout         = useCallback(() => {
     logoutUser(); setUser(null); resetFreeTimer(); setFreeExpired(false);
+    // Clear in-memory watchlist so next user doesn't see previous user's ships
+    loadPreferredFromAPI();
   }, []);
 
   const handleSearchEnter    = useCallback(() => {
@@ -182,6 +224,8 @@ export default function App() {
     setUser(u); clearInterval(freeIntervalRef.current);
     try { sessionStorage.removeItem(FREE_KEY); } catch {}
     setFreeExpired(false);
+    // Load this user's watchlist from BigQuery
+    loadPreferredFromAPI();
   }, []);
 
   // Stable panel toggles — one panel open at a time
@@ -190,7 +234,7 @@ export default function App() {
   const openHeatmap    = useCallback(() => { setHeatmapOpen(p => !p);    setCompareOpen(false); setAlertsOpen(false);  setPrefsOpen(false); setAgentIntelOpen(false); }, []);
   const openPrefs      = useCallback(() => { setPrefsOpen(p => !p);      setCompareOpen(false); setAlertsOpen(false);  setHeatmapOpen(false); setAgentIntelOpen(false); }, []);
   const openAgentIntel = useCallback(() => { setAgentIntelOpen(p => !p); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); setContactIntelOpen(false); }, []);
-  //const openContactIntel = useCallback(() => { setContactIntelOpen(p => !p); setAgentIntelOpen(false); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
+  const openContactIntel = useCallback(() => { setContactIntelOpen(p => !p); setAgentIntelOpen(false); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
 
   // Stable inline handlers — previously created new functions on every render
   const handleTogglePanel      = useCallback(() => setPanelOpen(p => !p), []);
@@ -223,12 +267,13 @@ export default function App() {
         onSearchEnter={handleSearchEnter}
         portPanelOpen={portPanelOpen} onTogglePortPanel={handleTogglePortPanel}
         preferredOpen={preferredOpen}   onTogglePreferred={() => setPreferredOpen(p => !p)}
-        preferredCount={JSON.parse(localStorage.getItem("mpa_preferred_ships")||"[]").length}
+        preferredCount={preferredCount}
         compareOpen={compareOpen}      onToggleCompare={openCompare}
         alertsOpen={alertsOpen}        onToggleAlerts={openAlerts}   alertCount={alertCount}
         heatmapOpen={heatmapOpen}      onToggleHeatmap={openHeatmap}
         prefsOpen={prefsOpen}          onTogglePrefs={openPrefs}
         agentIntelOpen={agentIntelOpen} onToggleAgentIntel={openAgentIntel}
+        contactIntelOpen={contactIntelOpen} onToggleContactIntel={openContactIntel}
       />
 
       <ErrorBanner message={error} onRetry={refresh} />

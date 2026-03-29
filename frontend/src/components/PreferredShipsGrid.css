@@ -200,3 +200,227 @@
 .star-btn:hover { background: rgba(255,170,0,0.1); color: #ffaa00; border-color: rgba(255,170,0,0.4); }
 .star-btn--on { background: rgba(255,170,0,0.12); color: #ffaa00; border-color: rgba(255,170,0,0.4); }
 .star-btn--on:hover { background: rgba(255,50,80,0.1); color: #ff6680; border-color: rgba(255,50,80,0.3); }
+
+/* ── v6 additions ───────────────────────────────────────────── */
+
+/* Resize handle on right edge of panel */
+.psg-resize-handle {
+  position: absolute;
+  top: 0; right: -4px; bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 10;
+  border-radius: 0 12px 12px 0;
+  transition: background 0.15s;
+}
+.psg-resize-handle:hover { background: rgba(0,229,255,0.18); }
+
+/* Split body layout */
+.psg-body-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.psg-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  transition: flex 0.2s ease;
+}
+
+.psg-body-narrow {
+  flex: 0 0 54%;
+  min-width: 220px;
+}
+
+/* Card contact button */
+.psg-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.psg-contact-btn {
+  background: rgba(0,229,255,0.08);
+  border: 1px solid rgba(0,229,255,0.15);
+  color: #4a9abb;
+  border-radius: 4px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.psg-contact-btn:hover,
+.psg-contact-btn.active {
+  background: rgba(0,229,255,0.18);
+  color: #00e5ff;
+  border-color: rgba(0,229,255,0.4);
+}
+.psg-contact-btn-sm {
+  background: rgba(0,229,255,0.06);
+  border: 1px solid rgba(0,229,255,0.12);
+  color: #4a9abb;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+.psg-contact-btn-sm:hover,
+.psg-contact-btn-sm.active { background: rgba(0,229,255,0.18); color: #00e5ff; }
+
+/* Card active highlight when contact panel open */
+.psg-card-active {
+  border-color: rgba(0,229,255,0.4) !important;
+  box-shadow: 0 0 0 1px rgba(0,229,255,0.2);
+}
+
+/* ── Inline Contact Detail Panel ─────────────────────────────── */
+.psg-contact-panel {
+  flex: 0 0 46%;
+  min-width: 240px;
+  border-left: 1px solid rgba(0,229,255,0.12);
+  display: flex;
+  flex-direction: column;
+  background: rgba(0,8,20,0.6);
+  overflow: hidden;
+}
+
+.psg-cp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0,229,255,0.1);
+  font-size: 12px;
+  font-weight: 700;
+  color: #00e5ff;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.psg-contact-close {
+  background: transparent;
+  border: none;
+  color: #4a7a9b;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.psg-contact-close:hover { color: #e8f6ff; }
+
+.psg-cp-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: #4a9abb;
+  font-size: 12px;
+  flex: 1;
+}
+.psg-cp-loading-sub { font-size: 10px; color: #2a5a7b; }
+
+.psg-cp-error {
+  padding: 16px;
+  color: #fc5c65;
+  font-size: 12px;
+}
+
+.psg-cp-empty {
+  padding: 24px 16px;
+  color: #4a7a9b;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.psg-cp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+/* Contact sections */
+.psg-contact-section {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.psg-contact-section:last-child { border-bottom: none; }
+
+.psg-cs-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4a9abb;
+  padding-left: 8px;
+  border-left: 3px solid #00e5ff;
+  margin-bottom: 8px;
+}
+
+.psg-cs-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c8dff0;
+  margin-bottom: 5px;
+}
+
+.psg-cs-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #4a9abb;
+  padding: 2px 0;
+  flex-wrap: wrap;
+}
+
+.psg-cs-link {
+  color: #00e5ff;
+  text-decoration: none;
+  word-break: break-all;
+}
+.psg-cs-link:hover { text-decoration: underline; }
+
+.psg-copy-btn {
+  background: transparent;
+  border: none;
+  color: #2a5a7b;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  transition: color 0.12s;
+  flex-shrink: 0;
+}
+.psg-copy-btn:hover { color: #00e5ff; }
+
+.psg-agent-row {
+  background: rgba(255,170,0,0.04);
+  border: 1px solid rgba(255,170,0,0.1);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.psg-agent-port {
+  font-size: 10px;
+  color: #ffaa00;
+  margin-bottom: 4px;
+}
+
+/* Spinner */
+.psg-spinner {
+  width: 20px; height: 20px;
+  border: 2px solid rgba(0,229,255,0.15);
+  border-top-color: #00e5ff;
+  border-radius: 50%;
+  animation: psg-spin 0.7s linear infinite;
+}
+@keyframes psg-spin { to { transform: rotate(360deg); } }

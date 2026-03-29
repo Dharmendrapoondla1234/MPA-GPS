@@ -14,6 +14,7 @@ const aiTrajRoutes = require("./routes/ai_trajectory");
 const weatherRoutes = require("./routes/weather");
 const contactRoutes     = require("./routes/contacts");
 const intelligenceRoutes = require("./routes/intelligence");
+const preferredRoutes   = require("./routes/preferred");
 const logger = require("./utils/logger");
 const { warmCache, bigquery, BQ_LOCATION, T } = require("./services/bigquery");
 const maritimeRouter = require("./services/maritimeRouter");
@@ -80,6 +81,7 @@ app.use("/api/contacts", contactRoutes);      // vessel contact enrichment
 app.use("/api", contactRoutes);               // spec endpoint: GET /api/vessel-contact
 app.use("/api/intelligence", intelligenceRoutes); // domain pipeline + efficiency scoring
 app.use("/api", intelligenceRoutes);          // /api/vessel/:imo/contact, /api/vessels/low-efficiency
+app.use("/api/preferred", preferredRoutes);   // per-user watchlist
 
 // ── DEBUG: test full enrichment pipeline ─────────────────────────
 app.get("/debug/enrich/:imo", async (req, res) => {

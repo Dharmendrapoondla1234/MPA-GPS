@@ -297,3 +297,28 @@ export function getCurrentUser() {
   try { return JSON.parse(localStorage.getItem("mt_user")); }
   catch { return null; }
 }
+// ── PREFERRED SHIPS (BigQuery-backed, per-user) ───────────────────
+export async function fetchPreferredShips() {
+  return call("/preferred", { bustCache: true });
+}
+
+export async function addPreferredShipAPI(vessel) {
+  return call("/preferred", {
+    method: "POST",
+    body: {
+      imo_number:  String(vessel.imo_number || ""),
+      vessel_name: vessel.vessel_name || vessel.name || "",
+      vessel_type: vessel.vessel_type || "",
+      flag:        vessel.flag || "",
+    },
+    bustCache: true,
+  });
+}
+
+export async function removePreferredShipAPI(imo) {
+  return call(`/preferred/${encodeURIComponent(imo)}`, { method: "DELETE", bustCache: true });
+}
+
+export async function clearPreferredShipsAPI() {
+  return call("/preferred", { method: "DELETE", bustCache: true });
+}
