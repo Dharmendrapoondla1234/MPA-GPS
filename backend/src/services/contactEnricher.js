@@ -137,15 +137,22 @@ async function equasisLogin() {
   const email = process.env.EQUASIS_EMAIL, pass = process.env.EQUASIS_PASSWORD;
   if (!email || !pass) { logger.warn("[equasis] EQUASIS_EMAIL/PASSWORD not set in environment"); return null; }
   try {
-    const pageRes = await safeFetch(`${EQ_BASE}/public/HomePage`, {}, 10000);
+    // Step 1: GET public home to grab initial session cookies
+    const pageRes = await safeFetch(`${EQ_BASE}/public/HomePage`, {
+      headers: { "Accept": "text/html,application/xhtml+xml" },
+    }, 10000);
     const pageCookies = getAllCookies(pageRes);
+    logger.info(`[equasis] page cookies: ${pageCookies.slice(0, 80)}`);
 
-    const loginRes = await safeFetch(`${EQ_BASE}/authen/HomePage?fs=Search`, {
+    // Step 2: POST login — correct URL is authen/HomePage?fs=HomePage (not fs=Search)
+    const loginRes = await safeFetch(`${EQ_BASE}/authen/HomePage?fs=HomePage`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "Cookie": pageCookies,
         "Referer": `${EQ_BASE}/public/HomePage`,
+        "Accept": "text/html,application/xhtml+xml",
+        "Origin": "https://www.equasis.org",
       },
       body: new URLSearchParams({ j_email: email, j_password: pass, submit: "Login" }),
       redirect: "follow",
@@ -153,86 +160,192 @@ async function equasisLogin() {
 
     const loginCookies = getAllCookies(loginRes);
     const allCookies = [pageCookies, loginCookies].filter(Boolean).join("; ");
-    const body = await loginRes.text();
-    const ok = body.toLowerCase().includes("logout") ||
-               body.toLowerCase().includes("welcome") ||
-               loginRes.url.includes("authen");
-    if (!ok) { logger.warn("[equasis] Login failed — check credentials or Equasis is blocking"); return null; }
-    _eqCookies = allCookies; _eqCookieTs = Date.now();
-    logger.info("[equasis] Login OK");
+    const bodyText = await loginRes.text();
+
+    // Login success: page contains "Logout" link or "Search" form, NOT "Invalid" or login form again
+    const bodyLower = bodyText.toLowerCase();
+    const failed = bodyLower.includes("invalid") || bodyLower.includes("incorrect") ||
+                   bodyLower.includes("j_password") || bodyLower.includes("authentication failed");
+    const ok = !failed && (bodyLower.includes("logout") || bodyLower.includes("search") ||
+                           loginRes.url.includes("authen/HomePage"));
+
+    logger.info(`[equasis] login status=${loginRes.status} finalUrl=${loginRes.url} ok=${ok}`);
+    if (!ok) { logger.warn("[equasis] Login failed — check EQUASIS_EMAIL/PASSWORD env vars"); return null; }
+
+    _eqCookies = allCookies;
+    _eqCookieTs = Date.now();
+    logger.info(`[equasis] Login OK — cookies: ${allCookies.slice(0, 120)}`);
     return allCookies;
   } catch (err) { logger.warn("[equasis] Login error:", err.message); return null; }
 }
 
 function parseEquasisHtml(html) {
-  const strip = s => (s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  function extractAfterLabel(label) {
-    const re = new RegExp(label + "[\\s\\S]{0,400}?<td[^>]*>([\\s\\S]{3,300}?)<\\/td>", "i");
+  const strip = s => (s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&")
+                               .replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+
+  // Equasis ShipInfo page renders company data in table rows like:
+  // <tr><td class="...">Registered owner</td><td class="..."><a href="...">COMPANY NAME</a></td></tr>
+  // We extract the text content of the <td> that follows each label <td>
+
+  function extractAfterLabel(labelPattern) {
+    // Match: <td>LABEL</td> ... <td>VALUE</td> within the same <tr>
+    const patterns = [
+      // Inside a table row — label td then value td
+      new RegExp(`<td[^>]*>[^<]*${labelPattern}[^<]*<\/td>\s*<td[^>]*>([\s\S]{2,200}?)<\/td>`, "i"),
+      // With extra cells in between (colspan etc)
+      new RegExp(`${labelPattern}[\s\S]{0,600}?<td[^>]*class="[^"]*info[^"]*"[^>]*>([\s\S]{2,200}?)<\/td>`, "i"),
+      // Fallback: label text anywhere followed by next td
+      new RegExp(`${labelPattern}[\s\S]{0,400}?<td[^>]*>([\s\S]{2,200}?)<\/td>`, "i"),
+    ];
+    for (const re of patterns) {
+      const m = re.exec(html);
+      if (!m) continue;
+      const val = strip(m[1]);
+      // Skip if too short, placeholder, or contains HTML tags (means we got a nested element we didn't strip)
+      if (!val || val.length < 2 || /^[-–]$/.test(val)) continue;
+      if (/^(n\/a|none|unknown|not available|-)$/i.test(val)) continue;
+      // Skip if it looks like a UI element (button text, navigation)
+      if (/^(search|login|logout|home|back|next|previous|submit)$/i.test(val)) continue;
+      return val;
+    }
+    return null;
+  }
+
+  // Also try extracting from <a> tags near company labels (Equasis links company names)
+  function extractLinkedName(labelPattern) {
+    const re = new RegExp(`${labelPattern}[\s\S]{0,500}?<a[^>]+href="[^"]*[Cc]ompany[^"]*"[^>]*>([^<]{3,100})<\/a>`, "i");
     const m = re.exec(html);
     if (!m) return null;
     const val = strip(m[1]);
-    if (!val || val.length < 3 || /^(-|n\/a|none|unknown)$/i.test(val)) return null;
-    return val;
+    return (val && val.length > 2) ? val : null;
   }
-  return {
-    owner:    extractAfterLabel("Registered owner"),
-    manager:  extractAfterLabel("ISM [Mm]anager") || extractAfterLabel("ISM Manager"),
-    shipMgr:  extractAfterLabel("Ship manager"),
-    operator: extractAfterLabel("Operator"),
-    flag:     extractAfterLabel("Flag"),
-    address:  strip((/Address[\s\S]{0,300}?<td[^>]*>([\s\S]{5,400}?)<\/td>/i.exec(html) || [])[1] || ""),
-  };
+
+  const owner   = extractLinkedName("Registered owner")   || extractAfterLabel("Registered owner");
+  const manager = extractLinkedName("ISM Manager")        || extractAfterLabel("ISM Manager") || extractAfterLabel("ISM manager");
+  const shipMgr = extractLinkedName("Ship manager")       || extractAfterLabel("Ship manager");
+  const operator= extractLinkedName("Operator")           || extractAfterLabel("(?<!ISM )[Oo]perator");
+  const flag    = extractAfterLabel("Flag");
+  const address = extractAfterLabel("Address");
+
+  return { owner, manager, shipMgr, operator, flag, address };
 }
 
 async function fetchFromEquasis(imo) {
   const cookies = await equasisLogin();
   if (!cookies) return null;
-  const hdrs = { "Cookie": cookies, "Accept": "text/html,application/xhtml+xml" };
+  const hdrs = {
+    "Cookie": cookies,
+    "Accept": "text/html,application/xhtml+xml",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Origin": "https://www.equasis.org",
+  };
+
+  let html = "";
+
   try {
-    // Strategy A: POST restricted/Search
-    const sRes = await safeFetch(`${EQ_BASE}/restricted/Search?fs=HomePage`, {
+    // ── STRATEGY A (correct flow from browser trace) ──────────────
+    // Step A1: POST to restricted/Search?fs=HomePage with the IMO as the search term
+    // This is the search form on the authenticated home page
+    const refA = `${EQ_BASE}/authen/HomePage?fs=HomePage`;
+    const searchRes = await safeFetch(`${EQ_BASE}/restricted/Search?fs=HomePage`, {
       method: "POST",
-      headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": `${EQ_BASE}/authen/HomePage?fs=Search` },
-      body: new URLSearchParams({ P_ENTREE_HOME: imo, checkbox_ship: "on", P_PAGE_SHIP: 1 }),
+      headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded", "Referer": refA },
+      body: new URLSearchParams({ P_ENTREE_HOME: String(imo), checkbox_ship: "on", P_PAGE_SHIP: "1" }),
       redirect: "follow",
     }, 15000);
-    let html = sRes.ok ? await sRes.text() : "";
+    logger.info(`[equasis] A1 search: status=${searchRes.status} url=${searchRes.url}`);
 
-    // Strategy B: POST ShipInfo
+    if (searchRes.ok) {
+      const searchHtml = await searchRes.text();
+
+      // Step A2: If search returned a list page (multiple results), find the ship link and follow it
+      // Equasis ship info links look like: href="...restricted/ShipInfo?fs=Search..."
+      const shipLinkM = /href="([^"]*restricted\/ShipInfo[^"]*)"/.exec(searchHtml);
+      if (shipLinkM) {
+        const shipUrl = shipLinkM[1].startsWith("http")
+          ? shipLinkM[1]
+          : `https://www.equasis.org${shipLinkM[1]}`;
+        logger.info(`[equasis] A2 following ship link: ${shipUrl}`);
+        const shipRes = await safeFetch(shipUrl, {
+          headers: { ...hdrs, "Referer": searchRes.url || refA },
+          redirect: "follow",
+        }, 12000);
+        if (shipRes.ok) html = await shipRes.text();
+      } else if (searchHtml.includes("Registered owner") || searchHtml.includes("ISM")) {
+        // Search result IS the ship page directly
+        html = searchHtml;
+      }
+    }
+
+    // ── STRATEGY B: POST directly to restricted/ShipInfo?fs=Search ──
     if (!html.includes("Registered owner") && !html.includes("ISM")) {
-      const r2 = await safeFetch(`${EQ_BASE}/authen/ShipInfo`, {
+      logger.info(`[equasis] Strategy B: POST restricted/ShipInfo?fs=Search`);
+      const r2 = await safeFetch(`${EQ_BASE}/restricted/ShipInfo?fs=Search`, {
         method: "POST",
         headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
-          "Referer": `${EQ_BASE}/authen/HomePage?fs=ByShip` },
-        body: new URLSearchParams({ P_IMO: imo }),
+          "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage` },
+        body: new URLSearchParams({ P_IMO: String(imo), fs: "Search" }),
         redirect: "follow",
       }, 12000);
+      logger.info(`[equasis] B: status=${r2.status} url=${r2.url}`);
       if (r2.ok) html = await r2.text();
     }
 
-    // Strategy C: GET ShipInfo legacy
+    // ── STRATEGY C: GET restricted/ShipInfo?fs=Search&P_IMO=xxx ────
     if (!html.includes("Registered owner") && !html.includes("ISM")) {
-      const r3 = await safeFetch(`${EQ_BASE}/authen/ShipInfo?fs=ByShip&P_IMO=${imo}`,
-        { headers: { ...hdrs, "Referer": `${EQ_BASE}/authen/HomePage?fs=ByShip` }, redirect: "follow" }, 12000);
+      logger.info(`[equasis] Strategy C: GET restricted/ShipInfo?fs=Search&P_IMO=${imo}`);
+      const r3 = await safeFetch(
+        `${EQ_BASE}/restricted/ShipInfo?fs=Search&P_IMO=${imo}`,
+        { headers: { ...hdrs, "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage` }, redirect: "follow" },
+        12000
+      );
+      logger.info(`[equasis] C: status=${r3.status} url=${r3.url}`);
       if (r3.ok) html = await r3.text();
     }
 
+    // ── STRATEGY D: POST to authen/ShipInfo (legacy) ────────────────
     if (!html.includes("Registered owner") && !html.includes("ISM")) {
-      logger.warn(`[equasis] No ship data found for IMO ${imo}`);
+      logger.info(`[equasis] Strategy D: POST authen/ShipInfo`);
+      const r4 = await safeFetch(`${EQ_BASE}/authen/ShipInfo`, {
+        method: "POST",
+        headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage` },
+        body: new URLSearchParams({ P_IMO: String(imo) }),
+        redirect: "follow",
+      }, 12000);
+      logger.info(`[equasis] D: status=${r4.status} url=${r4.url}`);
+      if (r4.ok) html = await r4.text();
+    }
+
+    // Log a snippet so we can debug what Equasis actually returned
+    if (html) {
+      const snippet = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 300);
+      logger.info(`[equasis] HTML snippet for IMO ${imo}: ${snippet}`);
+    }
+
+    if (!html.includes("Registered owner") && !html.includes("ISM")) {
+      logger.warn(`[equasis] All strategies failed for IMO ${imo} — no ship data in any response`);
       return null;
     }
 
     const p = parseEquasisHtml(html);
     if (!p.owner && !p.manager) {
-      logger.warn(`[equasis] Could not parse company from HTML for IMO ${imo}`);
+      logger.warn(`[equasis] HTML found but could not extract company for IMO ${imo}`);
+      // Log more of the html for debugging
+      const dbg = html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,500);
+      logger.info(`[equasis] debug text: ${dbg}`);
       return null;
     }
-    logger.info(`[equasis] IMO ${imo}: owner="${p.owner}" manager="${p.manager}"`);
-    return { owner_name: p.owner, manager_name: p.manager, ship_manager: p.shipMgr,
-             operator_name: p.operator, address: p.address, flag: p.flag,
-             source: "equasis", confidence: 0.92 };
-  } catch (err) { logger.warn("[equasis] fetch error:", err.message); return null; }
+    logger.info(`[equasis] ✅ IMO ${imo}: owner="${p.owner}" manager="${p.manager}" flag="${p.flag}"`);
+    return {
+      owner_name: p.owner, manager_name: p.manager, ship_manager: p.shipMgr,
+      operator_name: p.operator, address: p.address, flag: p.flag,
+      source: "equasis", confidence: 0.92,
+    };
+  } catch (err) {
+    logger.warn("[equasis] fetch error:", err.message);
+    return null;
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════
