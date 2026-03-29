@@ -259,7 +259,7 @@ function AgentCard({ agent, rank }) {
 
 // ── Pipeline step row ─────────────────────────────────────────────
 function PipelineRow({ step, status }) {
-  const col = status === "done" ? "#00ff9d" : status === "running" ? "#00e5ff" : "#1a2e50";
+  //const col = status === "done" ? "#00ff9d" : status === "running" ? "#00e5ff" : "#1a2e50";
   return (
     <div className={`ucf-pipe-row${status === "running" ? " ucf-pipe-running" : ""}`}>
       <span className="ucf-pipe-icon" style={{ color: status === "running" ? "#00e5ff" : status === "done" ? "#00ff9d" : "#1a2e50" }}>

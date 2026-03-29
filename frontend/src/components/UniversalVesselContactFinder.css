@@ -442,7 +442,7 @@
 }
 
 /* ── Person card ─────────────────────────────────────────────── */
-.ucf-person-card { }
+ 
 .ucf-person-rank {
   margin-left: auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
