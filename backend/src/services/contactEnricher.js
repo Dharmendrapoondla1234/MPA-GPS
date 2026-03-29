@@ -120,66 +120,163 @@ async function safeFetch(url, opts = {}, timeoutMs = 8000) {
   } finally { clearTimeout(t); }
 }
 
-function getAllCookies(res) {
+// ── Cookie helpers ────────────────────────────────────────────────
+// Parse ALL Set-Cookie headers from a response into a name→value map,
+// so duplicate names (e.g. two JSESSIONID) keep only the LATEST value.
+function parseCookieHeaders(res) {
+  let raw = [];
   if (typeof res.headers.getSetCookie === "function") {
-    return res.headers.getSetCookie().join("; ");
+    raw = res.headers.getSetCookie();
+  } else {
+    const h = res.headers.get("set-cookie") || "";
+    // Split on commas that precede a new cookie name (not inside expires dates)
+    raw = h.split(/,(?=\s*[A-Za-z0-9_-]+=)/).map(s => s.trim());
   }
-  return (res.headers.get("set-cookie") || "")
-    .split(/,(?=[^ ].*?=)/).map(c => c.split(";")[0].trim()).join("; ");
+  const map = new Map();
+  for (const cookie of raw) {
+    const [pair] = cookie.split(";");
+    const eq = pair.indexOf("=");
+    if (eq < 1) continue;
+    const name  = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    map.set(name, value); // later cookies overwrite earlier ones (correct)
+  }
+  return map;
+}
+
+function mapToCookieHeader(map) {
+  return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+function mergeCookieMaps(...maps) {
+  const merged = new Map();
+  for (const m of maps) for (const [k, v] of m) merged.set(k, v);
+  return merged;
 }
 
 // ═════════════════════════════════════════════════════════════════
 // STEP 1: EQUASIS (IMO-verified owner/manager/ISM)
 // ═════════════════════════════════════════════════════════════════
 const EQ_BASE = "https://www.equasis.org/EquasisWeb";
-let _eqCookies = null, _eqCookieTs = 0;
-const EQ_TTL   = 4 * 60 * 60 * 1000;
 
-async function equasisLogin() {
-  if (_eqCookies && Date.now() - _eqCookieTs < EQ_TTL) return _eqCookies;
-  const email = process.env.EQUASIS_EMAIL, pass = process.env.EQUASIS_PASSWORD;
-  if (!email || !pass) { logger.warn("[equasis] EQUASIS_EMAIL/PASSWORD not set in environment"); return null; }
+// Session state — module-level, persists across requests
+let _eqCookieMap  = null;   // Map of name→value for current session
+let _eqCookieTs   = 0;
+let _eqLoginLock  = false;  // prevent concurrent login races
+// Real Equasis server-side sessions time out after ~30 min of inactivity.
+// We use 20 min so we always re-login before the server kills our session.
+const EQ_SESSION_TTL = 20 * 60 * 1000;
+
+function isSessionExpiredHtml(html) {
+  // When session expires, Equasis returns the login page which contains these markers
+  const lower = (html || "").toLowerCase();
+  return lower.includes("j_password") || lower.includes("j_email") ||
+         lower.includes("please login") || lower.includes("please log in") ||
+         (lower.includes("login") && lower.includes("password") && !lower.includes("logout"));
+}
+
+function invalidateSession(reason) {
+  logger.warn(`[equasis] session invalidated: ${reason}`);
+  _eqCookieMap = null;
+  _eqCookieTs  = 0;
+}
+
+async function equasisLogin(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && _eqCookieMap && (now - _eqCookieTs) < EQ_SESSION_TTL) {
+    return mapToCookieHeader(_eqCookieMap);
+  }
+
+  // Prevent concurrent login storms
+  if (_eqLoginLock) {
+    await new Promise(r => setTimeout(r, 3000));
+    if (_eqCookieMap) return mapToCookieHeader(_eqCookieMap);
+  }
+  _eqLoginLock = true;
+
+  const email = process.env.EQUASIS_EMAIL;
+  const pass  = process.env.EQUASIS_PASSWORD;
+  if (!email || !pass) {
+    _eqLoginLock = false;
+    logger.warn("[equasis] EQUASIS_EMAIL/PASSWORD not set");
+    return null;
+  }
+
   try {
-    // Step 1: GET public home to grab initial session cookies
-    const pageRes = await safeFetch(`${EQ_BASE}/public/HomePage`, {
-      headers: { "Accept": "text/html,application/xhtml+xml" },
-    }, 10000);
-    const pageCookies = getAllCookies(pageRes);
-    logger.info(`[equasis] page cookies: ${pageCookies.slice(0, 80)}`);
+    // Step 1: GET public home — captures initial JSESSIONID (pre-auth)
+    const pageRes      = await safeFetch(`${EQ_BASE}/public/HomePage`, {
+      headers: { "Accept": "text/html,application/xhtml+xml,*/*" },
+    }, 12000);
+    const pageCookies  = parseCookieHeaders(pageRes);
+    logger.info(`[equasis] pre-login cookies: ${mapToCookieHeader(pageCookies).slice(0, 80)}`);
 
-    // Step 2: POST login — correct URL is authen/HomePage?fs=HomePage (not fs=Search)
+    // Step 2: POST credentials — Equasis sets a new authenticated JSESSIONID here
+    // Using redirect:"manual" so we capture Set-Cookie on the 302 response itself,
+    // not the final redirected page (where Set-Cookie is absent).
     const loginRes = await safeFetch(`${EQ_BASE}/authen/HomePage?fs=HomePage`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        "Cookie": pageCookies,
-        "Referer": `${EQ_BASE}/public/HomePage`,
-        "Accept": "text/html,application/xhtml+xml",
-        "Origin": "https://www.equasis.org",
+        "Cookie":       mapToCookieHeader(pageCookies),
+        "Referer":      `${EQ_BASE}/public/HomePage`,
+        "Accept":       "text/html,application/xhtml+xml,*/*",
+        "Origin":       "https://www.equasis.org",
       },
       body: new URLSearchParams({ j_email: email, j_password: pass, submit: "Login" }),
-      redirect: "follow",
+      redirect: "manual",   // ← KEY FIX: capture 302 Set-Cookie before following
     }, 15000);
 
-    const loginCookies = getAllCookies(loginRes);
-    const allCookies = [pageCookies, loginCookies].filter(Boolean).join("; ");
-    const bodyText = await loginRes.text();
+    // Merge: pre-login cookies + login-response cookies (login JSESSIONID wins)
+    const loginCookies   = parseCookieHeaders(loginRes);
+    const mergedCookies  = mergeCookieMaps(pageCookies, loginCookies);
+    logger.info(`[equasis] login status=${loginRes.status} cookies: ${mapToCookieHeader(mergedCookies).slice(0, 120)}`);
 
-    // Login success: page contains "Logout" link or "Search" form, NOT "Invalid" or login form again
-    const bodyLower = bodyText.toLowerCase();
+    // If 302 redirect, follow it manually to verify we land on the authenticated page
+    let finalBody = "";
+    if (loginRes.status === 302 || loginRes.status === 301) {
+      const location = loginRes.headers.get("location") || "";
+      const redirectUrl = new URL(location, EQ_BASE).href;
+      logger.info(`[equasis] following login redirect → ${redirectUrl}`);
+      const finalRes = await safeFetch(redirectUrl, {
+        headers: {
+          "Cookie":  mapToCookieHeader(mergedCookies),
+          "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage`,
+          "Accept":  "text/html,application/xhtml+xml,*/*",
+        },
+        redirect: "follow",
+      }, 12000);
+      // Merge any further cookies from the final page
+      const finalCookies = parseCookieHeaders(finalRes);
+      finalCookies.forEach((v, k) => mergedCookies.set(k, v));
+      finalBody = await finalRes.text();
+    } else {
+      finalBody = await loginRes.text();
+    }
+
+    const bodyLower = finalBody.toLowerCase();
     const failed = bodyLower.includes("invalid") || bodyLower.includes("incorrect") ||
-                   bodyLower.includes("j_password") || bodyLower.includes("authentication failed");
-    const ok = !failed && (bodyLower.includes("logout") || bodyLower.includes("search") ||
-                           loginRes.url.includes("authen/HomePage"));
+                   bodyLower.includes("j_password") || bodyLower.includes("authentication failed") ||
+                   bodyLower.includes("access denied");
+    const ok = !failed && (bodyLower.includes("logout") || bodyLower.includes("welcome") ||
+                            bodyLower.includes("kaizentric") || bodyLower.includes("my equasis"));
 
-    logger.info(`[equasis] login status=${loginRes.status} finalUrl=${loginRes.url} ok=${ok}`);
-    if (!ok) { logger.warn("[equasis] Login failed — check EQUASIS_EMAIL/PASSWORD env vars"); return null; }
+    logger.info(`[equasis] login ok=${ok} jsessionid=${mergedCookies.get("JSESSIONID")?.slice(0, 12)}…`);
+    if (!ok) {
+      _eqLoginLock = false;
+      logger.warn("[equasis] Login FAILED — check EQUASIS_EMAIL/PASSWORD env vars");
+      return null;
+    }
 
-    _eqCookies = allCookies;
-    _eqCookieTs = Date.now();
-    logger.info(`[equasis] Login OK — cookies: ${allCookies.slice(0, 120)}`);
-    return allCookies;
-  } catch (err) { logger.warn(`[equasis] Login error: ${err?.message || String(err)}`); return null; }
+    _eqCookieMap = mergedCookies;
+    _eqCookieTs  = Date.now();
+    _eqLoginLock = false;
+    logger.info(`[equasis] Login OK — session valid for ${EQ_SESSION_TTL/60000} min`);
+    return mapToCookieHeader(_eqCookieMap);
+  } catch (err) {
+    _eqLoginLock = false;
+    logger.warn(`[equasis] Login error: ${err?.message || String(err)}`);
+    return null;
+  }
 }
 
 function parseEquasisHtml(html) {
@@ -243,33 +340,66 @@ function parseEquasisHtml(html) {
   return { owner, manager, shipMgr, operator, flag, address };
 }
 
-async function fetchFromEquasis(imo) {
-  const cookies = await equasisLogin();
+// ── Detect if Equasis has expired/invalidated our session ────────
+// Returns true if the HTML response is actually the login page
+function responseIsLoginPage(html, url) {
+  if (!html) return false;
+  if ((url || "").includes("/public/") && (url || "").includes("HomePage")) return true;
+  return isSessionExpiredHtml(html);
+}
+
+// ── Detect Equasis quota/rate-limit responses ─────────────────────
+function responseIsQuotaError(html) {
+  const lower = (html || "").toLowerCase();
+  return lower.includes("quota") || lower.includes("too many") ||
+         lower.includes("rate limit") || lower.includes("exceeded") ||
+         lower.includes("temporarily unavailable") || lower.includes("try again later");
+}
+
+async function fetchFromEquasis(imo, retryCount = 0) {
+  let cookies = await equasisLogin();
   if (!cookies) return null;
   const hdrs = {
-    "Cookie": cookies,
-    "Accept": "text/html,application/xhtml+xml",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Origin": "https://www.equasis.org",
+    "Cookie":     cookies,
+    "Accept":     "text/html,application/xhtml+xml,*/*",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Origin":     "https://www.equasis.org",
+    "Accept-Language": "en-US,en;q=0.9",
   };
 
+  // Helper: run a fetch and check if the response is a login redirect
+  // Returns { html, sessionExpired, quotaError }
+  async function checkedFetch(url, opts, timeoutMs) {
+    const res = await safeFetch(url, opts, timeoutMs);
+    if (!res?.ok) return { html: null, sessionExpired: false, quotaError: false };
+    const html  = await res.text();
+    const sessionExpired = responseIsLoginPage(html, res.url);
+    const quotaError     = responseIsQuotaError(html);
+    if (sessionExpired) logger.warn(`[equasis] session expired detected on ${res.url}`);
+    if (quotaError)     logger.warn(`[equasis] quota/rate-limit detected on ${res.url}`);
+    return { html, sessionExpired, quotaError, url: res.url };
+  }
+
   let html = "";
+  let sessionExpiredDetected = false;
 
   try {
-    // ── STRATEGY A (correct flow from browser trace) ──────────────
-    // Step A1: POST to restricted/Search?fs=HomePage with the IMO as the search term
-    // This is the search form on the authenticated home page
+    // ── STRATEGY A ──────────────────────────────────────────────
     const refA = `${EQ_BASE}/authen/HomePage?fs=HomePage`;
-    const searchRes = await safeFetch(`${EQ_BASE}/restricted/Search?fs=HomePage`, {
+    const A1 = await checkedFetch(`${EQ_BASE}/restricted/Search?fs=HomePage`, {
       method: "POST",
       headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded", "Referer": refA },
       body: new URLSearchParams({ P_ENTREE_HOME: String(imo), checkbox_ship: "on", P_PAGE_SHIP: "1" }),
       redirect: "follow",
     }, 15000);
-    logger.info(`[equasis] A1 search: status=${searchRes.status} url=${searchRes.url}`);
+    logger.info(`[equasis] A1 search url=${A1.url}`);
 
-    if (searchRes.ok) {
-      const searchHtml = await searchRes.text();
+    if (A1.sessionExpired) { sessionExpiredDetected = true; }
+    else if (A1.quotaError) { logger.warn("[equasis] quota hit on A1"); return null; }
+    const searchRes = { ok: !!A1.html, url: A1.url, text: () => A1.html };
+    const searchHtml = A1.html || "";
+
+    if (searchHtml) {
       const searchText = searchHtml.replace(/<[^>]+>/g," ").replace(/\s+/g," ");
       logger.info(`[equasis] A1 search text (0-400): ${searchText.slice(0, 400)}`);
 
@@ -322,50 +452,50 @@ async function fetchFromEquasis(imo) {
             delete hiddenInputs["Submit"];
 
             logger.info(`[equasis] A2 form POST to: ${formAction} fields: ${JSON.stringify(hiddenInputs)}`);
-            const formRes = await safeFetch(formAction, {
+            const A2 = await checkedFetch(formAction, {
               method: "POST",
               headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": searchRes.url },
+                "Referer": A1.url || `${EQ_BASE}/restricted/Search?fs=HomePage` },
               body: new URLSearchParams({ ...hiddenInputs, Submit: "Search" }),
               redirect: "follow",
             }, 15000);
-            logger.info(`[equasis] A2 result: status=${formRes.status} url=${formRes.url}`);
-            if (formRes.ok) {
-              const a2html = await formRes.text();
+            logger.info(`[equasis] A2 result: url=${A2.url}`);
+            if (A2.sessionExpired) { sessionExpiredDetected = true; }
+            else if (A2.html) {
+              const a2html = A2.html;
               const a2text = a2html.replace(/<[^>]+>/g," ").replace(/\s+/g," ");
               logger.info(`[equasis] A2 text (0-500): ${a2text.slice(0, 500)}`);
 
               if (a2html.includes("Registered owner") || a2html.includes("ISM Manager")) {
-                html = a2html; // Got ship detail directly
+                html = a2html;
               } else {
-                // Got a results list — find ship link or sub-form
                 const shipLinkM = /href="([^"]*ShipInfo[^"]*)"/.exec(a2html) ||
                                   /action="([^"]*ShipInfo[^"]*)"/.exec(a2html);
                 if (shipLinkM) {
-                  const shipUrl = resolveUrl(formRes.url, shipLinkM[1]);
+                  const shipUrl = resolveUrl(A2.url, shipLinkM[1]);
                   logger.info(`[equasis] A3 following ship link: ${shipUrl}`);
                   if (shipUrl) {
-                    const a3Res = await safeFetch(shipUrl, {
-                      headers: { ...hdrs, "Referer": formRes.url }, redirect: "follow",
+                    const A3 = await checkedFetch(shipUrl, {
+                      headers: { ...hdrs, "Referer": A2.url }, redirect: "follow",
                     }, 12000);
-                    if (a3Res.ok) html = await a3Res.text();
+                    if (!A3.sessionExpired && A3.html) html = A3.html;
+                    else if (A3.sessionExpired) sessionExpiredDetected = true;
                   }
                 }
-                // Also try extracting P_SHIP_ID from results and posting to ShipInfo
                 const shipIdM = /P_SHIP_ID[^>]+value="([^"]+)"/.exec(a2html) ||
                                 /name="P_SHIP_ID"[^>]+value="([^"]+)"/.exec(a2html);
                 if (shipIdM && (!html || !html.includes("Registered owner"))) {
                   logger.info(`[equasis] A4 P_SHIP_ID=${shipIdM[1]}`);
-                  const a4url = resolveUrl(formRes.url, "../restricted/ShipInfo?fs=Search");
+                  const a4url = resolveUrl(A2.url, "../restricted/ShipInfo?fs=Search");
                   if (a4url) {
-                    const a4Res = await safeFetch(a4url, {
+                    const A4 = await checkedFetch(a4url, {
                       method: "POST",
-                      headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
-                        "Referer": formRes.url },
+                      headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded", "Referer": A2.url },
                       body: new URLSearchParams({ P_SHIP_ID: shipIdM[1], fs: "Search" }),
                       redirect: "follow",
                     }, 12000);
-                    if (a4Res.ok) html = await a4Res.text();
+                    if (!A4.sessionExpired && A4.html) html = A4.html;
+                    else if (A4.sessionExpired) sessionExpiredDetected = true;
                   }
                 }
               }
@@ -380,10 +510,9 @@ async function fetchFromEquasis(imo) {
     const textOf = h => (h||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ");
 
     // ── STRATEGY B: POST to restricted/ShipInfo with P_IMO directly ──
-    if (!hasData(html)) {
-      const bUrl = `${EQ_BASE}/restricted/ShipInfo?fs=Search`;
-      logger.info(`[equasis] Strategy B: POST ${bUrl}`);
-      const r2 = await safeFetch(bUrl, {
+    if (!hasData(html) && !sessionExpiredDetected) {
+      logger.info(`[equasis] Strategy B: POST restricted/ShipInfo`);
+      const B = await checkedFetch(`${EQ_BASE}/restricted/ShipInfo?fs=Search`, {
         method: "POST",
         headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
           "Referer": `${EQ_BASE}/restricted/Search?fs=HomePage` },
@@ -393,20 +522,18 @@ async function fetchFromEquasis(imo) {
         }),
         redirect: "follow",
       }, 12000);
-      logger.info(`[equasis] B: status=${r2.status} url=${r2.url}`);
-      if (r2.ok) {
-        const b2html = await r2.text();
-        logger.info(`[equasis] B text (0-500): ${textOf(b2html).slice(0, 500)}`);
-        if (hasData(b2html)) html = b2html;
+      if (B.sessionExpired) { sessionExpiredDetected = true; }
+      else if (B.html) {
+        logger.info(`[equasis] B text (0-500): ${textOf(B.html).slice(0, 500)}`);
+        if (hasData(B.html)) html = B.html;
         else {
-          // Maybe got results list — follow any ShipInfo link
-          const lm = /href="([^"]*ShipInfo[^"]*)"/.exec(b2html) ||
-                     /action="([^"]*ShipInfo[^"]*)"/.exec(b2html);
+          const lm = /href="([^"]*ShipInfo[^"]*)"/.exec(B.html) || /action="([^"]*ShipInfo[^"]*)"/.exec(B.html);
           if (lm) {
-            const lu = resolveUrl(r2.url, lm[1]);
+            const lu = resolveUrl(B.url, lm[1]);
             if (lu) {
-              const lr = await safeFetch(lu, { headers: { ...hdrs, "Referer": r2.url }, redirect: "follow" }, 12000);
-              if (lr.ok) { const lh = await lr.text(); if (hasData(lh)) html = lh; }
+              const BL = await checkedFetch(lu, { headers: { ...hdrs, "Referer": B.url }, redirect: "follow" }, 12000);
+              if (!BL.sessionExpired && BL.html && hasData(BL.html)) html = BL.html;
+              else if (BL.sessionExpired) sessionExpiredDetected = true;
             }
           }
         }
@@ -414,9 +541,9 @@ async function fetchFromEquasis(imo) {
     }
 
     // ── STRATEGY C: POST to restricted/Search?fs=ByShip with P_IMO ───
-    if (!hasData(html)) {
+    if (!hasData(html) && !sessionExpiredDetected) {
       logger.info(`[equasis] Strategy C: POST restricted/Search?fs=ByShip`);
-      const r3 = await safeFetch(`${EQ_BASE}/restricted/Search?fs=ByShip`, {
+      const C = await checkedFetch(`${EQ_BASE}/restricted/Search?fs=ByShip`, {
         method: "POST",
         headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
           "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage` },
@@ -426,19 +553,18 @@ async function fetchFromEquasis(imo) {
         }),
         redirect: "follow",
       }, 12000);
-      logger.info(`[equasis] C: status=${r3.status} url=${r3.url}`);
-      if (r3.ok) {
-        const c3html = await r3.text();
-        logger.info(`[equasis] C text (0-500): ${textOf(c3html).slice(0, 500)}`);
-        if (hasData(c3html)) { html = c3html; }
+      if (C.sessionExpired) { sessionExpiredDetected = true; }
+      else if (C.html) {
+        logger.info(`[equasis] C text (0-500): ${textOf(C.html).slice(0, 500)}`);
+        if (hasData(C.html)) html = C.html;
         else {
-          const lm = /href="([^"]*ShipInfo[^"]*)"/.exec(c3html) ||
-                     /action="([^"]*ShipInfo[^"]*)"/.exec(c3html);
+          const lm = /href="([^"]*ShipInfo[^"]*)"/.exec(C.html) || /action="([^"]*ShipInfo[^"]*)"/.exec(C.html);
           if (lm) {
-            const lu = resolveUrl(r3.url, lm[1]);
+            const lu = resolveUrl(C.url, lm[1]);
             if (lu) {
-              const lr = await safeFetch(lu, { headers: { ...hdrs, "Referer": r3.url }, redirect: "follow" }, 12000);
-              if (lr.ok) { const lh = await lr.text(); if (hasData(lh)) html = lh; }
+              const CL = await checkedFetch(lu, { headers: { ...hdrs, "Referer": C.url }, redirect: "follow" }, 12000);
+              if (!CL.sessionExpired && CL.html && hasData(CL.html)) html = CL.html;
+              else if (CL.sessionExpired) sessionExpiredDetected = true;
             }
           }
         }
@@ -446,21 +572,33 @@ async function fetchFromEquasis(imo) {
     }
 
     // ── STRATEGY D: legacy authen/ShipInfo POST ───────────────────────
-    if (!hasData(html)) {
+    if (!hasData(html) && !sessionExpiredDetected) {
       logger.info(`[equasis] Strategy D: POST authen/ShipInfo`);
-      const r4 = await safeFetch(`${EQ_BASE}/authen/ShipInfo`, {
+      const D = await checkedFetch(`${EQ_BASE}/authen/ShipInfo`, {
         method: "POST",
         headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
           "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage` },
         body: new URLSearchParams({ P_IMO: String(imo) }),
         redirect: "follow",
       }, 12000);
-      logger.info(`[equasis] D: status=${r4.status} url=${r4.url}`);
-      if (r4.ok) {
-        const d4html = await r4.text();
-        logger.info(`[equasis] D text (0-500): ${textOf(d4html).slice(0, 500)}`);
-        if (hasData(d4html)) html = d4html;
+      if (D.sessionExpired) { sessionExpiredDetected = true; }
+      else if (D.html) {
+        logger.info(`[equasis] D text (0-500): ${textOf(D.html).slice(0, 500)}`);
+        if (hasData(D.html)) html = D.html;
       }
+    }
+
+    // ── SESSION EXPIRED: invalidate + retry once ──────────────────────
+    if (sessionExpiredDetected) {
+      logger.warn(`[equasis] session expired mid-fetch for IMO ${imo} — invalidating and retrying`);
+      invalidateSession("detected during IMO fetch strategies");
+      if (retryCount < 1) {
+        logger.info(`[equasis] re-login and retry for IMO ${imo}`);
+        await new Promise(r => setTimeout(r, 1500)); // brief pause before re-login
+        return fetchFromEquasis(imo, retryCount + 1);
+      }
+      logger.warn(`[equasis] retry exhausted for IMO ${imo}`);
+      return null;
     }
 
     // Log a snippet so we can debug what Equasis actually returned
@@ -1130,5 +1268,49 @@ async function batchEnrichArrivals(limit = 20) {
     return results;
   } catch (err) { logger.error("[batch] error:", err.message); return []; }
 }
+
+
+// ── Proactive Equasis session keep-alive ──────────────────────────
+// Ping authenticated page every 15 min to prevent server-side session timeout
+// (Equasis times out sessions after ~30 min of inactivity)
+const EQ_KEEPALIVE_INTERVAL = 15 * 60 * 1000;
+let _eqKeepaliveTimer = null;
+
+async function equasisKeepalive() {
+  if (!_eqCookieMap) return; // not logged in yet — nothing to keep alive
+  const cookies = mapToCookieHeader(_eqCookieMap);
+  try {
+    const res = await safeFetch(`${EQ_BASE}/authen/HomePage?fs=HomePage`, {
+      method: "GET",
+      headers: {
+        "Cookie":     cookies,
+        "Accept":     "text/html,application/xhtml+xml,*/*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+      redirect: "follow",
+    }, 10000);
+    const html  = await res.text();
+    const alive = !isSessionExpiredHtml(html);
+    if (alive) {
+      _eqCookieTs = Date.now(); // extend TTL
+      logger.info("[equasis] keep-alive ping — session still valid ✓");
+    } else {
+      logger.warn("[equasis] keep-alive detected session expired — will re-login on next request");
+      invalidateSession("keep-alive ping found login page");
+    }
+  } catch (err) {
+    logger.warn(`[equasis] keep-alive error: ${err?.message?.slice(0, 60)}`);
+  }
+}
+
+function startEquasisKeepalive() {
+  if (_eqKeepaliveTimer) return;
+  _eqKeepaliveTimer = setInterval(equasisKeepalive, EQ_KEEPALIVE_INTERVAL);
+  logger.info(`[equasis] keep-alive started (every ${EQ_KEEPALIVE_INTERVAL/60000} min)`);
+}
+
+// Start keep-alive when module loads (first login will be triggered on first actual use)
+// We delay 2s to allow server startup to complete
+setTimeout(startEquasisKeepalive, 2000);
 
 module.exports = { enrichVesselContact, batchEnrichArrivals, enrichPortAgents };

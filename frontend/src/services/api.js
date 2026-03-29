@@ -224,12 +224,13 @@ export async function fetchVesselContactSpec(imo, {
  * Uses the no-AI pipeline: DuckDuckGo + DNS + website scraping + SMTP validation
  * Requires owner/manager names from Equasis first.
  */
-export async function fetchVesselIntelligence(imo, { owner, manager, operator, ship_manager, forceRefresh = false } = {}) {
+export async function fetchVesselIntelligence(imo, { owner, manager, operator, ship_manager, address, forceRefresh = false } = {}) {
   const p = new URLSearchParams();
   if (owner)        p.set("owner",        owner);
   if (manager)      p.set("manager",      manager);
   if (operator)     p.set("operator",     operator);
   if (ship_manager) p.set("ship_manager", ship_manager);
+  if (address)      p.set("address",      address);
   if (forceRefresh) p.set("forceRefresh", "true");
   return call(`/vessel/${encodeURIComponent(imo)}/contact?${p}`, { bustCache: forceRefresh });
 }

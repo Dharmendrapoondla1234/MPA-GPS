@@ -430,3 +430,106 @@
   padding: 1px 5px;
   border-radius: 4px;
 }
+
+/* ── Contact Intelligence Tab ───────────────────────────────────── */
+.intel-tab { display: flex; flex-direction: column; gap: 10px; }
+
+.intel-meta-bar {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(0,229,255,0.04);
+  border: 1px solid rgba(0,229,255,0.10);
+  border-radius: 5px; padding: 6px 10px;
+  font-size: 10px; color: #607d8b;
+}
+.intel-meta-label { font-weight: 700; color: #00e5ff; letter-spacing: 0.5px; text-transform: uppercase; }
+.intel-meta-val   { color: #8ab4d0; font-family: var(--font-mono, monospace); }
+.intel-meta-steps { margin-left: auto; font-size: 9px; color: #3d6a8a; }
+.intel-badge-cached { background: rgba(255,170,0,0.12); color: #ffaa00; border-radius: 3px; padding: 1px 5px; font-size: 9px; font-weight: 700; }
+
+.intel-section { display: flex; flex-direction: column; gap: 4px; }
+.intel-section-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 0 4px; border-bottom: 1px solid rgba(0,229,255,0.08);
+}
+.intel-section-icon  { font-size: 13px; }
+.intel-section-title { font-size: 10px; font-weight: 700; letter-spacing: 0.8px; color: #8ab4d0; text-transform: uppercase; }
+.intel-section-count { margin-left: auto; background: rgba(0,229,255,0.1); color: #00e5ff; border-radius: 10px; padding: 1px 7px; font-size: 10px; font-weight: 700; }
+
+/* Email rows */
+.intel-email-list { display: flex; flex-direction: column; gap: 3px; }
+.intel-email-list-compact { padding-left: 8px; border-left: 2px solid rgba(0,229,255,0.08); }
+.intel-email-row {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,0.2); border-radius: 4px;
+  padding: 5px 8px; border: 1px solid rgba(255,255,255,0.04);
+}
+.intel-email-row:hover { border-color: rgba(0,229,255,0.15); background: rgba(0,229,255,0.04); }
+.intel-email { font-family: var(--font-mono, monospace); font-size: 11px; color: #00e5ff; text-decoration: none; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.intel-email:hover { text-decoration: underline; }
+.intel-email-meta { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.intel-source { font-size: 9px; color: #455a64; white-space: nowrap; }
+
+/* Confidence */
+.intel-conf { font-size: 9px; font-weight: 700; font-family: var(--font-mono, monospace); padding: 1px 4px; border-radius: 3px; }
+.intel-conf-high { color: #00ff9d; background: rgba(0,255,157,0.1); }
+.intel-conf-mid  { color: #fd9644; background: rgba(253,150,68,0.1); }
+.intel-conf-low  { color: #607d8b; background: rgba(96,125,139,0.1); }
+
+/* Badges */
+.intel-badge-smtp     { font-size: 9px; color: #00ff9d; background: rgba(0,255,157,0.1); border-radius: 3px; padding: 1px 4px; font-weight: 700; }
+.intel-badge-rejected { font-size: 9px; color: #fc5c65; background: rgba(252,92,101,0.1); border-radius: 3px; padding: 1px 4px; }
+.intel-badge-mx       { font-size: 9px; color: #26de81; background: rgba(38,222,129,0.1); border-radius: 3px; padding: 1px 4px; font-weight: 700; }
+
+/* Phone rows */
+.intel-phone-list { display: flex; flex-direction: column; gap: 3px; }
+.intel-phone-row  { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: rgba(0,0,0,0.15); border-radius: 4px; }
+.intel-phone-icon { font-size: 11px; }
+.intel-phone      { font-family: var(--font-mono, monospace); font-size: 11px; color: #8ab4d0; flex: 1; }
+
+/* Per-company block */
+.intel-company-block {
+  border: 1px solid rgba(0,229,255,0.08);
+  border-radius: 6px; padding: 10px; background: rgba(0,0,0,0.15);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.intel-company-header { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.intel-company-name   { font-weight: 700; font-size: 12px; color: #f0f8ff; flex: 1; }
+.intel-company-role   { font-size: 9px; color: #607d8b; background: rgba(96,125,139,0.12); border-radius: 3px; padding: 2px 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Domain row */
+.intel-domain-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+.intel-domain-icon { font-size: 12px; }
+.intel-domain-link { font-size: 12px; color: #00e5ff; text-decoration: none; font-weight: 600; }
+.intel-domain-link:hover { text-decoration: underline; }
+.intel-domain-meta { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.intel-no-domain { font-size: 10px; color: #455a64; padding: 2px 0; }
+
+/* Address */
+.intel-address-row { display: flex; align-items: flex-start; gap: 6px; font-size: 10px; color: #607d8b; }
+.intel-address-icon { flex-shrink: 0; }
+.intel-address { line-height: 1.4; }
+
+/* External links */
+.intel-external-links {
+  display: flex; gap: 8px; padding-top: 6px;
+  border-top: 1px solid rgba(0,229,255,0.06);
+  flex-wrap: wrap;
+}
+.intel-external-links a {
+  font-size: 10px; color: #607d8b; text-decoration: none;
+  padding: 2px 6px; border: 1px solid rgba(255,255,255,0.06); border-radius: 3px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.intel-external-links a:hover { color: #00e5ff; border-color: rgba(0,229,255,0.25); }
+
+/* Intelligence panel (legacy — inside company tab) */
+.cp-intelligence-panel {
+  margin-top: 8px;
+  border: 1px solid rgba(0,229,255,0.12);
+  border-radius: 6px; padding: 10px;
+  background: rgba(0,229,255,0.02);
+}
+.cp-intel-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.cp-intel-icon  { font-size: 14px; }
+.cp-intel-title { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #00e5ff; text-transform: uppercase; }
+.cp-intel-badge { margin-left: auto; font-size: 9px; color: #607d8b; background: rgba(96,125,139,0.1); border-radius: 3px; padding: 2px 6px; }
