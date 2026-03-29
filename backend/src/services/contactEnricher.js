@@ -266,108 +266,174 @@ async function fetchFromEquasis(imo) {
         logger.info(`[equasis] A1 returned ship detail directly`);
       }
 
-      // Case 2: Search returned a results list — Equasis uses a FORM POST (not <a> link)
-      // The form has action="restricted/ShipInfo?fs=Search" and hidden field with P_SHIP_ID or similar
+      // Case 2: The search page returned is the BLANK search form (not results yet).
+      // Equasis's search form has action="../restricted/ShipInfo?fs=Search" (relative URL).
+      // We must resolve the relative URL correctly and inject the IMO into P_ENTREE_HOME_HIDDEN.
       if (!html) {
-        // Extract the form action and all hidden inputs
+        // Resolve the form action URL relative to the current page URL
+        const resolveUrl = (base, rel) => {
+          try { return new URL(rel, base).href; } catch { return null; }
+        };
+
+        // Find the search/ship form action
         const formActionM = /action="([^"]*ShipInfo[^"]*)"/.exec(searchHtml) ||
+                            /action="([^"]*Search[^"]*)"/.exec(searchHtml) ||
                             /action="([^"]*restricted[^"]*)"/.exec(searchHtml);
+
         if (formActionM) {
-          const formAction = formActionM[1].startsWith("http")
-            ? formActionM[1] : `https://www.equasis.org${formActionM[1]}`;
+          // Resolve relative URL (handles "../restricted/ShipInfo?fs=Search" correctly)
+          const formAction = resolveUrl(searchRes.url, formActionM[1]);
+          if (!formAction) { logger.warn("[equasis] Could not resolve form URL"); }
+          else {
+            // Collect all hidden input fields
+            const hiddenInputs = {};
+            let m;
+            // Try all attribute orderings
+            for (const re of [
+              /<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"[^>]*>/gi,
+              /<input[^>]+name="([^"]+)"[^>]+type="hidden"[^>]+value="([^"]*)"[^>]*>/gi,
+              /<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"[^>]*type="hidden"[^>]*>/gi,
+            ]) {
+              const reCopy = new RegExp(re.source, re.flags);
+              while ((m = reCopy.exec(searchHtml)) !== null) {
+                if (!hiddenInputs[m[1]]) hiddenInputs[m[1]] = m[2];
+              }
+            }
 
-          // Collect all hidden input fields from the form
-          const hiddenInputs = {};
-          let m;
-          const inputRe = /<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"[^>]*>/gi;
-          while ((m = inputRe.exec(searchHtml)) !== null) hiddenInputs[m[1]] = m[2];
-          // Also try reversed name/value attribute order
-          const inputRe2 = /<input[^>]+name="([^"]+)"[^>]+type="hidden"[^>]+value="([^"]*)"[^>]*>/gi;
-          while ((m = inputRe2.exec(searchHtml)) !== null) hiddenInputs[m[1]] = m[2];
+            // Inject the IMO into the right fields — override empty ones
+            hiddenInputs["P_ENTREE_HOME_HIDDEN"] = String(imo);
+            hiddenInputs["P_IMO"]                = String(imo);
+            hiddenInputs["ongletActifSC"]         = "ship";
+            hiddenInputs["checkbox_ship"]         = "on";
+            // Remove the Submit button field — we add it separately
+            delete hiddenInputs["Submit"];
 
-          logger.info(`[equasis] A2 form POST to: ${formAction} with fields: ${JSON.stringify(hiddenInputs)}`);
-          const formRes = await safeFetch(formAction, {
-            method: "POST",
-            headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
-              "Referer": searchRes.url },
-            body: new URLSearchParams({ ...hiddenInputs, submit: "View" }),
-            redirect: "follow",
-          }, 12000);
-          logger.info(`[equasis] A2 form result: status=${formRes.status} url=${formRes.url}`);
-          if (formRes.ok) html = await formRes.text();
-        }
+            logger.info(`[equasis] A2 form POST to: ${formAction} fields: ${JSON.stringify(hiddenInputs)}`);
+            const formRes = await safeFetch(formAction, {
+              method: "POST",
+              headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": searchRes.url },
+              body: new URLSearchParams({ ...hiddenInputs, Submit: "Search" }),
+              redirect: "follow",
+            }, 15000);
+            logger.info(`[equasis] A2 result: status=${formRes.status} url=${formRes.url}`);
+            if (formRes.ok) {
+              const a2html = await formRes.text();
+              const a2text = a2html.replace(/<[^>]+>/g," ").replace(/\s+/g," ");
+              logger.info(`[equasis] A2 text (0-500): ${a2text.slice(0, 500)}`);
 
-        // Case 3: Look for direct <a> links to ship page  
-        if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
-          const hrefPatterns = [
-            /href="([^"]*restricted\/ShipInfo[^"]*)"/,
-            /href="([^"]*ShipInfo[^"]*fs=Search[^"]*)"/,
-            /href="([^"]*ShipInfo[^"]*P_IMO[^"]*)"/,
-          ];
-          for (const pat of hrefPatterns) {
-            const linkM = pat.exec(searchHtml);
-            if (!linkM) continue;
-            const shipUrl = linkM[1].startsWith("http")
-              ? linkM[1] : `https://www.equasis.org${linkM[1]}`;
-            logger.info(`[equasis] A3 following href: ${shipUrl}`);
-            const shipRes = await safeFetch(shipUrl, {
-              headers: { ...hdrs, "Referer": searchRes.url }, redirect: "follow",
-            }, 12000);
-            if (shipRes.ok) { html = await shipRes.text(); break; }
+              if (a2html.includes("Registered owner") || a2html.includes("ISM Manager")) {
+                html = a2html; // Got ship detail directly
+              } else {
+                // Got a results list — find ship link or sub-form
+                const shipLinkM = /href="([^"]*ShipInfo[^"]*)"/.exec(a2html) ||
+                                  /action="([^"]*ShipInfo[^"]*)"/.exec(a2html);
+                if (shipLinkM) {
+                  const shipUrl = resolveUrl(formRes.url, shipLinkM[1]);
+                  logger.info(`[equasis] A3 following ship link: ${shipUrl}`);
+                  if (shipUrl) {
+                    const a3Res = await safeFetch(shipUrl, {
+                      headers: { ...hdrs, "Referer": formRes.url }, redirect: "follow",
+                    }, 12000);
+                    if (a3Res.ok) html = await a3Res.text();
+                  }
+                }
+                // Also try extracting P_SHIP_ID from results and posting to ShipInfo
+                const shipIdM = /P_SHIP_ID[^>]+value="([^"]+)"/.exec(a2html) ||
+                                /name="P_SHIP_ID"[^>]+value="([^"]+)"/.exec(a2html);
+                if (shipIdM && (!html || !html.includes("Registered owner"))) {
+                  logger.info(`[equasis] A4 P_SHIP_ID=${shipIdM[1]}`);
+                  const a4url = resolveUrl(formRes.url, "../restricted/ShipInfo?fs=Search");
+                  if (a4url) {
+                    const a4Res = await safeFetch(a4url, {
+                      method: "POST",
+                      headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
+                        "Referer": formRes.url },
+                      body: new URLSearchParams({ P_SHIP_ID: shipIdM[1], fs: "Search" }),
+                      redirect: "follow",
+                    }, 12000);
+                    if (a4Res.ok) html = await a4Res.text();
+                  }
+                }
+              }
+            }
           }
         }
       }
     }
 
-    // ── STRATEGY B: Search then immediately GET ShipInfo with P_IMO ─
-    // Equasis session may remember last search — try GET after establishing session
-    if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
-      logger.info(`[equasis] Strategy B: GET restricted/ShipInfo?fs=Search&P_IMO=${imo}`);
-      const r2 = await safeFetch(
-        `${EQ_BASE}/restricted/ShipInfo?fs=Search&P_IMO=${imo}`,
-        { headers: { ...hdrs, "Referer": `${EQ_BASE}/restricted/Search?fs=HomePage` }, redirect: "follow" },
-        12000
-      );
+    const hasData = h => h && (h.includes("Registered owner") || h.includes("ISM Manager"));
+    const resolveUrl = (base, rel) => { try { return new URL(rel, base).href; } catch { return null; } };
+    const textOf = h => (h||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ");
+
+    // ── STRATEGY B: POST to restricted/ShipInfo with P_IMO directly ──
+    if (!hasData(html)) {
+      const bUrl = `${EQ_BASE}/restricted/ShipInfo?fs=Search`;
+      logger.info(`[equasis] Strategy B: POST ${bUrl}`);
+      const r2 = await safeFetch(bUrl, {
+        method: "POST",
+        headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": `${EQ_BASE}/restricted/Search?fs=HomePage` },
+        body: new URLSearchParams({
+          P_IMO: String(imo), P_ENTREE_HOME_HIDDEN: String(imo),
+          ongletActifSC: "ship", checkbox_ship: "on", P_PAGE_SHIP: "1",
+        }),
+        redirect: "follow",
+      }, 12000);
       logger.info(`[equasis] B: status=${r2.status} url=${r2.url}`);
       if (r2.ok) {
         const b2html = await r2.text();
-        const b2text = b2html.replace(/<[^>]+>/g," ").replace(/\s+/g," ");
-        logger.info(`[equasis] B text (0-400): ${b2text.slice(0, 400)}`);
-        if (b2html.includes("Registered owner") || b2html.includes("ISM")) html = b2html;
+        logger.info(`[equasis] B text (0-500): ${textOf(b2html).slice(0, 500)}`);
+        if (hasData(b2html)) html = b2html;
+        else {
+          // Maybe got results list — follow any ShipInfo link
+          const lm = /href="([^"]*ShipInfo[^"]*)"/.exec(b2html) ||
+                     /action="([^"]*ShipInfo[^"]*)"/.exec(b2html);
+          if (lm) {
+            const lu = resolveUrl(r2.url, lm[1]);
+            if (lu) {
+              const lr = await safeFetch(lu, { headers: { ...hdrs, "Referer": r2.url }, redirect: "follow" }, 12000);
+              if (lr.ok) { const lh = await lr.text(); if (hasData(lh)) html = lh; }
+            }
+          }
+        }
       }
     }
 
-    // ── STRATEGY C: POST ByShip search form directly ─────────────────
-    if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
-      logger.info(`[equasis] Strategy C: POST ByShip search`);
+    // ── STRATEGY C: POST to restricted/Search?fs=ByShip with P_IMO ───
+    if (!hasData(html)) {
+      logger.info(`[equasis] Strategy C: POST restricted/Search?fs=ByShip`);
       const r3 = await safeFetch(`${EQ_BASE}/restricted/Search?fs=ByShip`, {
         method: "POST",
         headers: { ...hdrs, "Content-Type": "application/x-www-form-urlencoded",
           "Referer": `${EQ_BASE}/authen/HomePage?fs=HomePage` },
-        body: new URLSearchParams({ P_IMO: String(imo), P_SEARCH_TYPE: "IMO", submit: "Search" }),
+        body: new URLSearchParams({
+          P_IMO: String(imo), P_ENTREE_HOME_HIDDEN: String(imo),
+          ongletActifSC: "ship", checkbox_ship: "on",
+        }),
         redirect: "follow",
       }, 12000);
       logger.info(`[equasis] C: status=${r3.status} url=${r3.url}`);
       if (r3.ok) {
         const c3html = await r3.text();
-        const c3text = c3html.replace(/<[^>]+>/g," ").replace(/\s+/g," ");
-        logger.info(`[equasis] C text (0-400): ${c3text.slice(0, 400)}`);
-        if (c3html.includes("Registered owner") || c3html.includes("ISM")) html = c3html;
-        // Also check for ship link in results
-        if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
+        logger.info(`[equasis] C text (0-500): ${textOf(c3html).slice(0, 500)}`);
+        if (hasData(c3html)) { html = c3html; }
+        else {
           const lm = /href="([^"]*ShipInfo[^"]*)"/.exec(c3html) ||
                      /action="([^"]*ShipInfo[^"]*)"/.exec(c3html);
           if (lm) {
-            const lu = lm[1].startsWith("http") ? lm[1] : `https://www.equasis.org${lm[1]}`;
-            const lr = await safeFetch(lu, { headers: { ...hdrs, "Referer": r3.url }, redirect: "follow" }, 12000);
-            if (lr.ok) html = await lr.text();
+            const lu = resolveUrl(r3.url, lm[1]);
+            if (lu) {
+              const lr = await safeFetch(lu, { headers: { ...hdrs, "Referer": r3.url }, redirect: "follow" }, 12000);
+              if (lr.ok) { const lh = await lr.text(); if (hasData(lh)) html = lh; }
+            }
           }
         }
       }
     }
 
-    // ── STRATEGY D: legacy authen/ShipInfo POST ──────────────────────
-    if (!html || (!html.includes("Registered owner") && !html.includes("ISM"))) {
+    // ── STRATEGY D: legacy authen/ShipInfo POST ───────────────────────
+    if (!hasData(html)) {
       logger.info(`[equasis] Strategy D: POST authen/ShipInfo`);
       const r4 = await safeFetch(`${EQ_BASE}/authen/ShipInfo`, {
         method: "POST",
@@ -379,8 +445,8 @@ async function fetchFromEquasis(imo) {
       logger.info(`[equasis] D: status=${r4.status} url=${r4.url}`);
       if (r4.ok) {
         const d4html = await r4.text();
-        if (d4html.includes("Registered owner") || d4html.includes("ISM")) html = d4html;
-        else logger.info(`[equasis] D text (0-300): ${d4html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,300)}`);
+        logger.info(`[equasis] D text (0-500): ${textOf(d4html).slice(0, 500)}`);
+        if (hasData(d4html)) html = d4html;
       }
     }
 
@@ -547,7 +613,7 @@ async function fetchFromVesselFinder(imo) {
 // STEP 4: AI IMO LOOKUP — Claude searches all maritime sources
 // ═════════════════════════════════════════════════════════════════
 async function aiLookupByIMO(imo, vesselName) {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
+  if (!process.env.ANTHROPIC_API_KEY) { logger.warn("[ai-imo] ANTHROPIC_API_KEY not set — skipping"); return null; }
   try {
     const resp = await withTimeout(anthropic.messages.create({
       model: MODEL, max_tokens: 1000,
@@ -569,14 +635,15 @@ Return ONLY valid JSON (no markdown, no text before or after):
     if (!data.vessel_name && !data.owner_name) return null;
     logger.info(`[ai-imo] IMO ${imo}: vessel="${data.vessel_name}" owner="${data.owner_name}"`);
     return { ...data, source: "ai_imo_search" };
-  } catch (err) { logger.warn("[ai-imo] error:", err.message?.slice(0, 80)); return null; }
+  } catch (err) { logger.warn("[ai-imo] error:", err.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
 // STEP 5: AI COMPANY CONTACT SEARCH (email, phone, website)
 // ═════════════════════════════════════════════════════════════════
 async function aiSearchCompanyContacts(companyName, country) {
-  if (!companyName || !process.env.ANTHROPIC_API_KEY) return null;
+  if (!process.env.ANTHROPIC_API_KEY) { logger.warn("[ai-company] ANTHROPIC_API_KEY not set — skipping"); return null; }
+  if (!companyName) return null;
   try {
     const resp = await withTimeout(anthropic.messages.create({
       model: MODEL, max_tokens: 800,
@@ -598,7 +665,7 @@ Rules: verified only, null for uncertain. confidence: 0.9=official site, 0.75=di
     if (data.email && data.email.includes("example")) data.email = null;
     logger.info(`[ai-company] "${companyName}": email=${data.email} web=${data.website}`);
     return { ...data, source: "ai_web_search" };
-  } catch (err) { logger.warn("[ai-company] error:", err.message?.slice(0, 80)); return null; }
+  } catch (err) { logger.warn("[ai-company] error:", err.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -668,7 +735,7 @@ Return ONLY valid JSON: {"linkedin_url":null,"website":null,"found":false}` }],
     if (!data?.linkedin_url && !data?.website) return null;
     logger.info(`[linkedin] "${companyName}": ${data.linkedin_url}`);
     return data;
-  } catch (err) { logger.warn("[linkedin] error:", err.message?.slice(0, 60)); return null; }
+  } catch (err) { logger.warn("[linkedin] error:", err.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -736,7 +803,7 @@ Return ONLY valid JSON (no markdown):
     }), 40000);
     const text = resp.content.find(b => b.type === "text")?.text;
     return safeJson(text);
-  } catch (err) { logger.warn("[agent-org] error:", err.message?.slice(0, 80)); return null; }
+  } catch (err) { logger.warn("[agent-org] error:", err.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -757,7 +824,7 @@ Return ONLY valid JSON (no markdown):
     }), 35000);
     const text = resp.content.find(b => b.type === "text")?.text;
     return safeJson(text);
-  } catch (err) { logger.warn("[master-contact] error:", err.message?.slice(0, 80)); return null; }
+  } catch (err) { logger.warn("[master-contact] error:", err.message || String(err)); return null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
