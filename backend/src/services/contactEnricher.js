@@ -70,9 +70,27 @@ function extractPhones(text) {
 function safeJson(text) {
   if (!text) return null;
   try {
-    const m = text.match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : null;
+    // Match the LAST {...} block — avoids grabbing the prompt template if echoed back
+    const matches = [...text.matchAll(/\{[\s\S]*?\}/g)];
+    // Find the largest match (most likely the real answer, not a snippet)
+    const best = matches.reduce((a, b) => b[0].length > a[0].length ? b : a, { 0: "{}" });
+    return JSON.parse(best[0]);
   } catch { return null; }
+}
+
+// Reject company names that look like field-label echo or template garbage
+function isValidCompanyName(name) {
+  if (!name || typeof name !== "string") return false;
+  if (name.length < 3 || name.length > 120) return false;
+  // Reject if it contains 3+ JSON field keywords — means the AI returned the schema
+  const fieldKeywords = ["Website", "Email", "Address", "Manager", "Phone", "ISM", "Operator", "Owner"];
+  const hits = fieldKeywords.filter(k => name.includes(k)).length;
+  if (hits >= 3) return false;
+  // Reject pure lowercase (field names) or all-punctuation
+  if (/^[a-z_]+$/.test(name)) return false;
+  // Reject if it looks like a JSON key list
+  if (name.includes(":null") || name.includes('":"')) return false;
+  return true;
 }
 
 function withTimeout(promise, ms) {
@@ -241,18 +259,36 @@ async function fetchFromMarineTraffic(imo) {
       } catch { /* continue */ }
     }
 
-    // Scrape visible text
-    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-    const ownerM   = /(?:Registered Owner|Ship Owner)[:\s]+([A-Z][A-Z\s&.,'\-]{3,60})/i.exec(text);
-    const managerM = /(?:Manager|ISM Manager)[:\s]+([A-Z][A-Z\s&.,'\-]{3,60})/i.exec(text);
-    const flagM    = /(?:Flag)[:\s]+([A-Z][A-Za-z\s]{2,40})/i.exec(text);
-    const nameM    = /(?:Vessel Name|Ship Name)[:\s]+([A-Z][A-Z\s0-9\-]{2,40})/i.exec(text);
+    // Try meta description (often has vessel name and basic info)
+    const metaM = /<meta[^>]+(?:name="description"|property="og:description")[^>]+content="([^"]{10,300})"/i.exec(html);
+    if (metaM) {
+      const desc = metaM[1];
+      const nameInMeta = /^([A-Z][A-Z0-9\s\-]{2,35})\s*[-–,]/i.exec(desc);
+      if (nameInMeta) {
+        logger.info(`[marinetraffic] meta IMO ${imo}: vessel="${nameInMeta[1].trim()}"`);
+        return { vessel_name: nameInMeta[1].trim() || null, owner_name: null,
+                 source: "marinetraffic", confidence: 0.60 };
+      }
+    }
 
-    if (!ownerM && !managerM) return null;
-    logger.info(`[marinetraffic] IMO ${imo}: owner="${ownerM?.[1]}"`);
-    return { vessel_name: nameM?.[1]?.trim() || null, owner_name: ownerM?.[1]?.trim() || null,
-             manager_name: managerM?.[1]?.trim() || null, flag: flagM?.[1]?.trim() || null,
-             source: "marinetraffic", confidence: 0.78 };
+    // Look for owner in specific MT data rows (they render as: <td>Registered Owner</td><td>NAME</td>)
+    const ownerRowM = /Registered Owner[\s\S]{0,300}?<td[^>]*>([^<]{4,80})<\/td>/i.exec(html);
+    const mgrRowM   = /ISM Manager[\s\S]{0,300}?<td[^>]*>([^<]{4,80})<\/td>/i.exec(html);
+    const flagRowM  = /Flag[\s\S]{0,200}?<td[^>]*>([^<]{2,40})<\/td>/i.exec(html);
+
+    const ownerVal   = ownerRowM?.[1]?.trim().replace(/<[^>]+>/g,"").trim();
+    const mgrVal     = mgrRowM?.[1]?.trim().replace(/<[^>]+>/g,"").trim();
+    const flagVal    = flagRowM?.[1]?.trim().replace(/<[^>]+>/g,"").trim();
+
+    if (!isValidCompanyName(ownerVal) && !isValidCompanyName(mgrVal)) return null;
+    logger.info(`[marinetraffic] IMO ${imo}: owner="${ownerVal}" mgr="${mgrVal}"`);
+    return {
+      vessel_name:  null,
+      owner_name:   isValidCompanyName(ownerVal) ? ownerVal : null,
+      manager_name: isValidCompanyName(mgrVal)   ? mgrVal   : null,
+      flag:         flagVal || null,
+      source: "marinetraffic", confidence: 0.78,
+    };
   } catch (err) { logger.warn("[marinetraffic] error:", err.message?.slice(0, 60)); return null; }
 }
 
@@ -279,19 +315,51 @@ async function fetchFromVesselFinder(imo) {
       }
     }
 
-    // Vessel detail page scrape
+    // Vessel detail page scrape — use structured data, not naive regex on stripped text
     const pageRes = await safeFetch(
       `https://www.vesselfinder.com/vessels/details/${imo}`,
       { headers: { "Referer": "https://www.vesselfinder.com/" } }, 10000
     );
     if (!pageRes.ok) return null;
-    const text = (await pageRes.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-    const ownerM = /(?:Owner|Company)[:\s]+([A-Z][A-Z\s&.,'\-]{3,60})/i.exec(text);
-    const nameM  = /(?:Vessel|Ship)\s*Name[:\s]+([A-Z][A-Z\s0-9\-]{2,40})/i.exec(text);
-    if (!ownerM && !nameM) return null;
-    logger.info(`[vesselfinder] page IMO ${imo}: owner="${ownerM?.[1]}"`);
-    return { vessel_name: nameM?.[1]?.trim() || null, owner_name: ownerM?.[1]?.trim() || null,
-             source: "vesselfinder", confidence: 0.65 };
+    const html = await pageRes.text();
+
+    // Try JSON-LD first
+    const ldM = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/i.exec(html);
+    if (ldM) {
+      try {
+        const ld = JSON.parse(ldM[1]);
+        const ownerRaw = ld?.owner || ld?.manufacturer || null;
+        const nameRaw  = ld?.name || null;
+        if (isValidCompanyName(ownerRaw) || nameRaw) {
+          return { vessel_name: nameRaw || null, owner_name: isValidCompanyName(ownerRaw) ? ownerRaw : null,
+                   source: "vesselfinder", confidence: 0.68 };
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Try meta tags (og:description often has vessel + owner info)
+    const metaDesc = /<meta[^>]+(?:name="description"|property="og:description")[^>]+content="([^"]{10,200})"/i.exec(html);
+    if (metaDesc) {
+      const desc = metaDesc[1];
+      // VesselFinder descriptions look like: "EONIA - Container Ship - built 2008, flag Singapore, owner XYZ Shipping"
+      const ownerInMeta = /(?:owner|operated by)[:\s]+([A-Z][A-Za-z0-9\s&.,'-]{4,60})/i.exec(desc);
+      const nameInMeta  = /^([A-Z][A-Z0-9\s-]{2,35})\s*[-–]/i.exec(desc);
+      if (ownerInMeta && isValidCompanyName(ownerInMeta[1].trim())) {
+        logger.info(`[vesselfinder] meta IMO ${imo}: owner="${ownerInMeta[1].trim()}"`);
+        return { vessel_name: nameInMeta?.[1]?.trim() || null, owner_name: ownerInMeta[1].trim(),
+                 source: "vesselfinder", confidence: 0.65 };
+      }
+    }
+
+    // Last resort: look for owner in specific data table cells, not stripped full-page text
+    // VesselFinder renders owner in: <td class="v2">COMPANY NAME</td> after an "Owner" label
+    const ownerCellM = /Owner[\s\S]{0,200}?<td[^>]*class="v2"[^>]*>([^<]{3,80})<\/td>/i.exec(html);
+    if (ownerCellM && isValidCompanyName(ownerCellM[1].trim())) {
+      logger.info(`[vesselfinder] cell IMO ${imo}: owner="${ownerCellM[1].trim()}"`);
+      return { vessel_name: null, owner_name: ownerCellM[1].trim(), source: "vesselfinder", confidence: 0.62 };
+    }
+
+    return null;
   } catch (err) { logger.warn("[vesselfinder] error:", err.message?.slice(0, 60)); return null; }
 }
 
@@ -314,7 +382,11 @@ Return ONLY valid JSON (no markdown, no text before or after):
     }), 45000);
     const text = resp.content.find(b => b.type === "text")?.text;
     const data = safeJson(text);
-    if (!data || (!data.vessel_name && !data.owner_name)) return null;
+    if (!data) return null;
+    // Validate — reject if company name looks like echoed field labels
+    if (data.owner_name && !isValidCompanyName(data.owner_name)) data.owner_name = null;
+    if (data.manager_name && !isValidCompanyName(data.manager_name)) data.manager_name = null;
+    if (!data.vessel_name && !data.owner_name) return null;
     logger.info(`[ai-imo] IMO ${imo}: vessel="${data.vessel_name}" owner="${data.owner_name}"`);
     return { ...data, source: "ai_imo_search" };
   } catch (err) { logger.warn("[ai-imo] error:", err.message?.slice(0, 80)); return null; }
@@ -341,6 +413,9 @@ Rules: verified only, null for uncertain. confidence: 0.9=official site, 0.75=di
     const text = resp.content.find(b => b.type === "text")?.text;
     const data = safeJson(text);
     if (!data) return null;
+    // Sanity check: reject obviously bad emails/phones
+    if (data.email && !data.email.includes("@")) data.email = null;
+    if (data.email && data.email.includes("example")) data.email = null;
     logger.info(`[ai-company] "${companyName}": email=${data.email} web=${data.website}`);
     return { ...data, source: "ai_web_search" };
   } catch (err) { logger.warn("[ai-company] error:", err.message?.slice(0, 80)); return null; }
@@ -576,8 +651,8 @@ async function enrichVesselContact(imo, {
   if (!r.owner_name) {
     const mt = await fetchFromMarineTraffic(imo).catch(() => null);
     if (mt) {
-      r.owner_name   = r.owner_name   || mt.owner_name;
-      r.manager_name = r.manager_name || mt.manager_name;
+      r.owner_name   = r.owner_name   || (isValidCompanyName(mt.owner_name)   ? mt.owner_name   : null);
+      r.manager_name = r.manager_name || (isValidCompanyName(mt.manager_name) ? mt.manager_name : null);
       r.vessel_name  = r.vessel_name  || mt.vessel_name || vesselName;
       r.flag         = r.flag         || mt.flag;
       r.confidence   = Math.max(r.confidence || 0, mt.confidence || 0);
@@ -589,7 +664,7 @@ async function enrichVesselContact(imo, {
   if (!r.owner_name) {
     const vf = await fetchFromVesselFinder(imo).catch(() => null);
     if (vf) {
-      r.owner_name  = r.owner_name  || vf.owner_name;
+      r.owner_name  = r.owner_name  || (isValidCompanyName(vf.owner_name) ? vf.owner_name : null);
       r.vessel_name = r.vessel_name || vf.vessel_name || vesselName;
       r.flag        = r.flag        || vf.flag;
       r.confidence  = Math.max(r.confidence || 0, vf.confidence || 0);
@@ -601,10 +676,10 @@ async function enrichVesselContact(imo, {
   if (!r.owner_name || !r.vessel_name) {
     const aiImo = await aiLookupByIMO(imo, r.vessel_name || vesselName).catch(() => null);
     if (aiImo) {
-      r.owner_name    = r.owner_name    || aiImo.owner_name;
-      r.manager_name  = r.manager_name  || aiImo.manager_name;
-      r.ship_manager  = r.ship_manager  || aiImo.ship_manager;
-      r.operator_name = r.operator_name || aiImo.operator_name;
+      r.owner_name    = r.owner_name    || (isValidCompanyName(aiImo.owner_name)    ? aiImo.owner_name    : null);
+      r.manager_name  = r.manager_name  || (isValidCompanyName(aiImo.manager_name)  ? aiImo.manager_name  : null);
+      r.ship_manager  = r.ship_manager  || (isValidCompanyName(aiImo.ship_manager)  ? aiImo.ship_manager  : null);
+      r.operator_name = r.operator_name || (isValidCompanyName(aiImo.operator_name) ? aiImo.operator_name : null);
       r.vessel_name   = r.vessel_name   || aiImo.vessel_name || vesselName;
       r.flag          = r.flag          || aiImo.flag;
       r.website       = r.website       || aiImo.website;

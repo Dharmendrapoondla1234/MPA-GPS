@@ -78,17 +78,27 @@ app.use("/api", vesselRoutes); // covers /vessels, /arrivals, /departures, /port
 app.use("/api/contacts", contactRoutes); // vessel contact enrichment
 app.use("/api", contactRoutes);           // spec endpoint: GET /api/vessel-contact
 
-// ── DEBUG: test Equasis directly ─────────────────────────────────
-app.get("/debug/equasis/:imo", async (req, res) => {
+// ── DEBUG: test full enrichment pipeline ─────────────────────────
+app.get("/debug/enrich/:imo", async (req, res) => {
   try {
     const { enrichVesselContact } = require("./services/contactEnricher");
     const imo = parseInt(req.params.imo, 10);
     if (!imo) return res.json({ error: "Invalid IMO" });
+    // forceRefresh=true bypasses cache so you always see fresh results
     const result = await enrichVesselContact(imo, { forceRefresh: true });
     res.json({ success: true, data: result });
   } catch (err) {
-    res.json({ success: false, error: err.message });
+    res.json({ success: false, error: err.message, stack: err.stack?.split("\n").slice(0,5) });
   }
+});
+
+// ── DEBUG: clear cache for an IMO ────────────────────────────────
+app.get("/debug/clear-cache/:imo", (req, res) => {
+  try {
+    // Force cache bust by importing module and deleting from its map
+    // The easiest way: just restart the server, or use forceRefresh on /debug/enrich
+    res.json({ success: true, message: `Use /debug/enrich/${req.params.imo} to force refresh` });
+  } catch (err) { res.json({ success: false, error: err.message }); }
 });
 
 // ── DEBUG: sample raw + converted coords ─────────────────────
