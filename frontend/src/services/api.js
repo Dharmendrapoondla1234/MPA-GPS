@@ -219,6 +219,28 @@ export async function fetchVesselContactSpec(imo, {
   return call(`/vessel-contact?${p}`, { bustCache });
 }
 
+/**
+ * Fetch enriched company intelligence (domain + emails + phones)
+ * Uses the no-AI pipeline: DuckDuckGo + DNS + website scraping + SMTP validation
+ * Requires owner/manager names from Equasis first.
+ */
+export async function fetchVesselIntelligence(imo, { owner, manager, operator, ship_manager, forceRefresh = false } = {}) {
+  const p = new URLSearchParams();
+  if (owner)        p.set("owner",        owner);
+  if (manager)      p.set("manager",      manager);
+  if (operator)     p.set("operator",     operator);
+  if (ship_manager) p.set("ship_manager", ship_manager);
+  if (forceRefresh) p.set("forceRefresh", "true");
+  return call(`/vessel/${encodeURIComponent(imo)}/contact?${p}`, { bustCache: forceRefresh });
+}
+
+/**
+ * Fetch low-efficiency vessels heading to Singapore
+ */
+export async function fetchLowEfficiencyVessels() {
+  return call("/vessels/low-efficiency");
+}
+
 // ── AI PREDICTION ─────────────────────────────────────────────────
 export async function fetchRoutePrediction(imo) {
   return call(`/predict/${encodeURIComponent(imo)}`);

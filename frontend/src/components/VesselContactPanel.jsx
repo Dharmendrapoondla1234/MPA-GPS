@@ -2,7 +2,7 @@
 // Uses api.js service functions (fixes "Network error" by routing through the
 // shared call() helper which handles auth headers, caching, and error formatting)
 import React, { useState, useEffect, useCallback, memo } from "react";
-import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment } from "../services/api";
+import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment, fetchVesselIntelligence } from "../services/api";
 import "./VesselContactPanel.css";
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -162,6 +162,7 @@ function AgentCard({ agent }) {
 // ── Main Component ────────────────────────────────────────────────
 const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }) {
   const [contacts,  setContacts]  = useState(null);
+  const [intelligence, setIntelligence] = useState(null);
   const [agents,    setAgents]    = useState([]);
   const [loading,   setLoading]   = useState(false);
   const [enriching, setEnriching] = useState(false);
@@ -212,6 +213,21 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
       } : null;
       setContacts(data);
       setAgents(data?.port_agents || []);
+
+      // After getting Equasis data, run intelligence pipeline for emails/domain
+      // This works without AI: DuckDuckGo + DNS + website scraper + SMTP validation
+      const ownerName   = data?.owner?.company_name || null;
+      const managerName = data?.manager?.company_name || null;
+      const operatorName= data?.operator?.company_name || null;
+      const shipMgrName = data?.ship_manager?.company_name || null;
+      if (imo && (ownerName || managerName)) {
+        fetchVesselIntelligence(imo, {
+          owner: ownerName, manager: managerName,
+          operator: operatorName, ship_manager: shipMgrName,
+        }).then(intel => {
+          if (intel?.companies?.length > 0) setIntelligence(intel);
+        }).catch(() => {});
+      }
 
       // If no agents from contacts call, try standalone port agent lookup
       if (!(data?.port_agents?.length) && (currentPort || nextPort)) {
@@ -340,12 +356,51 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
             <CompanyCard title="ISM Manager"       company={contacts?.manager}      accent="#a78bfa" />
             <CompanyCard title="Ship Manager"      company={contacts?.ship_manager} accent="#26de81" />
 
+            {/* Intelligence pipeline results — emails/domain/phone from non-AI scraping */}
+            {intelligence && intelligence.companies?.length > 0 && (
+              <div className="cp-intelligence-panel">
+                <div className="cp-intel-header">
+                  <span className="cp-intel-icon">🔎</span>
+                  <span className="cp-intel-title">CONTACT INTELLIGENCE</span>
+                  <span className="cp-intel-badge">Domain · Email · Phone</span>
+                </div>
+                {intelligence.companies.map((co, i) => co.domain ? (
+                  <div key={i} className="cp-intel-company">
+                    <div className="cp-intel-company-name">{co.company} <span className="cp-intel-role">({co.role})</span></div>
+                    {co.domain && (
+                      <div className="cp-intel-row">
+                        <span className="cp-intel-label">🌐 Website</span>
+                        <a href={`https://${co.domain}`} target="_blank" rel="noopener noreferrer"
+                           className="cp-intel-link">{co.domain}</a>
+                      </div>
+                    )}
+                    {co.emails?.slice(0,3).map((e, j) => (
+                      <div key={j} className="cp-intel-row">
+                        <span className="cp-intel-label">✉ Email {j > 0 ? j+1 : ""}</span>
+                        <a href={`mailto:${e.email}`} className="cp-intel-link">{e.email}</a>
+                        <span className="cp-intel-conf" style={{color: e.confidence>=80?"#00ff9d":e.confidence>=60?"#fd9644":"#78909c"}}>
+                          {e.confidence}%
+                        </span>
+                        {e.smtp_valid && <span className="cp-intel-smtp">✓ SMTP</span>}
+                      </div>
+                    ))}
+                    {co.phones?.slice(0,2).map((p, j) => (
+                      <div key={j} className="cp-intel-row">
+                        <span className="cp-intel-label">☎ Phone</span>
+                        <span className="cp-intel-val">{p}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null)}
+              </div>
+            )}
+
             {!hasCompanyData && (
               <div className="cp-no-data">
                 <div className="cp-no-data-icon">🔍</div>
                 <div>No contact data found for this vessel.</div>
                 <div className="cp-no-data-sub">
-                  Click <strong>🤖 Re-enrich</strong> to search Equasis, AI web, and company directories.
+                  Click <strong>🤖 Re-enrich</strong> to search Equasis and company directories.
                 </div>
                 {imo && (
                   <div className="cp-no-data-links">

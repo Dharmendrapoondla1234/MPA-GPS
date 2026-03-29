@@ -346,3 +346,87 @@
 .cp-no-data-sub  { font-size: 11px; color: #455a64; line-height: 1.6; }
 .cp-no-data-links { font-size: 11px; }
 .cp-no-data-links a { color: #00e5ff; margin: 0 2px; }
+/* ── Intelligence Pipeline Panel ────────────────────────────────── */
+.cp-intelligence-panel {
+  background: rgba(0, 229, 255, 0.04);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 12px;
+}
+.cp-intel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.15);
+}
+.cp-intel-icon { font-size: 14px; }
+.cp-intel-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #00e5ff;
+}
+.cp-intel-badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: #546e7a;
+  background: rgba(0,229,255,0.08);
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+.cp-intel-company {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.cp-intel-company:last-child { border-bottom: none; margin-bottom: 0; }
+.cp-intel-company-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #cfd8dc;
+  margin-bottom: 6px;
+}
+.cp-intel-role {
+  font-size: 10px;
+  color: #546e7a;
+  font-weight: 400;
+}
+.cp-intel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.cp-intel-label {
+  min-width: 70px;
+  color: #546e7a;
+  font-size: 11px;
+}
+.cp-intel-link {
+  color: #00e5ff;
+  text-decoration: none;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-intel-link:hover { text-decoration: underline; }
+.cp-intel-val { color: #b0bec5; flex: 1; }
+.cp-intel-conf {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+}
+.cp-intel-smtp {
+  font-size: 10px;
+  color: #00ff9d;
+  background: rgba(0,255,157,0.1);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
