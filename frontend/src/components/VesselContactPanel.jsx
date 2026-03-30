@@ -18,7 +18,7 @@ function SourcePills({ source }) {
   const map = {
     equasis:"Equasis", ai_search:"AI Web", scrape:"Scraped",
     google_cse:"Google", vesselfinder:"VF", ai_enriched:"AI",
-    bigquery:"BQ", website_mailto:"Mailto", website_scraped:"Scraped",
+    bigquery:"Cached", website_mailto:"Mailto", website_scraped:"Scraped",
     smtp_validated:"SMTP✓", pattern_generated:"Pattern",
     "search+content_validated":"Search+Verified", "search+dns":"Search+DNS",
     "heuristic+content_validated":"Heuristic+Verified", "heuristic+dns":"Heuristic+DNS",

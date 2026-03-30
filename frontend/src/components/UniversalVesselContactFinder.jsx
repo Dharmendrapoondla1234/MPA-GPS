@@ -34,8 +34,8 @@ const SOURCE_MAP = {
   website_scrape:{ label: "Scraped",  color: "#00ff9d" },
   web_search:    { label: "Web",      color: "#fd9644" },
   google_cse:    { label: "Google",   color: "#fd9644" },
-  port_agent_db: { label: "DB",       color: "#26de81" },
-  bigquery:      { label: "BQ",       color: "#38bdf8" },
+  port_agent_db: { label: "Agents",   color: "#26de81" },
+  bigquery:      { label: "Cached",   color: "#38bdf8" },
   enricher:      { label: "Enricher", color: "#26de81" },
 };
 
@@ -48,10 +48,9 @@ const PIPELINE_STEPS = [
   { id: "scrape",         label: "Website contact scrape",     icon: "🕸", conf: 0.85 },
   { id: "google_cse",     label: "Google CSE extraction",      icon: "🔎", conf: 0.65 },
   { id: "linkedin",       label: "LinkedIn profile search",    icon: "💼", conf: 0.60 },
-  { id: "port_agents",    label: "Port agent DB + AI lookup",  icon: "⚓", conf: 0.80 },
+  { id: "port_agents",    label: "Port agent + AI lookup",     icon: "⚓", conf: 0.80 },
   { id: "agent_org",      label: "Husbandry agent org search", icon: "🏗", conf: 0.70 },
   { id: "master_channel", label: "Master contact channel",     icon: "👨‍✈️", conf: 0.50 },
-  { id: "bigquery",       label: "BigQuery persist",           icon: "💾", conf: 1.00 },
 ];
 
 function SourcePill({ src }) {
@@ -586,7 +585,7 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
                         ))}
                       </div>
                       <div className="ucf-pipe-summary">
-                        <span>Sources: Equasis · MarineTraffic · VesselFinder · Web Scraping · Port Agent DB</span>
+                        <span>Sources: Equasis · MarineTraffic · VesselFinder · Web Scraping · Port Agents</span>
                         <span className="ucf-pipe-overall" style={{ color: confColor(r.confidence) }}>
                           Overall: {Math.round((r.confidence || 0) * 100)}% confidence
                         </span>

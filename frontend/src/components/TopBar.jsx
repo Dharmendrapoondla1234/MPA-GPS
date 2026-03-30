@@ -1,4 +1,4 @@
-// src/components/TopBar.jsx — MPA Advanced v6
+// src/components/TopBar.jsx — MPA Advanced v7
 import React, { useState, useEffect, useRef } from "react";
 import { useCountdown } from "../hooks/useCountdown";
 import { logoutUser } from "../services/api";
@@ -16,6 +16,7 @@ export default function TopBar({
   prefsOpen,   onTogglePrefs,
   agentIntelOpen, onToggleAgentIntel,
   contactIntelOpen, onToggleContactIntel,
+  onOpenProfile,
 }) {
   const countdown = useCountdown(nextRefresh);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -62,7 +63,7 @@ export default function TopBar({
           </div>
           <div>
             <div className="tb-logo-text">MARINE<span>TRACK</span></div>
-            <div className="tb-logo-sub">LIVE AIS · BIGQUERY · DBT</div>
+            <div className="tb-logo-sub">LIVE AIS · MARITIME INTELLIGENCE</div>
           </div>
         </div>
 
@@ -215,32 +216,31 @@ export default function TopBar({
             </svg>
           </button>
 
-          {/* Port Agent Intelligence button */}
-          <div className="tb-divider-v" />
-          <button
-            className={`tb-btn tb-btn-intel${agentIntelOpen ? " active" : ""}`}
-            onClick={onToggleAgentIntel}
-            title="Port Agent Intelligence — find vessel contacts"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-              <circle cx="12" cy="10" r="3"/>
-            </svg>
-            <span className="tb-btn-label">AGENTS</span>
-          </button>
+          {/* Port Agent Intelligence + Contact Intelligence — grouped to avoid collision */}
+          <div className="tb-intel-group">
+            <button
+              className={`tb-btn tb-btn-intel${agentIntelOpen ? " active" : ""}`}
+              onClick={onToggleAgentIntel}
+              title="Port Agent Intelligence — find vessel contacts"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+              <span className="tb-btn-label">AGENTS</span>
+            </button>
 
-          {/* Universal Contact Intelligence button */}
-          <button
-            className={`tb-btn tb-btn-intel${contactIntelOpen ? " active" : ""}`}
-            onClick={onToggleContactIntel}
-            title="Universal Vessel Contact Finder"
-            style={{ marginLeft: 2 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.29a16 16 0 0 0 6.29 6.29l1.17-1.17a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
-            </svg>
-            <span className="tb-btn-label">CONTACTS</span>
-          </button>
+            <button
+              className={`tb-btn tb-btn-intel${contactIntelOpen ? " active" : ""}`}
+              onClick={onToggleContactIntel}
+              title="Universal Vessel Contact Finder"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.29a16 16 0 0 0 6.29 6.29l1.17-1.17a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+              </svg>
+              <span className="tb-btn-label">CONTACTS</span>
+            </button>
+          </div>
 
           {/* User menu */}
           <div className="tb-user-wrap" ref={wrapRef}>
@@ -253,11 +253,12 @@ export default function TopBar({
                 <div className="tb-user-email">{user?.email}</div>
                 <div className="tb-user-role">{user?.role?.toUpperCase()}</div>
                 <hr className="tb-user-hr"/>
-                <div className="tb-dbt-info">
-                  <div className="tb-dbt-row">📊 Project: <b>photons-377606</b></div>
-                  <div className="tb-dbt-row">🗄 Dataset: <b>Photons_MPA</b></div>
-                  <div className="tb-dbt-row">📋 Tables: fct_vessel_live_tracking</div>
-                </div>
+                <button className="tb-user-profile-btn" onClick={() => { setMenuOpen(false); onOpenProfile?.(); }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                  </svg>
+                  My Profile
+                </button>
                 <hr className="tb-user-hr"/>
                 <button className="tb-user-logout" onClick={handleLogout}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

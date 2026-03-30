@@ -11,6 +11,7 @@ import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import PreferredShipsGrid, { loadPreferredFromAPI, usePreferred } from "./components/PreferredShipsGrid";
 import WatchlistPanel, { loadWatchlistFromAPI, useWatchlist } from "./components/WatchlistPanel";
+import ProfilePanel from "./components/ProfilePanel";
 import "./styles/App.css";
 
 const VesselComparison           = lazy(() => import("./components/Vesselcomparison"));
@@ -107,6 +108,7 @@ export default function App() {
   const [preferredOpen,   setPreferredOpen]    = useState(false);
   const [watchlistOpen,   setWatchlistOpen]    = useState(false);
   const [watchlistMapFilter, setWatchlistMapFilter] = useState(false);
+  const [profileOpen,     setProfileOpen]      = useState(false);
   const mapRef = useRef(null);
 
   // ── Right-panel drag-to-resize ────────────────────────────────
@@ -301,6 +303,7 @@ export default function App() {
         prefsOpen={prefsOpen}          onTogglePrefs={openPrefs}
         agentIntelOpen={agentIntelOpen} onToggleAgentIntel={openAgentIntel}
         contactIntelOpen={contactIntelOpen} onToggleContactIntel={openContactIntel}
+        onOpenProfile={() => setProfileOpen(true)}
       />
 
       <ErrorBanner message={error} onRetry={refresh} />
@@ -399,6 +402,14 @@ export default function App() {
   watchlistMapFilter={watchlistMapFilter}
   onToggleMapFilter={() => setWatchlistMapFilter(p => !p)}
 />
+
+      {/* ── Profile Panel ── */}
+      <ProfilePanel
+        isOpen={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        user={user}
+        onLogout={handleLogout}
+      />
 
       <div className={`app-bottom-dock${dockOpen ? " open" : ""}`}>
         <Suspense fallback={null}>

@@ -469,3 +469,39 @@
 .tb-btn-label {
   font-size: 9px; font-weight: 800; letter-spacing: 0.8px;
 }
+
+/* ── Intel group — keep AGENTS + CONTACTS together, no collision ── */
+.tb-intel-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid rgba(0,229,255,0.12);
+  border-radius: 8px;
+  padding: 2px;
+  background: rgba(0,229,255,0.03);
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+.tb-intel-group .tb-btn {
+  border: none !important;
+  border-radius: 6px;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.tb-intel-group .tb-btn:hover,
+.tb-intel-group .tb-btn.active {
+  background: rgba(0,229,255,0.1) !important;
+  border: none !important;
+}
+
+/* ── Profile button in user menu ── */
+.tb-user-profile-btn {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; background: none; border: none;
+  color: #a0c8e8; font-size: 11px; font-family: 'Rajdhani', sans-serif;
+  font-weight: 600; letter-spacing: 0.05em;
+  padding: 6px 4px; cursor: pointer; border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.tb-user-profile-btn:hover { color: #00e5ff; background: rgba(0,229,255,0.06); }
+.tb-user-profile-btn svg { opacity: 0.6; }
