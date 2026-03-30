@@ -144,6 +144,7 @@ const MapView = forwardRef(function MapView(
   const weatherObjs    = useRef([]);
   const nauticalTileRef = useRef(null); // ← OpenSeaMap nautical tile overlay
   const mapZoomRef     = useRef(11);
+  const zoomUpdateTimeout = useRef(null);   // new
   const hasFitBounds   = useRef(false);
   const hoverCache     = useRef({});
   const hoverTimer     = useRef(null);
@@ -318,12 +319,16 @@ const MapView = forwardRef(function MapView(
       });
       map.addListener("zoom_changed", () => {
         const z = map.getZoom() ?? 11;
-        mapZoomRef.current = z;
         if (z < MIN_ZOOM) map.setZoom(MIN_ZOOM);
         if (z > MAX_ZOOM) map.setZoom(MAX_ZOOM);
-        // Re-scale only VISIBLE markers on zoom — not all 3000
-        // Defer to after tiles settle so it doesn't fight the zoom animation
-        requestAnimationFrame(() => {
+
+        if (mapZoomRef.current === z) return;
+        mapZoomRef.current = z;
+
+        if (zoomUpdateTimeout.current) {
+          clearTimeout(zoomUpdateTimeout.current);
+        }
+        zoomUpdateTimeout.current = setTimeout(() => {
           const bounds = mapObj.current?.getBounds();
           if (!bounds) return;
           Object.values(markersRef.current).forEach(m => {
@@ -333,7 +338,7 @@ const MapView = forwardRef(function MapView(
               m.setIcon(getVesselIcon(m._vessel, false, null, z));
             }
           });
-        });
+        }, 80);
       });
 
       setMapReady(true);
@@ -358,6 +363,10 @@ const MapView = forwardRef(function MapView(
     return () => {
       clearTimeout(hoverTimer.current);
       hoverTimer.current = null;
+      if (zoomUpdateTimeout.current) {
+        clearTimeout(zoomUpdateTimeout.current);
+        zoomUpdateTimeout.current = null;
+      }
       if (mapObj.current?._resizeObserver) {
         mapObj.current._resizeObserver.disconnect();
       }
@@ -400,8 +409,6 @@ const MapView = forwardRef(function MapView(
       nauticalTileRef.current = null;
     };
   }, [mapReady, layers.nauticalChart]);
-
-
 
   /* ── GIS layers ─────────────────────────────────────────── */
   useEffect(() => {
@@ -887,7 +894,7 @@ const MapView = forwardRef(function MapView(
 
     wps.slice(1,-1).forEach((wp,i) => {
       const dot=new window.google.maps.Marker({position:{lat:wp.lat,lng:wp.lng},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#e040fb",fillOpacity:1,strokeColor:"#ffe0ff",strokeWeight:2},title:wp.label||`Waypoint ${i+1}`,zIndex:10});
-      dot.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#12082a,#1e0f40);border:1px solid #7c3aed88;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#a78bfa;font-weight:700;font-size:10px">⚓ WAYPOINT</div><div style="font-size:13px;font-weight:700;color:#ede9fe;margin:4px 0">${wp.label||"Waypoint"}</div>${wp.eta_hours_from_now?`<div style="font-size:9px;color:#c4b5fd">ETA: ~${wp.eta_hours_from_now}h</div>`:""}</div>`);infoWin.current.setPosition({lat:wp.lat,lng:wp.lng});infoWin.current.open(mapObj.current);});
+      dot.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#12082a,#1e0f40);border:1px solid #7c3aed88;border-radius:8px;padding:10px 14px;color:#fff;min-width:220px"><div style="color:#a78bfa;font-weight:700;font-size:10px">⚓ WAYPOINT</div><div style="font-size:13px;font-weight:700;color:#ede9fe;margin:4px 0 5px">${wp.label||"Waypoint"}</div>${wp.eta_hours_from_now?`<div style="font-size:9px;color:#c4b5fd">ETA: ~${wp.eta_hours_from_now}h</div>`:""}</div>`);infoWin.current.setPosition({lat:wp.lat,lng:wp.lng});infoWin.current.open(mapObj.current);});
       predRouteObjs.current.push(dot);
     });
     predRouteObjs.current.push(new window.google.maps.Marker({position:{lat:start.lat,lng:start.lng},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:8,fillColor:"#00e5ff",fillOpacity:1,strokeColor:"#fff",strokeWeight:2},title:"Current Position",zIndex:12}));
@@ -1065,7 +1072,7 @@ const MapView = forwardRef(function MapView(
             <span className="mv-lp-title">⚓ NAUTICAL LAYERS</span>
             <button className="mv-lp-close" onClick={() => setShowLayerPanel(false)}>✕</button>
           </div>
-          {[
+          {([
             { key:"nauticalChart",   label:"Nautical Chart",     icon:"🗺️", col:"#1e7fff" },
             { key:"dangers",         label:"Dangers & Hazards",  icon:"⛔", col:"#ff2244" },
             { key:"depths",          label:"Depth Contours",     icon:"🌊", col:"#0055aa" },
@@ -1079,7 +1086,7 @@ const MapView = forwardRef(function MapView(
             { key:"vesselProximity", label:"Proximity Alerts",   icon:"📡", col:"#ff8800" },
             { key:"aiTrajectory",    label:"AI Trajectory Fill", icon:"🤖", col:"#7cdcff" },
             { key:"weatherStations", label:"Wind Stations",      icon:"🌬️", col:"#00e5ff" },
-          ].map(({ key, label, icon, col }) => (
+          ]).map(({ key, label, icon, col }) => (
             <div key={key} className={`mv-lp-row ${layers[key] ? "mv-lp-on" : ""}`} onClick={() => toggleLayer(key)}>
               <span className="mv-lp-icon">{icon}</span>
               <span className="mv-lp-label">{label}</span>
@@ -1090,8 +1097,6 @@ const MapView = forwardRef(function MapView(
           ))}
         </div>
       )}
-
-
 
 
       {/* ALERT PANEL */}
