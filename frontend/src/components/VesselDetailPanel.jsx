@@ -7,6 +7,8 @@ import {
 import { fetchVesselHistory, fetchRoutePrediction } from "../services/api";
 import VesselContactPanel from "./VesselContactPanel";
 import { StarButton } from "./PreferredShipsGrid";
+import { WatchlistStar } from "./WatchlistPanel";
+import FuelEfficiencyPanel from "./FuelEfficiencyPanel";
 import "./VesselDetailPanel.css";
 
 function bq(val) {
@@ -23,6 +25,7 @@ const TABS = [
   { id:"STATUS",   icon:"📊", label:"Status"   },
   { id:"TRAIL",    icon:"🛤", label:"Trail"    },
   { id:"PREDICT",  icon:"🤖", label:"AI"       },
+  { id:"FUEL",     icon:"⛽", label:"Fuel"     },
   { id:"CONTACTS", icon:"📞", label:"Contacts" },
 ];
 const HOUR_OPTIONS = [12,24,48,72];
@@ -177,6 +180,7 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
         </div>
         <div className="dp-head-actions">
           <StarButton vessel={vessel} className="dp-star-btn" />
+          <WatchlistStar vessel={vessel} className="dp-star-btn" />
           <button className="dp-close" onClick={onClose}>✕</button>
         </div>
       </div>
@@ -568,6 +572,10 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
             onLoad={loadPrediction}
             onToggleRoute={togglePredictRoute}
           />
+        )}
+
+        {tab==="FUEL" && (
+          <FuelEfficiencyPanel vessel={vessel} />
         )}
 
         {tab==="CONTACTS" && (

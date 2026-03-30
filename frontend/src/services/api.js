@@ -142,8 +142,8 @@ export async function fetchVesselHistory(imo, hours = 24) {
 }
 
 // ── ARRIVALS & DEPARTURES ─────────────────────────────────────────
-export async function fetchArrivals(limit = 50)   { return call(`/arrivals?limit=${limit}`); }
-export async function fetchDepartures(limit = 50) { return call(`/departures?limit=${limit}`); }
+export async function fetchArrivals(limit = 500)   { return call(`/arrivals?limit=${limit}`); }
+export async function fetchDepartures(limit = 500) { return call(`/departures?limit=${limit}`); }
 export async function fetchPortActivity()         { return call("/port-activity"); }
 
 // ── CONTACT ENRICHMENT ────────────────────────────────────────────
@@ -322,3 +322,40 @@ export async function removePreferredShipAPI(imo) {
 export async function clearPreferredShipsAPI() {
   return call("/preferred", { method: "DELETE", bustCache: true });
 }
+
+// ── WATCHLIST (BigQuery MPA_Watchlist — per user email) ───────────
+export async function fetchWatchlist() {
+  return call("/watchlist", { bustCache: true });
+}
+
+export async function addToWatchlistAPI(vessel) {
+  return call("/watchlist", {
+    method: "POST",
+    body: {
+      imo_number:  String(vessel.imo_number || ""),
+      vessel_name: vessel.vessel_name || vessel.name || "",
+      vessel_type: vessel.vessel_type || "",
+      flag:        vessel.flag || "",
+      notes:       vessel.notes || "",
+    },
+    bustCache: true,
+  });
+}
+
+export async function removeFromWatchlistAPI(imo) {
+  return call(`/watchlist/${encodeURIComponent(imo)}`, { method: "DELETE", bustCache: true });
+}
+
+export async function clearWatchlistAPI() {
+  return call("/watchlist", { method: "DELETE", bustCache: true });
+}
+
+// ── FUEL EFFICIENCY ───────────────────────────────────────────────
+export async function fetchVesselFuelEfficiency(imo) {
+  return call(`/fuel/vessel/${imo}`);
+}
+
+export async function fetchFleetFuelEfficiency(limit = 200) {
+  return call(`/fuel/fleet?limit=${limit}`);
+}
+

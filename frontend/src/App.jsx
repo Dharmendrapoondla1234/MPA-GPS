@@ -10,6 +10,7 @@ import PortActivityPanel from "./components/PortActivityPanel";
 import { useVessels } from "./hooks/useVessels";
 import { getCurrentUser, logoutUser } from "./services/api";
 import PreferredShipsGrid, { loadPreferredFromAPI, usePreferred } from "./components/PreferredShipsGrid";
+import WatchlistPanel, { loadWatchlistFromAPI, useWatchlist } from "./components/WatchlistPanel";
 import "./styles/App.css";
 
 const VesselComparison           = lazy(() => import("./components/Vesselcomparison"));
@@ -104,6 +105,8 @@ export default function App() {
   const [agentIntelOpen,  setAgentIntelOpen]   = useState(false);
   const [contactIntelOpen, setContactIntelOpen] = useState(false);
   const [preferredOpen,   setPreferredOpen]    = useState(false);
+  const [watchlistOpen,   setWatchlistOpen]    = useState(false);
+  const [watchlistMapFilter, setWatchlistMapFilter] = useState(false);
   const mapRef = useRef(null);
 
   // ── Right-panel drag-to-resize ────────────────────────────────
@@ -146,12 +149,22 @@ export default function App() {
   const { vessels: rawVessels, stats, vesselTypes, loading, error, nextRefresh, lastUpdated, refresh } = useVessels(filters);
   const preferredList  = usePreferred();
   const preferredCount = preferredList.length;
+  const watchlistList  = useWatchlist();
+  const watchlistCount = watchlistList.length;
 
   // Client-side flag filter (flag is not a BigQuery param, applied here)
   const vessels = useMemo(() => {
-    if (!filters.flag) return rawVessels;
-    return rawVessels.filter(v => v.flag === filters.flag);
+    let v = rawVessels;
+    if (filters.flag) v = v.filter(vessel => vessel.flag === filters.flag);
+    return v;
   }, [rawVessels, filters.flag]);
+
+  // Vessels shown on map — filtered to watchlist when watchlistMapFilter is on
+  const mapVessels = useMemo(() => {
+    if (!watchlistMapFilter || !watchlistList.length) return vessels;
+    const imoSet = new Set(watchlistList.map(w => String(w.imo_number)));
+    return vessels.filter(v => imoSet.has(String(v.imo_number)));
+  }, [vessels, watchlistMapFilter, watchlistList]);
 
   // Unique flag codes for the TopBar dropdown — derived from live data
   const flagOptions = useMemo(() => {
@@ -207,6 +220,7 @@ export default function App() {
     logoutUser(); setUser(null); resetFreeTimer(); setFreeExpired(false);
     // Clear in-memory watchlist so next user doesn't see previous user's ships
     loadPreferredFromAPI();
+    loadWatchlistFromAPI();
   }, []);
 
   const handleSearchEnter    = useCallback(() => {
@@ -226,6 +240,7 @@ export default function App() {
     setFreeExpired(false);
     // Load this user's watchlist from BigQuery
     loadPreferredFromAPI();
+    loadWatchlistFromAPI();
   }, []);
 
   // Stable panel toggles — one panel open at a time
@@ -235,6 +250,16 @@ export default function App() {
   const openPrefs      = useCallback(() => { setPrefsOpen(p => !p);      setCompareOpen(false); setAlertsOpen(false);  setHeatmapOpen(false); setAgentIntelOpen(false); }, []);
   const openAgentIntel = useCallback(() => { setAgentIntelOpen(p => !p); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); setContactIntelOpen(false); }, []);
   const openContactIntel = useCallback(() => { setContactIntelOpen(p => !p); setAgentIntelOpen(false); setCompareOpen(false); setAlertsOpen(false); setHeatmapOpen(false); setPrefsOpen(false); }, []);
+
+  // Locate vessel on map from watchlist
+  const handleLocateVessel = useCallback((vessel) => {
+    setWatchlistOpen(false);
+    setSelectedVessel(vessel);
+    setTimeout(() => {
+      if (mapRef.current?.panToVessel) mapRef.current.panToVessel(vessel);
+      mapRef.current?.triggerResize?.();
+    }, 200);
+  }, []);
 
   // Stable inline handlers — previously created new functions on every render
   const handleTogglePanel      = useCallback(() => setPanelOpen(p => !p), []);
@@ -268,6 +293,8 @@ export default function App() {
         portPanelOpen={portPanelOpen} onTogglePortPanel={handleTogglePortPanel}
         preferredOpen={preferredOpen}   onTogglePreferred={() => setPreferredOpen(p => !p)}
         preferredCount={preferredCount}
+        watchlistOpen={watchlistOpen}   onToggleWatchlist={() => setWatchlistOpen(p => !p)}
+        watchlistCount={watchlistCount}
         compareOpen={compareOpen}      onToggleCompare={openCompare}
         alertsOpen={alertsOpen}        onToggleAlerts={openAlerts}   alertCount={alertCount}
         heatmapOpen={heatmapOpen}      onToggleHeatmap={openHeatmap}
@@ -300,7 +327,7 @@ export default function App() {
           />
 
           <MemoMapView
-            ref={mapRef}            vessels={vessels}
+            ref={mapRef}            vessels={mapVessels}
             selectedVessel={selectedVessel} onVesselClick={handleSelectVessel}
             trailData={trailData}   predictRoute={predictRoute}
             portPanelOpen={portPanelOpen} onTogglePortPanel={handleTogglePortPanel}
@@ -361,6 +388,17 @@ export default function App() {
         isOpen={preferredOpen}
         onClose={() => setPreferredOpen(false)}
       />
+
+      {/* ── Watchlist Panel (BigQuery-backed) ── */}
+      <WatchlistPanel
+  vessels={vessels}
+  onSelectVessel={handleSelectVessel}
+  onLocateVessel={handleLocateVessel}
+  isOpen={watchlistOpen}
+  onClose={() => setWatchlistOpen(false)}
+  watchlistMapFilter={watchlistMapFilter}
+  onToggleMapFilter={() => setWatchlistMapFilter(p => !p)}
+/>
 
       <div className={`app-bottom-dock${dockOpen ? " open" : ""}`}>
         <Suspense fallback={null}>

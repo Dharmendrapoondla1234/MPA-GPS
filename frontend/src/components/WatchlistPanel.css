@@ -1,0 +1,225 @@
+/* WatchlistPanel.css */
+.wl-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(3,12,24,0.80);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 20px 16px;
+  animation: wl-fade 0.18s ease;
+}
+@keyframes wl-fade { from { opacity: 0 } to { opacity: 1 } }
+
+.wl-panel {
+  background: #050f1c;
+  border: 1px solid rgba(0,229,255,0.18);
+  border-radius: 12px;
+  width: 100%; max-width: 980px;
+  max-height: calc(100vh - 40px);
+  display: flex; flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(0,229,255,0.06);
+  animation: wl-slide 0.22s cubic-bezier(0.34,1.56,0.64,1);
+  overflow: hidden;
+}
+@keyframes wl-slide { from { transform: translateY(18px); opacity: 0 } to { transform: none; opacity: 1 } }
+
+/* ── Header ── */
+.wl-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid rgba(0,229,255,0.08);
+  flex-shrink: 0;
+}
+.wl-header-left { display: flex; align-items: center; gap: 12px; }
+.wl-header-icon { font-size: 22px; color: #ffaa00; }
+.wl-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px; font-weight: 800; letter-spacing: 0.12em; color: #e8f6ff;
+}
+.wl-subtitle { font-size: 11px; color: #4a7a9b; margin-top: 2px; }
+.wl-close-btn {
+  background: transparent; border: 1px solid rgba(255,255,255,0.1);
+  color: #546e7a; border-radius: 5px; padding: 5px 9px;
+  cursor: pointer; font-size: 13px; transition: all 0.15s;
+}
+.wl-close-btn:hover { background: rgba(255,50,50,0.12); color: #ff5577; border-color: rgba(255,50,50,0.3); }
+
+/* ── Controls ── */
+.wl-controls {
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  flex-shrink: 0;
+}
+.wl-search-wrap {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 7px; padding: 0 10px; margin-bottom: 8px;
+}
+.wl-search-icon { color: #546e7a; font-size: 13px; }
+.wl-search {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: #e8f6ff; font-size: 13px; padding: 7px 0;
+}
+.wl-search::placeholder { color: #546e7a; }
+.wl-search-clear {
+  background: transparent; border: none; color: #546e7a;
+  cursor: pointer; padding: 2px 4px; font-size: 12px;
+}
+.wl-sort-row {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.wl-sort-label { font-size: 11px; color: #4a7a9b; margin-right: 2px; }
+.wl-sort-btn {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  color: #607d8b; border-radius: 4px; padding: 3px 8px;
+  cursor: pointer; font-size: 11px; transition: all 0.15s;
+}
+.wl-sort-btn.active, .wl-sort-btn:hover {
+  background: rgba(0,229,255,0.1); color: #00e5ff; border-color: rgba(0,229,255,0.3);
+}
+.wl-toggle-label {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: #607d8b; cursor: pointer;
+  margin-right: 8px;
+}
+
+/* ── Fleet summary bar ── */
+.wl-fleet-bar {
+  display: flex; gap: 1px;
+  background: rgba(0,229,255,0.06);
+  border-bottom: 1px solid rgba(0,229,255,0.08);
+  flex-shrink: 0;
+}
+.wl-fleet-stat {
+  flex: 1; padding: 8px 12px; text-align: center;
+  border-right: 1px solid rgba(255,255,255,0.04);
+}
+.wl-fleet-stat:last-child { border-right: none; }
+.wl-fleet-val { display: block; font-size: 18px; font-weight: 700; color: #00e5ff; line-height: 1.2; }
+.wl-fleet-label { font-size: 10px; color: #4a7a9b; letter-spacing: 0.05em; text-transform: uppercase; }
+
+/* ── Body / Grid ── */
+.wl-body { flex: 1; overflow-y: auto; padding: 14px; }
+.wl-body::-webkit-scrollbar { width: 4px; }
+.wl-body::-webkit-scrollbar-track { background: transparent; }
+.wl-body::-webkit-scrollbar-thumb { background: rgba(0,229,255,0.2); border-radius: 2px; }
+
+.wl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+/* ── Vessel card ── */
+.wl-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 9px; padding: 12px;
+  cursor: pointer; transition: all 0.18s;
+}
+.wl-card:hover {
+  background: rgba(0,229,255,0.05);
+  border-color: rgba(0,229,255,0.22);
+  transform: translateY(-1px);
+}
+.wl-card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 4px; }
+.wl-card-name {
+  font-size: 13px; font-weight: 600; color: #e8f6ff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 160px;
+}
+.wl-card-actions { display: flex; gap: 4px; }
+.wl-locate-btn, .wl-remove-btn {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 13px; padding: 2px 4px; border-radius: 3px;
+  transition: background 0.12s;
+}
+.wl-locate-btn { color: #4a7a9b; }
+.wl-locate-btn:hover { background: rgba(0,229,255,0.1); color: #00e5ff; }
+.wl-remove-btn { color: #4a7a9b; }
+.wl-remove-btn:hover { background: rgba(255,50,50,0.1); color: #ff5577; }
+.wl-card-imo { font-size: 10px; color: #4a7a9b; margin-bottom: 8px; }
+
+.wl-card-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.wl-speed { font-size: 16px; font-weight: 700; }
+.wl-status { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; }
+.wl-status.moving { color: #00ff9d; }
+.wl-status.stopped { color: #546e7a; }
+
+/* CII badge */
+.wl-cii-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+  padding: 2px 6px; border-radius: 3px; color: #050f1c;
+}
+
+/* Fuel gauge */
+.wl-fuel-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.wl-fuel-label { font-size: 10px; color: #4a7a9b; white-space: nowrap; }
+.wl-gauge-wrap {
+  flex: 1; height: 6px; background: rgba(255,255,255,0.06);
+  border-radius: 3px; position: relative; overflow: visible;
+}
+.wl-gauge-bar { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+.wl-gauge-val {
+  position: absolute; right: -28px; top: -5px;
+  font-size: 10px; color: #8aabb8; white-space: nowrap;
+}
+
+.wl-fuel-details {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+  font-size: 10px; color: #607d8b;
+}
+.wl-fuel-details span { white-space: nowrap; }
+
+.wl-dest {
+  font-size: 11px; color: #4a7a9b;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 6px;
+}
+.wl-card-footer { display: flex; gap: 4px; flex-wrap: wrap; }
+.wl-tag {
+  font-size: 9px; background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 3px; padding: 1px 5px; color: #607d8b;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.wl-tag-flag { border-color: rgba(0,229,255,0.15); color: #4a8aaa; }
+
+/* ── Empty state ── */
+.wl-empty {
+  text-align: center; padding: 48px 24px; color: #4a7a9b;
+}
+.wl-empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.5; }
+.wl-empty-title { font-size: 15px; font-weight: 600; color: #607d8b; margin-bottom: 8px; }
+.wl-empty-sub { font-size: 12px; line-height: 1.6; }
+
+/* ── Footer ── */
+.wl-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  flex-shrink: 0;
+}
+.wl-clear-btn {
+  background: transparent; border: 1px solid rgba(255,100,100,0.2);
+  color: #7a4a4a; border-radius: 5px; padding: 5px 12px;
+  cursor: pointer; font-size: 12px; transition: all 0.15s;
+}
+.wl-clear-btn:hover:not(:disabled) { background: rgba(255,50,50,0.1); color: #ff5577; border-color: rgba(255,50,50,0.4); }
+.wl-clear-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.wl-footer-hint { font-size: 11px; color: #2a4a5a; }
+
+/* ── Star button (used inline in other components) ── */
+.wl-star-btn {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 18px; color: #546e7a; padding: 2px 4px;
+  transition: all 0.15s; line-height: 1;
+}
+.wl-star-btn:hover { color: #ffaa00; transform: scale(1.15); }
+.wl-star-btn--on { color: #ffaa00; text-shadow: 0 0 8px rgba(255,170,0,0.5); }
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .wl-grid { grid-template-columns: 1fr; }
+  .wl-fleet-bar { flex-wrap: wrap; }
+  .wl-fleet-stat { min-width: 50%; }
+}

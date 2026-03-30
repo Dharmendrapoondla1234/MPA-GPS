@@ -356,11 +356,11 @@ async function getVesselDetail(imoNumber) {
 // ════════════════════════════════════════════════════════════════
 //  ARRIVALS
 // ════════════════════════════════════════════════════════════════
-async function getRecentArrivals(limit = 50) {
+async function getRecentArrivals(limit = 500) {
   const hit = fromCache("arrivals");
   if (hit) return hit;
   const dbt = await useDbt();
-  const lim = Math.min(parseInt(limit) || 50, 200);
+  const lim = Math.min(parseInt(limit) || 500, 2000);
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
@@ -368,8 +368,8 @@ async function getRecentArrivals(limit = 50) {
                   CASE WHEN arrival_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
                 FROM ${T.ARRIVALS}
                 WHERE arrival_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-                   OR arrival_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 3 DAY)
-                ORDER BY arrival_time DESC LIMIT ${lim}`,
+                   OR arrival_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
+                ORDER BY arrival_time ASC LIMIT ${lim}`,
         location: BQ_LOCATION,
       });
       return toCache("arrivals", rows);
@@ -382,8 +382,8 @@ async function getRecentArrivals(limit = 50) {
   const [rows] = await bigquery.query({
     query: `SELECT * FROM ${T.LEGACY_ARRIVALS}
             WHERE TIMESTAMP(COALESCE(arrivedTime, arrived_time, arrival_time))
-              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 DAY)
-            ORDER BY 1 DESC LIMIT ${lim}`,
+              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+            ORDER BY TIMESTAMP(COALESCE(arrivedTime, arrived_time, arrival_time)) ASC LIMIT ${lim}`,
     location: BQ_LOCATION,
   });
   return toCache("arrivals", rows);
@@ -392,18 +392,18 @@ async function getRecentArrivals(limit = 50) {
 // ════════════════════════════════════════════════════════════════
 //  DEPARTURES
 // ════════════════════════════════════════════════════════════════
-async function getRecentDepartures(limit = 50) {
+async function getRecentDepartures(limit = 500) {
   const hit = fromCache("departures");
   if (hit) return hit;
   const dbt = await useDbt();
-  const lim = Math.min(parseInt(limit) || 50, 200);
+  const lim = Math.min(parseInt(limit) || 500, 2000);
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
         query: `SELECT *,
                   CASE WHEN departure_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
                 FROM ${T.DEPARTURES}
-                WHERE departure_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+                WHERE departure_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
                   AND departure_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
                 ORDER BY departure_time ASC LIMIT ${lim}`,
         location: BQ_LOCATION,
@@ -418,8 +418,8 @@ async function getRecentDepartures(limit = 50) {
   const [rows] = await bigquery.query({
     query: `SELECT * FROM ${T.LEGACY_DEPARTURES}
             WHERE TIMESTAMP(COALESCE(departedTime, departed_time, departure_time))
-              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 DAY)
-            ORDER BY 1 DESC LIMIT ${lim}`,
+              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+            ORDER BY TIMESTAMP(COALESCE(departedTime, departed_time, departure_time)) ASC LIMIT ${lim}`,
     location: BQ_LOCATION,
   });
   return toCache("departures", rows);
@@ -597,6 +597,20 @@ const T_PREFERRED = `\`${PROJECT}.${DATASET}.MPA_Preferred_Ships\``;
 const T_EQUASIS   = `\`${PROJECT}.${DATASET}.MPA_Equasis_Data\``;
 const T_CONTACTS  = `\`${PROJECT}.${DATASET}.MPA_Company_Contacts\``;
 const T_PORT_AGENTS = `\`${PROJECT}.${DATASET}.MPA_Port_Agent_Contacts\``;
+
+/* CREATE TABLE DDL (run once in BigQuery console):
+
+CREATE TABLE IF NOT EXISTS `photons-377606.MPA.MPA_Watchlist` (
+  user_id      STRING NOT NULL,
+  user_email   STRING,
+  imo_number   STRING NOT NULL,
+  vessel_name  STRING,
+  vessel_type  STRING,
+  flag         STRING,
+  notes        STRING,
+  added_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
+*/
 
 /* CREATE TABLE DDL (run once in BigQuery console):
 

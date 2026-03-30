@@ -15,6 +15,8 @@ const weatherRoutes = require("./routes/weather");
 const contactRoutes     = require("./routes/contacts");
 const intelligenceRoutes = require("./routes/intelligence");
 const preferredRoutes   = require("./routes/preferred");
+const watchlistRoutes   = require("./routes/watchlist");
+const fuelRoutes        = require("./routes/fuel");
 const logger = require("./utils/logger");
 const { warmCache, bigquery, BQ_LOCATION, T } = require("./services/bigquery");
 const maritimeRouter = require("./services/maritimeRouter");
@@ -82,6 +84,8 @@ app.use("/api", contactRoutes);               // spec endpoint: GET /api/vessel-
 app.use("/api/intelligence", intelligenceRoutes); // domain pipeline + efficiency scoring
 app.use("/api", intelligenceRoutes);          // /api/vessel/:imo/contact, /api/vessels/low-efficiency
 app.use("/api/preferred", preferredRoutes);   // per-user watchlist
+app.use("/api/watchlist", watchlistRoutes);   // per-user watchlist (BigQuery backed)
+app.use("/api/fuel",      fuelRoutes);        // fuel efficiency + CII
 
 // ── DEBUG: test full enrichment pipeline ─────────────────────────
 app.get("/debug/enrich/:imo", async (req, res) => {

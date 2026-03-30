@@ -20,6 +20,7 @@ const { BigQuery }  = require("@google-cloud/bigquery");
 const Anthropic     = require("@anthropic-ai/sdk");
 const logger        = require("../utils/logger");
 const { lookupPortAgents, rankAgents } = require("./portAgentDB");
+const { findCompanyContactsWeb, searchMaritimeDBsForIMO } = require("./webContactFinder");
 
 const PROJECT     = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
 const DATASET     = process.env.BIGQUERY_DATASET    || "MPA";
@@ -766,10 +767,14 @@ async function fetchFromVesselFinder(imo) {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 4: AI IMO LOOKUP — Claude searches all maritime sources
+// STEP 4: AI IMO LOOKUP — falls back to web scraping when API unavailable
 // ═════════════════════════════════════════════════════════════════
 async function aiLookupByIMO(imo, vesselName) {
-  if (!process.env.ANTHROPIC_API_KEY) { logger.warn("[ai-imo] ANTHROPIC_API_KEY not set — skipping"); return null; }
+  // Always try web scraping first (free, no API needed)
+  const webResult = await searchMaritimeDBsForIMO(imo, vesselName).catch(() => null);
+  if (webResult?.owner_name) return webResult;
+
+  if (!process.env.ANTHROPIC_API_KEY) { logger.debug("[ai-imo] API key not set, returning web result"); return webResult || null; }
   try {
     const resp = await withTimeout(anthropic.messages.create({
       model: MODEL, max_tokens: 1000,
@@ -784,22 +789,25 @@ Return ONLY valid JSON (no markdown, no text before or after):
     }), 45000);
     const text = resp.content.find(b => b.type === "text")?.text;
     const data = safeJson(text);
-    if (!data) return null;
-    // Validate — reject if company name looks like echoed field labels
+    if (!data) return webResult || null;
     if (data.owner_name && !isValidCompanyName(data.owner_name)) data.owner_name = null;
     if (data.manager_name && !isValidCompanyName(data.manager_name)) data.manager_name = null;
-    if (!data.vessel_name && !data.owner_name) return null;
+    if (!data.vessel_name && !data.owner_name) return webResult || null;
     logger.info(`[ai-imo] IMO ${imo}: vessel="${data.vessel_name}" owner="${data.owner_name}"`);
     return { ...data, source: "ai_imo_search" };
-  } catch (err) { logger.warn(`[ai-imo] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
+  } catch (err) { logger.warn(`[ai-imo] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return webResult || null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
-// STEP 5: AI COMPANY CONTACT SEARCH (email, phone, website)
+// STEP 5: AI COMPANY CONTACT SEARCH — falls back to web scraping
 // ═════════════════════════════════════════════════════════════════
 async function aiSearchCompanyContacts(companyName, country) {
-  if (!process.env.ANTHROPIC_API_KEY) { logger.warn("[ai-company] ANTHROPIC_API_KEY not set — skipping"); return null; }
   if (!companyName) return null;
+  // Always try web-based search first (free)
+  const webResult = await findCompanyContactsWeb(companyName, country).catch(() => null);
+  if (webResult?.email) return webResult;
+
+  if (!process.env.ANTHROPIC_API_KEY) { logger.debug("[ai-company] API key not set, returning web result"); return webResult || null; }
   try {
     const resp = await withTimeout(anthropic.messages.create({
       model: MODEL, max_tokens: 800,
@@ -815,13 +823,12 @@ Rules: verified only, null for uncertain. confidence: 0.9=official site, 0.75=di
     }), 40000);
     const text = resp.content.find(b => b.type === "text")?.text;
     const data = safeJson(text);
-    if (!data) return null;
-    // Sanity check: reject obviously bad emails/phones
+    if (!data) return webResult || null;
     if (data.email && !data.email.includes("@")) data.email = null;
     if (data.email && data.email.includes("example")) data.email = null;
     logger.info(`[ai-company] "${companyName}": email=${data.email} web=${data.website}`);
     return { ...data, source: "ai_web_search" };
-  } catch (err) { logger.warn(`[ai-company] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
+  } catch (err) { logger.warn(`[ai-company] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return webResult || null; }
 }
 
 // ═════════════════════════════════════════════════════════════════
