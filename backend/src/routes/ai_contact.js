@@ -38,12 +38,14 @@ function extractPhones(text) {
     .filter(p => p.replace(/\D/g, "").length >= 7 && p.replace(/\D/g, "").length <= 15);
 }
 function first(...vals) { return vals.find(v => v != null && v !== "") ?? null; }
+
 function addSrc(cur, next) {
   if (!next) return cur;
-  const parts = cur ? cur.split("+") : [];
+  const parts = (cur ? cur.split("+").filter(Boolean) : []);
   next.split("+").forEach(p => { if (p && !parts.includes(p)) parts.push(p); });
   return parts.join("+");
 }
+
 function withTimeout(p, ms, label) {
   let t;
   return Promise.race([
@@ -66,7 +68,7 @@ const KNOWN_DOMAINS = {
   "EVERGREEN": "evergreen-marine.com", "COSCO": "cosco.com",
   "YANG MING": "yangming.com", "HMM": "hmm21.com",
   "HAPAG-LLOYD": "hapag-lloyd.com", "CMA CGM": "cmacgm.com",
-  "MSC ": "msc.com", "MAERSK": "maersk.com",
+  "MSC": "msc.com", "MAERSK": "maersk.com",
   "PIL": "pilship.com", "PACIFIC INTERNATIONAL": "pilship.com",
   "BW GROUP": "bwgroup.com", "TEEKAY": "teekay.com",
   "FRONTLINE": "frontline.bm", "DHT": "dhtankers.com",
@@ -125,30 +127,47 @@ async function stepEquasis(imo, name, curPort, nextPort, vtype) {
   try {
     const { enrichVesselContact } = require("../services/contactEnricher");
     const result = await enrichVesselContact(imo, {
-      vesselName: name || null, currentPort: curPort || null,
-      nextPort: nextPort || null, vesselType: vtype || null,
+      vesselName: name || null,
+      currentPort: curPort || null,
+      nextPort: nextPort || null,
+      vesselType: vtype || null,
     });
     if (!result) return null;
     const owner = result.owner || {};
     return {
-      vessel_name:   result.vessel_name || null,
-      flag:          result.flag        || null,
-      owner_name:    owner.company_name || null,
-      manager_name:  result.manager && result.manager.company_name
-                       ? result.manager.company_name
-                       : (result.ism_manager && result.ism_manager.company_name ? result.ism_manager.company_name : null),
-      ship_manager:  result.ship_manager && result.ship_manager.company_name ? result.ship_manager.company_name : null,
-      operator_name: result.operator && result.operator.company_name ? result.operator.company_name : null,
-      address:       owner.registered_address || owner.address || null,
-      email:         owner.primary_email  || owner.email    || null,
-      email_ops:     owner.secondary_email || owner.email_ops || null,
-      phone:         owner.phone_primary  || owner.phone    || null,
-      phone_alt:     owner.phone_secondary || owner.phone_alt || null,
-      website:       owner.website        || null,
-      linkedin:      owner.linkedin       || null,
-      port_agents:   result.port_agents   || [],
-      confidence:    result.enrichment && result.enrichment.confidence ? result.enrichment.confidence : 0.5,
-      source:        result.enrichment && result.enrichment.source ? result.enrichment.source : "equasis",
+      vessel_name: result.vessel_name || null,
+      flag: result.flag || null,
+      owner_name: owner.company_name || null,
+      manager_name:
+        result.manager && result.manager.company_name
+          ? result.manager.company_name
+          : result.ism_manager && result.ism_manager.company_name
+          ? result.ism_manager.company_name
+          : null,
+      ship_manager:
+        result.ship_manager && result.ship_manager.company_name
+          ? result.ship_manager.company_name
+          : null,
+      operator_name:
+        result.operator && result.operator.company_name
+          ? result.operator.company_name
+          : null,
+      address: owner.registered_address || owner.address || null,
+      email: owner.primary_email || owner.email || null,
+      email_ops: owner.secondary_email || owner.email_ops || null,
+      phone: owner.phone_primary || owner.phone || null,
+      phone_alt: owner.phone_secondary || owner.phone_alt || null,
+      website: owner.website || null,
+      linkedin: owner.linkedin || null,
+      port_agents: result.port_agents || [],
+      confidence:
+        result.enrichment && result.enrichment.confidence
+          ? result.enrichment.confidence
+          : 0.5,
+      source:
+        result.enrichment && result.enrichment.source
+          ? result.enrichment.source
+          : "equasis",
     };
   } catch (e) {
     logger.warn("[step/equasis] " + (e.message || String(e)).slice(0, 120));
@@ -491,13 +510,13 @@ async function runEnrichment(params) {
 }
 
 router.post("/enrich", async function(req, res) {
-  const body     = req.body || {};
-  const imo      = body.imo;
-  const mmsi     = body.mmsi;
-  const name     = body.name;
-  const curPort  = body.curPort;
+  const body = req.body || {};
+  const imo = body.imo;
+  const mmsi = body.mmsi;
+  const name = body.name;
+  const curPort = body.curPort;
   const nextPort = body.nextPort;
-  const vtype    = body.vtype;
+  const vtype = body.vtype;
 
   if (!imo && !mmsi && !name) {
     return res.status(400).json({ success: false, error: "Provide imo, mmsi, or name" });
@@ -507,14 +526,11 @@ router.post("/enrich", async function(req, res) {
 
   try {
     const result = await withTimeout(
-      runEnrichment({ imoInt: imoInt, name: name, curPort: curPort, nextPort: nextPort, vtype: vtype }),
+      runEnrichment({ imoInt, name, curPort, nextPort, vtype }),
       T_TOTAL, "full enrichment"
     );
     if (!result) {
-      return res.status(502).json({
-        success: false,
-        error: "No data found. Check the IMO number is valid.",
-      });
+      return res.status(502).json({ success: false, error: "No data found. Check the IMO number is valid." });
     }
     return res.json({ success: true, data: result });
   } catch (err) {
