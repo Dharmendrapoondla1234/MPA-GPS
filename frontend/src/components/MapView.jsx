@@ -1,31 +1,20 @@
 // src/components/MapView.jsx — v11 (sea routes + zoom limits + perf fixes)
 import React, {
-  useEffect,
-  useRef,
-  useState,
-  useCallback,
-  useMemo,
-  forwardRef,
-  useImperativeHandle,
+  useEffect, useRef, useState, useCallback, useMemo, forwardRef, useImperativeHandle,
 } from "react";
 import { Loader } from "@googlemaps/js-api-loader";
-import {
-  buildInfoWindowContent,
-  getSpeedColor,
-  getRegionName,
-} from "../utils/vesselUtils";
+import { buildInfoWindowContent, getSpeedColor, getRegionName } from "../utils/vesselUtils";
 import { BASE_URL } from "../services/api";
 import "./MapView.css";
 import WeatherPanel from "./WeatherPanel";
 
-const MAP_CENTER = { lat: 1.35, lng: 103.82 };
+const MAP_CENTER  = { lat: 1.35, lng: 103.82 };
 let loaderPromise = null;
-const RADIUS = { DANGER: 500, WARNING: 1500 };
-const STALE_MS = 2 * 60 * 60 * 1000; // 2h live window
+const RADIUS   = { DANGER: 500, WARNING: 1500 };
+const STALE_MS = 2 * 60 * 60 * 1000;   // 2h live window
 // More aggressive mobile detection (covers iOS Safari)
-const IS_MOBILE =
-  /Mobi|Android|iPhone|iPad|iPod|Touch/i.test(navigator.userAgent) ||
-  navigator.maxTouchPoints > 1;
+const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod|Touch/i.test(navigator.userAgent)
+  || (navigator.maxTouchPoints > 1);
 
 // ── Mobile performance caps ────────────────────────────────────────
 // Fewer markers rendered simultaneously on mobile prevents frame drops
@@ -34,68 +23,40 @@ const MAX_MARKERS_DESKTOP = 800;
 const MAX_MARKERS = IS_MOBILE ? MAX_MARKERS_MOBILE : MAX_MARKERS_DESKTOP;
 
 // ── Zoom limits ──────────────────────────────────────────────────
-const MIN_ZOOM = 3; // can't zoom out past world overview
-const MAX_ZOOM = 17; // can't over-zoom into street level
+const MIN_ZOOM = 3;   // can't zoom out past world overview
+const MAX_ZOOM = 17;  // can't over-zoom into street level
 
 /* ─── helpers ──────────────────────────────────────────────────── */
 function isStale(v) {
   const ts = v.effective_timestamp;
   if (!ts) return false;
-  try {
-    return (
-      Date.now() -
-        new Date(typeof ts === "object" && ts.value ? ts.value : ts).getTime() >
-      STALE_MS
-    );
-  } catch {
-    return false;
-  }
+  try { return Date.now() - new Date(typeof ts === "object" && ts.value ? ts.value : ts).getTime() > STALE_MS; }
+  catch { return false; }
 }
 
 function distanceM(lat1, lng1, lat2, lng2) {
-  const R = 6371000,
-    r = Math.PI / 180;
-  const dLat = (lat2 - lat1) * r,
-    dLng = (lng2 - lng1) * r;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLng / 2) ** 2;
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (lat2 - lat1) * r, dLng = (lng2 - lng1) * r;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+
 function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
-  const speed = parseFloat(vessel.speed) || 0;
+  const speed   = parseFloat(vessel.speed)   || 0;
   const heading = parseFloat(vessel.heading) || 0;
-  const zs =
-    zoom <= 3
-      ? 4.0
-      : zoom <= 4
-        ? 3.0
-        : zoom <= 5
-          ? 2.2
-          : zoom <= 6
-            ? 1.7
-            : zoom <= 7
-              ? 1.35
-              : zoom <= 8
-                ? 1.15
-                : 1.0;
-  const color =
-    alertLevel === "danger"
-      ? "#ff2244"
-      : alertLevel === "warning"
-        ? "#ffcc00"
-        : speed > 0.3
-          ? getSpeedColor(speed)
-          : "#00e5ff";
+  const zs = zoom <= 3 ? 4.0 : zoom <= 4 ? 3.0 : zoom <= 5 ? 2.2
+           : zoom <= 6 ? 1.7 : zoom <= 7 ? 1.35 : zoom <= 8 ? 1.15 : 1.0;
+  const color = alertLevel === "danger"  ? "#ff2244"
+              : alertLevel === "warning" ? "#ffcc00"
+              : speed > 0.3 ? getSpeedColor(speed)
+              : "#00e5ff";
   if (speed > 0.3) {
     const base = isSelected ? 12 : alertLevel ? 9 : 8;
     return {
       path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-      scale: base * zs,
-      rotation: heading,
-      fillColor: color,
-      fillOpacity: 1.0,
+      scale: base * zs, rotation: heading,
+      fillColor: color, fillOpacity: 1.0,
       strokeColor: isSelected ? "#ffffff" : "#000000",
       strokeWeight: isSelected ? 2.5 : 0.8,
       anchor: new window.google.maps.Point(0, 2.5),
@@ -104,8 +65,7 @@ function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
   const base = isSelected ? 7 : 5;
   return {
     path: window.google.maps.SymbolPath.CIRCLE,
-    scale: base * zs,
-    fillColor: color,
+    scale: base * zs, fillColor: color,
     fillOpacity: isSelected ? 1 : 0.92,
     strokeColor: isSelected ? "#ffffff" : "#000000",
     strokeWeight: isSelected ? 2.5 : 0.8,
@@ -114,56 +74,20 @@ function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
 
 function wktToLatLng(coords, type) {
   if (!coords) return null;
-  const pointTypes = [
-    "danger_point",
-    "seabed_point",
-    "tide_point",
-    "aid_nav",
-    "port_service",
-    "cultural_point",
-  ];
-  const lineTypes = ["depth_contour", "danger_line", "track_line"];
-  const areaTypes = [
-    "danger_area",
-    "regulated_area",
-    "track_area",
-    "seabed_area",
-    "cultural_bridge",
-  ];
-  if (pointTypes.includes(type))
-    return Array.isArray(coords) && typeof coords[0] === "number"
-      ? { lat: coords[1], lng: coords[0] }
-      : null;
-  if (lineTypes.includes(type))
-    return Array.isArray(coords) && Array.isArray(coords[0])
-      ? coords.map((c) => ({ lat: c[1], lng: c[0] }))
-      : null;
-  if (areaTypes.includes(type)) {
-    const ring =
-      Array.isArray(coords[0]) && Array.isArray(coords[0][0])
-        ? coords[0]
-        : coords;
-    return Array.isArray(ring)
-      ? ring.map((c) => ({ lat: c[1], lng: c[0] }))
-      : null;
-  }
+  const pointTypes = ["danger_point","seabed_point","tide_point","aid_nav","port_service","cultural_point"];
+  const lineTypes  = ["depth_contour","danger_line","track_line"];
+  const areaTypes  = ["danger_area","regulated_area","track_area","seabed_area","cultural_bridge"];
+  if (pointTypes.includes(type)) return Array.isArray(coords) && typeof coords[0] === "number" ? { lat: coords[1], lng: coords[0] } : null;
+  if (lineTypes.includes(type))  return Array.isArray(coords) && Array.isArray(coords[0]) ? coords.map(c => ({ lat: c[1], lng: c[0] })) : null;
+  if (areaTypes.includes(type))  { const ring = Array.isArray(coords[0]) && Array.isArray(coords[0][0]) ? coords[0] : coords; return Array.isArray(ring) ? ring.map(c => ({ lat: c[1], lng: c[0] })) : null; }
   return null;
 }
 
 function catmullRom(p0, p1, p2, p3, t) {
-  return (
-    0.5 *
-    (2 * p1 +
-      (-p0 + p2) * t +
-      (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
-      (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t)
-  );
+  return 0.5 * ((2*p1) + (-p0+p2)*t + (2*p0-5*p1+4*p2-p3)*t*t + (-p0+3*p1-3*p2+p3)*t*t*t);
 }
 function lerpAngle(a, b, t) {
-  let d = b - a;
-  while (d > 180) d -= 360;
-  while (d < -180) d += 360;
-  return a + d * t;
+  let d = b - a; while (d > 180) d -= 360; while (d < -180) d += 360; return a + d * t;
 }
 function interpolateTrajectory(points, gapThresholdMinutes = 30) {
   if (!points || points.length < 2) return points;
@@ -171,33 +95,18 @@ function interpolateTrajectory(points, gapThresholdMinutes = 30) {
   for (let i = 0; i < points.length - 1; i++) {
     result.push({ ...points[i], ai_interpolated: false });
     const t1 = new Date(points[i].effective_timestamp).getTime();
-    const t2 = new Date(points[i + 1].effective_timestamp).getTime();
+    const t2 = new Date(points[i+1].effective_timestamp).getTime();
     const gapMin = (t2 - t1) / 60000;
     if (gapMin > gapThresholdMinutes && gapMin < 360) {
       const steps = Math.min(Math.floor(gapMin / 8), 25);
-      const p0 = points[Math.max(0, i - 1)],
-        p1 = points[i],
-        p2 = points[i + 1],
-        p3 = points[Math.min(points.length - 1, i + 2)];
+      const p0 = points[Math.max(0,i-1)], p1 = points[i], p2 = points[i+1], p3 = points[Math.min(points.length-1,i+2)];
       for (let s = 1; s <= steps; s++) {
         const t = s / (steps + 1);
         result.push({
-          latitude_degrees: catmullRom(
-            +p0.latitude_degrees,
-            +p1.latitude_degrees,
-            +p2.latitude_degrees,
-            +p3.latitude_degrees,
-            t,
-          ),
-          longitude_degrees: catmullRom(
-            +p0.longitude_degrees,
-            +p1.longitude_degrees,
-            +p2.longitude_degrees,
-            +p3.longitude_degrees,
-            t,
-          ),
+          latitude_degrees:  catmullRom(+p0.latitude_degrees,  +p1.latitude_degrees,  +p2.latitude_degrees,  +p3.latitude_degrees,  t),
+          longitude_degrees: catmullRom(+p0.longitude_degrees, +p1.longitude_degrees, +p2.longitude_degrees, +p3.longitude_degrees, t),
           speed: +p1.speed + (+p2.speed - +p1.speed) * t,
-          heading: lerpAngle(+(p1.heading || 0), +(p2.heading || 0), t),
+          heading: lerpAngle(+(p1.heading||0), +(p2.heading||0), t),
           effective_timestamp: new Date(t1 + (t2 - t1) * t).toISOString(),
           ai_interpolated: true,
           confidence: Math.max(0.25, 1 - gapMin / 360),
@@ -206,87 +115,70 @@ function interpolateTrajectory(points, gapThresholdMinutes = 30) {
       }
     }
   }
-  result.push({ ...points[points.length - 1], ai_interpolated: false });
+  result.push({ ...points[points.length-1], ai_interpolated: false });
   return result;
 }
+
+
 
 /* ══════════════════════════════════════════════════════════════
    COMPONENT
 ══════════════════════════════════════════════════════════════ */
 const MapView = forwardRef(function MapView(
-  {
-    vessels,
-    selectedVessel,
-    onVesselClick,
-    trailData,
-    predictRoute,
-    portPanelOpen,
-    onTogglePortPanel,
-  },
-  ref,
+  { vessels, selectedVessel, onVesselClick, trailData, predictRoute,
+    portPanelOpen, onTogglePortPanel }, ref
 ) {
-  const mapRef = useRef(null);
-  const mapObj = useRef(null);
-  const markersRef = useRef({});
-  const infoWin = useRef(null);
-  const hoverWin = useRef(null);
-  const trailObjs = useRef([]);
-  const gisObjs = useRef([]);
-  const alertCircles = useRef({});
-  const vesselCircles = useRef({});
-  const pulseCirc = useRef(null);
-  const pulseTimer = useRef(null);
-  const aiObjs = useRef([]);
-  const predRouteObjs = useRef([]);
-  const weatherObjs = useRef([]);
+  const mapRef         = useRef(null);
+  const mapObj         = useRef(null);
+  const markersRef     = useRef({});
+  const infoWin        = useRef(null);
+  const hoverWin       = useRef(null);
+  const trailObjs      = useRef([]);
+  const gisObjs        = useRef([]);
+  const alertCircles   = useRef({});
+  const vesselCircles  = useRef({});
+  const pulseCirc      = useRef(null);
+  const pulseTimer     = useRef(null);
+  const aiObjs         = useRef([]);
+  const predRouteObjs  = useRef([]);
+  const weatherObjs    = useRef([]);
   const nauticalTileRef = useRef(null); // ← OpenSeaMap nautical tile overlay
-  const mapZoomRef = useRef(11);
-  const zoomUpdateTimeout = useRef(null); // new
-  const hasFitBounds = useRef(false);
-  const hoverCache = useRef({});
-  const hoverTimer = useRef(null);
-  const hoverOpenImo = useRef(null);
+  const mapZoomRef     = useRef(11);
+  const hasFitBounds   = useRef(false);
+  const hoverCache     = useRef({});
+  const hoverTimer     = useRef(null);
+  const hoverOpenImo   = useRef(null);
   // Bug #6 fix: stable ref for onVesselClick so the markers useEffect never re-runs
   // just because a parent re-render produced a new function identity.
   const onVesselClickRef = useRef(onVesselClick);
-  useEffect(() => {
-    onVesselClickRef.current = onVesselClick;
-  }, [onVesselClick]);
+  useEffect(() => { onVesselClickRef.current = onVesselClick; }, [onVesselClick]);
 
   // Coords written directly to DOM ref — no React state, no re-renders during map interaction
   const coordsDomRef = useRef(null);
-  const [mapStyle, setMapStyle] = useState("sea"); // sea = roadmap with maritime style
-  const [mapReady, setMapReady] = useState(false);
-  const [gisData, setGisData] = useState(null);
-  const [alerts, setAlerts] = useState([]);
-  const [showLayerPanel, setShowLayerPanel] = useState(false);
-  const [showAlerts, setShowAlerts] = useState(true);
-  const [showAllAlerts, setShowAllAlerts] = useState(false);
-  const [loadingGIS, setLoadingGIS] = useState(true);
-  const [aiStats, setAiStats] = useState(null);
-  const [weatherData, setWeatherData] = useState(null);
+  const [mapStyle,        setMapStyle]        = useState("sea");    // sea = roadmap with maritime style
+  const [mapReady,        setMapReady]        = useState(false);
+  const [gisData,         setGisData]         = useState(null);
+  const [alerts,          setAlerts]          = useState([]);
+  const [showLayerPanel,  setShowLayerPanel]  = useState(false);
+  const [showAlerts,      setShowAlerts]      = useState(true);
+  const [showAllAlerts,   setShowAllAlerts]   = useState(false);
+  const [loadingGIS,      setLoadingGIS]      = useState(true);
+  const [aiStats,         setAiStats]         = useState(null);
+  const [weatherData,     setWeatherData]     = useState(null);
   const [showWeatherPanel, setShowWeatherPanel] = useState(false);
 
+
   const [layers, setLayers] = useState({
-    dangers: true,
-    depths: true,
-    regulated: true,
-    tracks: false, // off by default — GIS track lines duplicate Google's built-in sea routes
-    aids: true,
-    seabed: false,
-    ports: true,
-    tides: false,
-    cultural: true,
-    vesselProximity: false,
-    aiTrajectory: true,
-    weatherStations: true,
+    dangers: true, depths: true, regulated: true,
+    tracks: false,        // off by default — GIS track lines duplicate Google's built-in sea routes
+    aids: true, seabed: false, ports: true, tides: false, cultural: true,
+    vesselProximity: false, aiTrajectory: true, weatherStations: true,
     nauticalChart: false,
   });
 
   useImperativeHandle(ref, () => ({
     panToVessel(vessel) {
-      const lat = Number(vessel?.latitude_degrees),
-        lng = Number(vessel?.longitude_degrees);
+      const lat = Number(vessel?.latitude_degrees), lng = Number(vessel?.longitude_degrees);
       if (mapObj.current && lat && lng) {
         mapObj.current.panTo({ lat, lng });
         // Only zoom in if currently zoomed far out; don't force a fixed zoom
@@ -307,10 +199,8 @@ const MapView = forwardRef(function MapView(
   useEffect(() => {
     const fetchW = () => {
       fetch(`${BASE_URL}/weather`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (j?.data) setWeatherData(j.data);
-        })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { if (j?.data) setWeatherData(j.data); })
         .catch(() => {});
     };
     fetchW();
@@ -325,54 +215,38 @@ const MapView = forwardRef(function MapView(
     const gisEtag = sessionStorage.getItem("gis_etag");
     const gisCached = sessionStorage.getItem("gis_data");
     if (gisCached && gisEtag) {
-      try {
-        setGisData(JSON.parse(gisCached));
-        setLoadingGIS(false);
-      } catch (_) {}
+      try { setGisData(JSON.parse(gisCached)); setLoadingGIS(false); } catch(_) {}
     }
     fetch(`${BASE_URL}/gis/all`, {
       headers: gisEtag ? { "If-None-Match": gisEtag } : {},
     })
-      .then((r) => {
+      .then(r => {
         if (r.status === 304) return null; // cached — no update needed
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const etag = r.headers.get("etag");
         if (etag) sessionStorage.setItem("gis_etag", etag);
         return r.json();
       })
-      .then((j) => {
+      .then(j => {
         if (!j) return; // 304 — keep existing cached data
         if (j?.data) {
           setGisData(j.data);
-          try {
-            sessionStorage.setItem("gis_data", JSON.stringify(j.data));
-          } catch (_) {}
+          try { sessionStorage.setItem("gis_data", JSON.stringify(j.data)); } catch(_) {}
         }
       })
-      .catch((e) => console.warn("[GIS]", e.message))
+      .catch(e => console.warn("[GIS]", e.message))
       .finally(() => setLoadingGIS(false));
   }, []);
 
   /* ── Memoised derived data ──────────────────────────────── */
-  const freshVesselsRaw = useMemo(
-    () =>
-      vessels.filter((v) => {
-        if (isStale(v)) return false;
-        const lat = parseFloat(v.latitude_degrees),
-          lng = parseFloat(v.longitude_degrees);
-        return (
-          !isNaN(lat) &&
-          !isNaN(lng) &&
-          lat !== 0 &&
-          lng !== 0 &&
-          lat >= -90 &&
-          lat <= 90 &&
-          lng >= -180 &&
-          lng <= 180
-        );
-      }),
-    [vessels],
-  );
+  const freshVesselsRaw = useMemo(() =>
+    vessels.filter(v => {
+      if (isStale(v)) return false;
+      const lat = parseFloat(v.latitude_degrees), lng = parseFloat(v.longitude_degrees);
+      return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0
+        && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    }),
+  [vessels]);
 
   // Debounce vessel updates 800ms — absorbs initial load burst and rapid filter changes
   const [freshVessels, setFreshVessels] = useState(freshVesselsRaw);
@@ -383,9 +257,7 @@ const MapView = forwardRef(function MapView(
 
   const alertMap = useMemo(() => {
     const m = {};
-    alerts.forEach((a) => {
-      if (a.vessel && !m[a.vessel]) m[a.vessel] = a.level;
-    });
+    alerts.forEach(a => { if (a.vessel && !m[a.vessel]) m[a.vessel] = a.level; });
     return m;
   }, [alerts]);
 
@@ -406,44 +278,31 @@ const MapView = forwardRef(function MapView(
         zoom: IS_MOBILE ? 10 : 11,
         minZoom: MIN_ZOOM,
         maxZoom: MAX_ZOOM,
-        mapTypeId: "roadmap", // roadmap shows Google's built-in sea/ferry routes
-        styles: [], // MUST be empty — any style override hides the sea route layer
-        zoomControl: false,
-        streetViewControl: false,
-        mapTypeControl: false,
-        fullscreenControl: false,
-        rotateControl: false,
-        gestureHandling: "greedy",
-        clickableIcons: false,
-        tilt: 0,
-        heading: 0,
-        renderingType: "RASTER", // force raster — WebGL vector can stutter on heavy overlays
-        isFractionalZoomEnabled: false, // integer zoom only = smoother tile loads
+        mapTypeId: "roadmap",  // roadmap shows Google's built-in sea/ferry routes
+        styles: [],            // MUST be empty — any style override hides the sea route layer
+        zoomControl: false, streetViewControl: false, mapTypeControl: false,
+        fullscreenControl: false, rotateControl: false,
+        gestureHandling: "greedy", clickableIcons: false,
+        tilt: 0, heading: 0,
+        renderingType: "RASTER",   // force raster — WebGL vector can stutter on heavy overlays
+        isFractionalZoomEnabled: false,  // integer zoom only = smoother tile loads
         // Mobile-specific: disable keyboard shortcuts (saves listener overhead)
         keyboardShortcuts: !IS_MOBILE,
         // Disable zoom animations on mobile — they compound with marker redraws to cause jank
         ...(IS_MOBILE && {
-          zoomControlOptions: {
-            position: window.google?.maps?.ControlPosition?.RIGHT_CENTER,
-          },
+          zoomControlOptions: { position: window.google?.maps?.ControlPosition?.RIGHT_CENTER },
           scrollwheel: false,
         }),
       });
-      mapObj.current = map;
-      infoWin.current = new window.google.maps.InfoWindow({
-        maxWidth: IS_MOBILE ? 280 : 340,
-      });
-      hoverWin.current = new window.google.maps.InfoWindow({
-        maxWidth: 240,
-        disableAutoPan: true,
-      });
+      mapObj.current   = map;
+      infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: IS_MOBILE ? 280 : 340 });
+      hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
 
       // Write coords directly to DOM — never call setState during map interaction
       let _mvTimer = null;
-      map.addListener("mousemove", (e) => {
+      map.addListener("mousemove", e => {
         if (_mvTimer) return;
-        _mvTimer = setTimeout(() => {
-          // 200ms throttle reduces main thread pressure
+        _mvTimer = setTimeout(() => { // 200ms throttle reduces main thread pressure
           _mvTimer = null;
           if (!coordsDomRef.current) return;
           const lat = e.latLng.lat().toFixed(5);
@@ -459,35 +318,29 @@ const MapView = forwardRef(function MapView(
       });
       map.addListener("zoom_changed", () => {
         const z = map.getZoom() ?? 11;
+        mapZoomRef.current = z;
         if (z < MIN_ZOOM) map.setZoom(MIN_ZOOM);
         if (z > MAX_ZOOM) map.setZoom(MAX_ZOOM);
-
-        if (mapZoomRef.current === z) return;
-        mapZoomRef.current = z;
-
-        if (zoomUpdateTimeout.current) {
-          clearTimeout(zoomUpdateTimeout.current);
-        }
-        zoomUpdateTimeout.current = setTimeout(() => {
+        // Re-scale only VISIBLE markers on zoom — not all 3000
+        // Defer to after tiles settle so it doesn't fight the zoom animation
+        requestAnimationFrame(() => {
           const bounds = mapObj.current?.getBounds();
           if (!bounds) return;
-          Object.values(markersRef.current).forEach((m) => {
+          Object.values(markersRef.current).forEach(m => {
             if (!m.getMap() || !m._vessel) return;
             const pos = m.getPosition();
             if (pos && bounds.contains(pos)) {
               m.setIcon(getVesselIcon(m._vessel, false, null, z));
             }
           });
-        }, 80);
+        });
       });
 
       setMapReady(true);
 
       if (typeof ResizeObserver !== "undefined" && mapRef.current) {
         let resizeReady = false;
-        window.google.maps.event.addListenerOnce(map, "tilesloaded", () => {
-          resizeReady = true;
-        });
+        window.google.maps.event.addListenerOnce(map, "tilesloaded", () => { resizeReady = true; });
         const ro = new ResizeObserver(() => {
           if (!mapObj.current || !resizeReady) return;
           const c = mapObj.current.getCenter();
@@ -505,10 +358,6 @@ const MapView = forwardRef(function MapView(
     return () => {
       clearTimeout(hoverTimer.current);
       hoverTimer.current = null;
-      if (zoomUpdateTimeout.current) {
-        clearTimeout(zoomUpdateTimeout.current);
-        zoomUpdateTimeout.current = null;
-      }
       if (mapObj.current?._resizeObserver) {
         mapObj.current._resizeObserver.disconnect();
       }
@@ -538,7 +387,7 @@ const MapView = forwardRef(function MapView(
       maxZoom: 17,
       opacity: 0.85,
       name: "OpenSeaMap",
-      alt: "Nautical Chart — OpenSeaMap",
+      alt:  "Nautical Chart — OpenSeaMap",
     });
     mapObj.current.overlayMapTypes.push(nauticalOverlay);
     nauticalTileRef.current = nauticalOverlay;
@@ -552,391 +401,30 @@ const MapView = forwardRef(function MapView(
     };
   }, [mapReady, layers.nauticalChart]);
 
+
+
   /* ── GIS layers ─────────────────────────────────────────── */
   useEffect(() => {
     if (!mapReady || !mapObj.current || !gisData) return;
-    gisObjs.current.forEach((o) => {
-      try {
-        o.setMap(null);
-      } catch (_) {}
-    });
+    gisObjs.current.forEach(o => { try { o.setMap(null); } catch(_) {} });
     gisObjs.current = [];
     const map = mapObj.current;
-    const add = (o) => {
-      gisObjs.current.push(o);
-      return o;
-    };
+    const add = o => { gisObjs.current.push(o); return o; };
 
     // ── Collect all GIS items into a queue, then render in rAF batches ──
     // This prevents the main thread locking when hundreds of GIS objects are created at once
     const queue = [];
     const enqueue = (fn) => queue.push(fn);
 
-    if (layers.regulated && gisData.regulated)
-      gisData.regulated.forEach((f) => {
-        enqueue(() => {
-          const p = wktToLatLng(f.coords, f.type);
-          if (!p || !Array.isArray(p)) return;
-          add(
-            new window.google.maps.Polygon({
-              paths: p,
-              map,
-              fillColor: "#ffcc0020",
-              strokeColor: "#ffcc00",
-              strokeWeight: 1.5,
-              strokeOpacity: 0.9,
-              fillOpacity: 1,
-              zIndex: 2,
-              clickable: true,
-            }),
-          ).addListener("click", () => {
-            infoWin.current.setContent(
-              `<div style="font-family:'JetBrains Mono',monospace;background:#1a1200;border:1px solid #ffcc00;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#ffcc00;font-weight:700;font-size:12px">⚠️ REGULATED AREA</div><div style="margin-top:6px;font-size:11px">${f.name || "Restricted Zone"}</div></div>`,
-            );
-            infoWin.current.setPosition(p[0]);
-            infoWin.current.open(map);
-          });
-        });
-      });
-    if (layers.tracks && gisData.tracks)
-      gisData.tracks.forEach((f) => {
-        enqueue(() => {
-          if (f.type === "track_area") {
-            const p = wktToLatLng(f.coords, f.type);
-            if (!p) return;
-            add(
-              new window.google.maps.Polygon({
-                paths: p,
-                map,
-                fillColor: "#00aaff12",
-                strokeColor: "#00aaff88",
-                strokeWeight: 1,
-                fillOpacity: 1,
-                zIndex: 1,
-              }),
-            );
-          } else if (f.type === "track_line") {
-            const p = wktToLatLng(f.coords, f.type);
-            if (!p) return;
-            add(
-              new window.google.maps.Polyline({
-                path: p,
-                map,
-                strokeColor: "#0088ffaa",
-                strokeWeight: 1.5,
-                strokeOpacity: 0.8,
-                zIndex: 3,
-                icons: [
-                  {
-                    icon: {
-                      path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-                      scale: 2,
-                      fillColor: "#0088ff",
-                      fillOpacity: 0.7,
-                      strokeColor: "#fff",
-                      strokeWeight: 0.5,
-                    },
-                    offset: "50%",
-                    repeat: "80px",
-                  },
-                ],
-              }),
-            );
-          }
-        });
-      });
-    if (layers.depths && gisData.depths)
-      gisData.depths.forEach((f) => {
-        enqueue(() => {
-          const p = wktToLatLng(f.coords, f.type);
-          if (!p) return;
-          const depth = parseFloat(f.depth) || 0;
-          const c =
-            depth <= 5
-              ? "#ff440088"
-              : depth <= 10
-                ? "#ff880055"
-                : depth <= 20
-                  ? "#ffcc0044"
-                  : "#0055aa44";
-          add(
-            new window.google.maps.Polyline({
-              path: p,
-              map,
-              strokeColor: c,
-              strokeWeight: depth <= 5 ? 2 : 1,
-              geodesic: false,
-              zIndex: 1,
-            }),
-          );
-        });
-      });
-    if (layers.dangers && gisData.dangers)
-      gisData.dangers.forEach((f) => {
-        enqueue(() => {
-          if (f.type === "danger_point") {
-            const pos = wktToLatLng(f.coords, f.type);
-            if (!pos) return;
-            const m = add(
-              new window.google.maps.Marker({
-                position: pos,
-                map,
-                optimized: true,
-                icon: {
-                  path: window.google.maps.SymbolPath.CIRCLE,
-                  scale: 6,
-                  fillColor: "#ff2244",
-                  fillOpacity: 0.9,
-                  strokeColor: "#fff",
-                  strokeWeight: 1.5,
-                },
-                title: f.name || "Danger",
-                zIndex: 10,
-              }),
-            );
-            m.addListener("click", () => {
-              infoWin.current.setContent(dangerInfoContent(f));
-              infoWin.current.open(map, m);
-            });
-            add(
-              new window.google.maps.Circle({
-                center: pos,
-                radius: 80,
-                map,
-                fillColor: "#ff2244",
-                fillOpacity: 0.15,
-                strokeColor: "#ff2244",
-                strokeWeight: 1,
-                strokeOpacity: 0.6,
-                zIndex: 4,
-              }),
-            );
-          } else if (f.type === "danger_area") {
-            const p = wktToLatLng(f.coords, f.type);
-            if (!p) return;
-            add(
-              new window.google.maps.Polygon({
-                paths: p,
-                map,
-                fillColor: "#ff224433",
-                strokeColor: "#ff2244",
-                strokeWeight: 2,
-                fillOpacity: 1,
-                zIndex: 5,
-                clickable: true,
-              }),
-            ).addListener("click", () => {
-              infoWin.current.setContent(dangerInfoContent(f));
-              infoWin.current.setPosition(p[0]);
-              infoWin.current.open(map);
-            });
-          } else if (f.type === "danger_line") {
-            const p = wktToLatLng(f.coords, f.type);
-            if (!p) return;
-            add(
-              new window.google.maps.Polyline({
-                path: p,
-                map,
-                strokeColor: "#ff4466",
-                strokeWeight: 2.5,
-                zIndex: 6,
-              }),
-            );
-          }
-        });
-      });
-    if (layers.aids && gisData.aids)
-      gisData.aids.forEach((f) => {
-        enqueue(() => {
-          if (!f.coords || isNaN(f.coords[0])) return;
-          const pos = { lat: f.coords[1], lng: f.coords[0] };
-          const c =
-            f.colour === "1"
-              ? "#ff2244"
-              : f.colour === "3"
-                ? "#00cc44"
-                : f.lighted
-                  ? "#ffee00"
-                  : "#cccccc";
-          const m = add(
-            new window.google.maps.Marker({
-              position: pos,
-              map,
-              optimized: true,
-              icon: {
-                path: f.lighted
-                  ? "M -2 -8 L 0 -10 L 2 -8 L 1 -8 L 1 0 L -1 0 L -1 -8 Z"
-                  : window.google.maps.SymbolPath.CIRCLE,
-                scale: f.lighted ? 1 : 4,
-                fillColor: c,
-                fillOpacity: 0.9,
-                strokeColor: "#000",
-                strokeWeight: 1,
-              },
-              title: f.name || "Aid",
-              zIndex: 8,
-            }),
-          );
-          if (f.lighted && f.range_nm > 0)
-            add(
-              new window.google.maps.Circle({
-                center: pos,
-                radius: f.range_nm * 1852,
-                map,
-                fillColor: c + "08",
-                strokeColor: c + "30",
-                strokeWeight: 0.5,
-                zIndex: 1,
-              }),
-            );
-          m.addListener("click", () => {
-            infoWin.current.setContent(
-              `<div style="font-family:'JetBrains Mono',monospace;background:#061020;border:1px solid ${c};border-radius:8px;padding:10px 14px;color:#fff"><div style="color:${c};font-weight:700;font-size:12px">${f.lighted ? "💡" : "🔘"} ${f.buoy ? "BUOY" : "BEACON"}</div><div style="margin-top:4px;font-size:11px">${f.name || "Aid"}</div></div>`,
-            );
-            infoWin.current.open(map, m);
-          });
-        });
-      });
-    if (layers.ports && gisData.ports)
-      gisData.ports.forEach((f) => {
-        enqueue(() => {
-          if (!f.coords) return;
-          const pos = wktToLatLng(f.coords, f.type);
-          if (!pos || typeof pos !== "object" || Array.isArray(pos)) return;
-          const m = add(
-            new window.google.maps.Marker({
-              position: pos,
-              map,
-              optimized: true,
-              icon: {
-                path: "M -4 0 L -2 -6 L 2 -6 L 4 0 L 2 0 L 2 2 L -2 2 L -2 0 Z",
-                scale: 1,
-                fillColor: "#44aaff",
-                fillOpacity: 0.9,
-                strokeColor: "#fff",
-                strokeWeight: 1,
-              },
-              title: f.name || "Port",
-              zIndex: 7,
-            }),
-          );
-          m.addListener("click", () => {
-            infoWin.current.setContent(
-              `<div style="font-family:'JetBrains Mono',monospace;background:#001830;border:1px solid #44aaff;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#44aaff;font-weight:700;font-size:12px">⚓ PORT / SERVICE</div><div style="font-size:11px;margin-top:4px">${f.name || "Facility"}</div>${f.depth ? `<div style="font-size:10px;color:#88aacc">Depth: ${f.depth}m</div>` : ""}</div>`,
-            );
-            infoWin.current.open(map, m);
-          });
-        });
-      });
-    if (layers.tides && gisData.tides)
-      gisData.tides.forEach((f) => {
-        enqueue(() => {
-          const pos = wktToLatLng(f.coords, f.type);
-          if (!pos || typeof pos !== "object" || Array.isArray(pos)) return;
-          add(
-            new window.google.maps.Marker({
-              position: pos,
-              map,
-              optimized: true,
-              icon: {
-                path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-                scale: 5,
-                rotation: parseFloat(f.direction) || 0,
-                fillColor: "#00eeff",
-                fillOpacity: 0.8,
-                strokeColor: "#fff",
-                strokeWeight: 1,
-              },
-              title: `${f.current_speed || "?"}kn`,
-              zIndex: 6,
-            }),
-          );
-        });
-      });
-    if (layers.cultural && gisData.cultural)
-      gisData.cultural.forEach((f) => {
-        enqueue(() => {
-          if (f.type === "cultural_point") {
-            const pos = wktToLatLng(f.coords, f.type);
-            if (!pos || typeof pos !== "object") return;
-            const c = f.cable ? "#ff8800" : f.pipe ? "#884400" : "#888888";
-            add(
-              new window.google.maps.Marker({
-                position: pos,
-                map,
-                optimized: true,
-                icon: {
-                  path: window.google.maps.SymbolPath.CIRCLE,
-                  scale: 3,
-                  fillColor: c,
-                  fillOpacity: 0.8,
-                  strokeColor: "#fff",
-                  strokeWeight: 0.5,
-                },
-                zIndex: 5,
-              }),
-            );
-          } else if (f.type === "cultural_bridge") {
-            const p = wktToLatLng(f.coords, f.type);
-            if (!p) return;
-            add(
-              new window.google.maps.Polygon({
-                paths: p,
-                map,
-                fillColor: "#88888833",
-                strokeColor: "#aaaaaa",
-                strokeWeight: 1.5,
-                zIndex: 4,
-              }),
-            );
-          }
-        });
-      });
-    if (layers.seabed && gisData.seabed)
-      gisData.seabed.forEach((f) => {
-        enqueue(() => {
-          if (f.type === "seabed_area") {
-            const p = wktToLatLng(f.coords, f.type);
-            if (!p) return;
-            add(
-              new window.google.maps.Polygon({
-                paths: p,
-                map,
-                fillColor: "#aa660033",
-                strokeColor: "#aa6600",
-                strokeWeight: 1,
-                fillOpacity: 1,
-                zIndex: 2,
-              }),
-            );
-          } else if (f.type === "seabed_point") {
-            const pos = wktToLatLng(f.coords, f.type);
-            if (!pos || typeof pos !== "object" || Array.isArray(pos)) return;
-            const c =
-              f.surface === "rock"
-                ? "#cc4400"
-                : f.surface === "mud"
-                  ? "#886600"
-                  : "#aa8800";
-            add(
-              new window.google.maps.Marker({
-                position: pos,
-                map,
-                optimized: true,
-                icon: {
-                  path: window.google.maps.SymbolPath.CIRCLE,
-                  scale: 3,
-                  fillColor: c,
-                  fillOpacity: 0.7,
-                  strokeColor: "#fff",
-                  strokeWeight: 0.5,
-                },
-                zIndex: 4,
-              }),
-            );
-          }
-        });
-      });
+    if (layers.regulated && gisData.regulated) gisData.regulated.forEach(f => { enqueue(() => { const p = wktToLatLng(f.coords,f.type); if(!p||!Array.isArray(p))return; add(new window.google.maps.Polygon({paths:p,map,fillColor:"#ffcc0020",strokeColor:"#ffcc00",strokeWeight:1.5,strokeOpacity:0.9,fillOpacity:1,zIndex:2,clickable:true})).addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#1a1200;border:1px solid #ffcc00;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#ffcc00;font-weight:700;font-size:12px">⚠️ REGULATED AREA</div><div style="margin-top:6px;font-size:11px">${f.name||"Restricted Zone"}</div></div>`);infoWin.current.setPosition(p[0]);infoWin.current.open(map);}); }); });
+    if (layers.tracks && gisData.tracks) gisData.tracks.forEach(f => { enqueue(() => { if(f.type==="track_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#00aaff12",strokeColor:"#00aaff88",strokeWeight:1,fillOpacity:1,zIndex:1}));}else if(f.type==="track_line"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polyline({path:p,map,strokeColor:"#0088ffaa",strokeWeight:1.5,strokeOpacity:0.8,zIndex:3,icons:[{icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:2,fillColor:"#0088ff",fillOpacity:0.7,strokeColor:"#fff",strokeWeight:0.5},offset:"50%",repeat:"80px"}]}));} }); });
+    if (layers.depths && gisData.depths) gisData.depths.forEach(f => { enqueue(() => { const p=wktToLatLng(f.coords,f.type);if(!p)return;const depth=parseFloat(f.depth)||0;const c=depth<=5?"#ff440088":depth<=10?"#ff880055":depth<=20?"#ffcc0044":"#0055aa44";add(new window.google.maps.Polyline({path:p,map,strokeColor:c,strokeWeight:depth<=5?2:1,geodesic:false,zIndex:1})); }); });
+    if (layers.dangers && gisData.dangers) gisData.dangers.forEach(f => { enqueue(() => { if(f.type==="danger_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos)return;const m=add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#ff2244",fillOpacity:0.9,strokeColor:"#fff",strokeWeight:1.5},title:f.name||"Danger",zIndex:10}));m.addListener("click",()=>{infoWin.current.setContent(dangerInfoContent(f));infoWin.current.open(map,m);});add(new window.google.maps.Circle({center:pos,radius:80,map,fillColor:"#ff2244",fillOpacity:0.15,strokeColor:"#ff2244",strokeWeight:1,strokeOpacity:0.6,zIndex:4}));}else if(f.type==="danger_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#ff224433",strokeColor:"#ff2244",strokeWeight:2,fillOpacity:1,zIndex:5,clickable:true})).addListener("click",()=>{infoWin.current.setContent(dangerInfoContent(f));infoWin.current.setPosition(p[0]);infoWin.current.open(map);});}else if(f.type==="danger_line"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polyline({path:p,map,strokeColor:"#ff4466",strokeWeight:2.5,zIndex:6}));} }); });
+    if (layers.aids && gisData.aids) gisData.aids.forEach(f => { enqueue(() => { if(!f.coords||isNaN(f.coords[0]))return;const pos={lat:f.coords[1],lng:f.coords[0]};const c=f.colour==="1"?"#ff2244":f.colour==="3"?"#00cc44":f.lighted?"#ffee00":"#cccccc";const m=add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:f.lighted?"M -2 -8 L 0 -10 L 2 -8 L 1 -8 L 1 0 L -1 0 L -1 -8 Z":window.google.maps.SymbolPath.CIRCLE,scale:f.lighted?1:4,fillColor:c,fillOpacity:0.9,strokeColor:"#000",strokeWeight:1},title:f.name||"Aid",zIndex:8}));if(f.lighted&&f.range_nm>0)add(new window.google.maps.Circle({center:pos,radius:f.range_nm*1852,map,fillColor:c+"08",strokeColor:c+"30",strokeWeight:0.5,zIndex:1}));m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#061020;border:1px solid ${c};border-radius:8px;padding:10px 14px;color:#fff"><div style="color:${c};font-weight:700;font-size:12px">${f.lighted?"💡":"🔘"} ${f.buoy?"BUOY":"BEACON"}</div><div style="margin-top:4px;font-size:11px">${f.name||"Aid"}</div></div>`);infoWin.current.open(map,m);}); }); });
+    if (layers.ports && gisData.ports) gisData.ports.forEach(f => { enqueue(() => { if(!f.coords)return;const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;const m=add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:"M -4 0 L -2 -6 L 2 -6 L 4 0 L 2 0 L 2 2 L -2 2 L -2 0 Z",scale:1,fillColor:"#44aaff",fillOpacity:0.9,strokeColor:"#fff",strokeWeight:1},title:f.name||"Port",zIndex:7}));m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#001830;border:1px solid #44aaff;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#44aaff;font-weight:700;font-size:12px">⚓ PORT / SERVICE</div><div style="font-size:11px;margin-top:4px">${f.name||"Facility"}</div>${f.depth?`<div style="font-size:10px;color:#88aacc">Depth: ${f.depth}m</div>`:""}</div>`);infoWin.current.open(map,m);}); }); });
+    if (layers.tides && gisData.tides) gisData.tides.forEach(f => { enqueue(() => { const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:5,rotation:parseFloat(f.direction)||0,fillColor:"#00eeff",fillOpacity:0.8,strokeColor:"#fff",strokeWeight:1},title:`${f.current_speed||"?"}kn`,zIndex:6})); }); });
+    if (layers.cultural && gisData.cultural) gisData.cultural.forEach(f => { enqueue(() => { if(f.type==="cultural_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object")return;const c=f.cable?"#ff8800":f.pipe?"#884400":"#888888";add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:3,fillColor:c,fillOpacity:0.8,strokeColor:"#fff",strokeWeight:0.5},zIndex:5}));}else if(f.type==="cultural_bridge"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#88888833",strokeColor:"#aaaaaa",strokeWeight:1.5,zIndex:4}));} }); });
+    if (layers.seabed && gisData.seabed) gisData.seabed.forEach(f => { enqueue(() => { if(f.type==="seabed_area"){const p=wktToLatLng(f.coords,f.type);if(!p)return;add(new window.google.maps.Polygon({paths:p,map,fillColor:"#aa660033",strokeColor:"#aa6600",strokeWeight:1,fillOpacity:1,zIndex:2}));}else if(f.type==="seabed_point"){const pos=wktToLatLng(f.coords,f.type);if(!pos||typeof pos!=="object"||Array.isArray(pos))return;const c=f.surface==="rock"?"#cc4400":f.surface==="mud"?"#886600":"#aa8800";add(new window.google.maps.Marker({position:pos,map,optimized:true,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:3,fillColor:c,fillOpacity:0.7,strokeColor:"#fff",strokeWeight:0.5},zIndex:4}));} }); });
 
     // Flush the queue in rAF batches — 40 items per frame keeps each frame under ~16ms
     // Mobile gets smaller batches to stay within 16ms budget on slower CPUs
@@ -946,31 +434,18 @@ const MapView = forwardRef(function MapView(
     const flush = () => {
       if (!mapObj.current) return;
       const end = Math.min(qi + GIS_BATCH, queue.length);
-      for (; qi < end; qi++) {
-        try {
-          queue[qi]();
-        } catch (_) {}
-      }
+      for (; qi < end; qi++) { try { queue[qi](); } catch(_) {} }
       if (qi < queue.length) rafId = requestAnimationFrame(flush);
     };
     rafId = requestAnimationFrame(flush);
     return () => cancelAnimationFrame(rafId);
-    // Bug #3 fix: list individual layer keys instead of the entire `layers` object.
-    // Previously any layer toggle (e.g. weatherStations) re-ran this effect and destroyed
-    // + recreated thousands of GIS polygons/markers even for layers you didn't touch.
-    // Now the effect only re-runs when a layer key that this effect actually uses changes.
-  }, [
-    gisData,
-    mapReady,
-    layers.regulated,
-    layers.tracks,
-    layers.depths,
-    layers.dangers,
-    layers.aids,
-    layers.ports,
-    layers.tides,
-    layers.cultural,
-    layers.seabed,
+  // Bug #3 fix: list individual layer keys instead of the entire `layers` object.
+  // Previously any layer toggle (e.g. weatherStations) re-ran this effect and destroyed
+  // + recreated thousands of GIS polygons/markers even for layers you didn't touch.
+  // Now the effect only re-runs when a layer key that this effect actually uses changes.
+  }, [gisData, mapReady,
+    layers.regulated, layers.tracks, layers.depths, layers.dangers,
+    layers.aids, layers.ports, layers.tides, layers.cultural, layers.seabed,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Viewport culling: hide markers outside bounds, show when back in view ──
@@ -1022,22 +497,10 @@ const MapView = forwardRef(function MapView(
     return () => viewportCullRef.current?.();
   }, [mapReady]);
   useEffect(() => {
-    Object.values(alertCircles.current).forEach((c) => {
-      try {
-        c.setMap(null);
-      } catch (_) {}
-    });
-    Object.values(vesselCircles.current).forEach((c) => {
-      try {
-        c.setMap(null);
-      } catch (_) {}
-    });
-    alertCircles.current = {};
-    vesselCircles.current = {};
-    if (!mapObj.current || !layers.vesselProximity) {
-      setAlerts([]);
-      return;
-    }
+    Object.values(alertCircles.current).forEach(c => { try{c.setMap(null);}catch(_){} });
+    Object.values(vesselCircles.current).forEach(c => { try{c.setMap(null);}catch(_){} });
+    alertCircles.current = {}; vesselCircles.current = {};
+    if (!mapObj.current || !layers.vesselProximity) { setAlerts([]); return; }
 
     // ── Yield to browser before heavy O(n²) computation ──────
     // Prevents "not responding" when freshVessels updates with 1000+ vessels
@@ -1048,129 +511,45 @@ const MapView = forwardRef(function MapView(
 
       if (gisData && layers.dangers && gisData.dangers) {
         const pts = gisData.dangers
-          .filter(
-            (d) =>
-              d.type === "danger_point" &&
-              Array.isArray(d.coords) &&
-              typeof d.coords[0] === "number",
-          )
-          .map((d) => ({ lat: d.coords[1], lng: d.coords[0], name: d.name }));
+          .filter(d => d.type==="danger_point" && Array.isArray(d.coords) && typeof d.coords[0]==="number")
+          .map(d => ({ lat:d.coords[1], lng:d.coords[0], name:d.name }));
         // Cap at 200 vessels to prevent O(n*m) lock
         const cap = Math.min(fresh.length, 200);
         for (let vi = 0; vi < cap; vi++) {
           const v = fresh[vi];
-          const vl = parseFloat(v.latitude_degrees),
-            vg = parseFloat(v.longitude_degrees);
-          if (isNaN(vl) || isNaN(vg)) continue;
-          let cd = Infinity,
-            cn = null;
+          const vl=parseFloat(v.latitude_degrees), vg=parseFloat(v.longitude_degrees);
+          if (isNaN(vl)||isNaN(vg)) continue;
+          let cd=Infinity, cn=null;
           for (const dp of pts) {
-            const dist = distanceM(vl, vg, dp.lat, dp.lng);
-            if (dist < cd) {
-              cd = dist;
-              cn = dp;
-            }
+            const dist=distanceM(vl,vg,dp.lat,dp.lng);
+            if(dist<cd){cd=dist;cn=dp;}
           }
-          if (cd < RADIUS.DANGER) {
-            newAlerts.push({
-              level: "danger",
-              vessel: v.vessel_name,
-              imo: v.imo_number,
-              lat: vl,
-              lng: vg,
-              detail: `${Math.round(cd)}m from ${cn?.name || "hazard"}`,
-            });
-            alertCircles.current[`d_${v.imo_number}`] =
-              new window.google.maps.Circle({
-                center: { lat: vl, lng: vg },
-                radius: RADIUS.DANGER,
-                map: mapObj.current,
-                fillColor: "#ff2244",
-                fillOpacity: 0.08,
-                strokeColor: "#ff2244",
-                strokeWeight: 2,
-                strokeOpacity: 0.9,
-                zIndex: 20,
-              });
-          } else if (cd < RADIUS.WARNING) {
-            newAlerts.push({
-              level: "warning",
-              vessel: v.vessel_name,
-              imo: v.imo_number,
-              lat: vl,
-              lng: vg,
-              detail: `${Math.round(cd)}m from ${cn?.name || "hazard"}`,
-            });
-            alertCircles.current[`w_${v.imo_number}`] =
-              new window.google.maps.Circle({
-                center: { lat: vl, lng: vg },
-                radius: RADIUS.WARNING,
-                map: mapObj.current,
-                fillColor: "#ffaa00",
-                fillOpacity: 0.05,
-                strokeColor: "#ffaa00",
-                strokeWeight: 1.5,
-                strokeOpacity: 0.7,
-                zIndex: 19,
-              });
+          if (cd<RADIUS.DANGER) {
+            newAlerts.push({level:"danger",vessel:v.vessel_name,imo:v.imo_number,lat:vl,lng:vg,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});
+            alertCircles.current[`d_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.DANGER,map:mapObj.current,fillColor:"#ff2244",fillOpacity:0.08,strokeColor:"#ff2244",strokeWeight:2,strokeOpacity:0.9,zIndex:20});
+          } else if (cd<RADIUS.WARNING) {
+            newAlerts.push({level:"warning",vessel:v.vessel_name,imo:v.imo_number,lat:vl,lng:vg,detail:`${Math.round(cd)}m from ${cn?.name||"hazard"}`});
+            alertCircles.current[`w_${v.imo_number}`]=new window.google.maps.Circle({center:{lat:vl,lng:vg},radius:RADIUS.WARNING,map:mapObj.current,fillColor:"#ffaa00",fillOpacity:0.05,strokeColor:"#ffaa00",strokeWeight:1.5,strokeOpacity:0.7,zIndex:19});
           }
         }
       }
 
       // O(n²) vessel-vessel proximity — hard cap at 80, early-exit with bbox
-      const moving = freshVessels.filter((v) => parseFloat(v.speed || 0) > 1.0);
-      const NEAR = 0.015,
-        cap2 = Math.min(moving.length, 80);
+      const moving = freshVessels.filter(v => parseFloat(v.speed || 0) > 1.0);
+      const NEAR = 0.015, cap2 = Math.min(moving.length, 80);
       for (let i = 0; i < cap2; i++) {
-        for (let j = i + 1; j < cap2; j++) {
-          const a = moving[i],
-            b = moving[j];
-          if (!a.imo_number || !b.imo_number || a.imo_number === b.imo_number)
-            continue;
-          if (Math.abs(+a.latitude_degrees - +b.latitude_degrees) > NEAR)
-            continue;
-          if (Math.abs(+a.longitude_degrees - +b.longitude_degrees) > NEAR)
-            continue;
-          const dist = distanceM(
-            +a.latitude_degrees,
-            +a.longitude_degrees,
-            +b.latitude_degrees,
-            +b.longitude_degrees,
-          );
+        for (let j = i+1; j < cap2; j++) {
+          const a=moving[i], b=moving[j];
+          if (!a.imo_number||!b.imo_number||a.imo_number===b.imo_number) continue;
+          if (Math.abs(+a.latitude_degrees - +b.latitude_degrees) > NEAR) continue;
+          if (Math.abs(+a.longitude_degrees - +b.longitude_degrees) > NEAR) continue;
+          const dist=distanceM(+a.latitude_degrees,+a.longitude_degrees,+b.latitude_degrees,+b.longitude_degrees);
           if (dist < RADIUS.DANGER) {
-            newAlerts.push({
-              level: "danger",
-              vessel: a.vessel_name,
-              imo: a.imo_number,
-              lat: +a.latitude_degrees,
-              lng: +a.longitude_degrees,
-              otherVessel: b.vessel_name,
-              detail: `${Math.round(dist)}m from ${b.vessel_name} — COLLISION RISK`,
-            });
-            const ml = (+a.latitude_degrees + +b.latitude_degrees) / 2,
-              mg = (+a.longitude_degrees + +b.longitude_degrees) / 2;
-            vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`] =
-              new window.google.maps.Circle({
-                center: { lat: ml, lng: mg },
-                radius: Math.max(dist / 2, 50),
-                map: mapObj.current,
-                fillColor: "#ff0000",
-                fillOpacity: 0.12,
-                strokeColor: "#ff0000",
-                strokeWeight: 2,
-                strokeOpacity: 1,
-                zIndex: 25,
-              });
+            newAlerts.push({level:"danger",vessel:a.vessel_name,imo:a.imo_number,lat:+a.latitude_degrees,lng:+a.longitude_degrees,otherVessel:b.vessel_name,detail:`${Math.round(dist)}m from ${b.vessel_name} — COLLISION RISK`});
+            const ml=(+a.latitude_degrees + +b.latitude_degrees)/2, mg=(+a.longitude_degrees + +b.longitude_degrees)/2;
+            vesselCircles.current[`vv_${a.imo_number}_${b.imo_number}`]=new window.google.maps.Circle({center:{lat:ml,lng:mg},radius:Math.max(dist/2,50),map:mapObj.current,fillColor:"#ff0000",fillOpacity:0.12,strokeColor:"#ff0000",strokeWeight:2,strokeOpacity:1,zIndex:25});
           } else if (dist < RADIUS.WARNING) {
-            newAlerts.push({
-              level: "warning",
-              vessel: a.vessel_name,
-              imo: a.imo_number,
-              lat: +a.latitude_degrees,
-              lng: +a.longitude_degrees,
-              otherVessel: b.vessel_name,
-              detail: `${Math.round(dist)}m from ${b.vessel_name}`,
-            });
+            newAlerts.push({level:"warning",vessel:a.vessel_name,imo:a.imo_number,lat:+a.latitude_degrees,lng:+a.longitude_degrees,otherVessel:b.vessel_name,detail:`${Math.round(dist)}m from ${b.vessel_name}`});
           }
         }
       }
@@ -1190,37 +569,27 @@ const MapView = forwardRef(function MapView(
   useEffect(() => {
     if (!mapReady || !mapObj.current) return;
     // Cap total vessels rendered on mobile — prevents frame drops with 1000+ markers
-    const fresh = IS_MOBILE ? freshVessels.slice(0, MAX_MARKERS) : freshVessels;
-    const activeIds = new Set(fresh.map((v) => String(v.imo_number)));
+    const fresh    = IS_MOBILE
+      ? freshVessels.slice(0, MAX_MARKERS)
+      : freshVessels;
+    const activeIds = new Set(fresh.map(v => String(v.imo_number)));
 
     // Incrementally update hover cache — mutate in place, never spread 1000+ entries
     const cache = hoverCache.current;
-    fresh.forEach((v) => {
+    fresh.forEach(v => {
       const spd = parseFloat(v.speed || 0);
       const hdg = parseFloat(v.heading || 0);
       const prev = markersRef.current[String(v.imo_number)]?._vessel;
-      if (
-        prev &&
-        Math.abs((prev.speed || 0) - spd) < 0.3 &&
-        Math.abs((prev.heading || 0) - hdg) < 5 &&
-        cache[v.imo_number]
-      )
-        return;
-      const col = getSpeedColor(spd);
-      const region = getRegionName(
-        parseFloat(v.latitude_degrees || 0),
-        parseFloat(v.longitude_degrees || 0),
-      );
-      cache[v.imo_number] =
-        `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || "Unknown"}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${hdg}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ""}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
+      if (prev && Math.abs((prev.speed || 0) - spd) < 0.3 && Math.abs((prev.heading || 0) - hdg) < 5 && cache[v.imo_number]) return;
+      const col    = getSpeedColor(spd);
+      const region = getRegionName(parseFloat(v.latitude_degrees || 0), parseFloat(v.longitude_degrees || 0));
+      cache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || 'Unknown'}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${hdg}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ''}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
     });
     // Evict stale entries
-    Object.keys(cache).forEach((id) => {
-      if (!activeIds.has(id)) delete cache[id];
-    });
+    Object.keys(cache).forEach(id => { if (!activeIds.has(id)) delete cache[id]; });
 
     // Remove stale markers
-    Object.keys(markersRef.current).forEach((id) => {
+    Object.keys(markersRef.current).forEach(id => {
       if (!activeIds.has(id)) {
         const m = markersRef.current[id];
         if (m._animId) cancelAnimationFrame(m._animId);
@@ -1235,14 +604,11 @@ const MapView = forwardRef(function MapView(
       setTimeout(() => {
         if (!mapObj.current) return;
         const bounds = new window.google.maps.LatLngBounds();
-        fresh.slice(0, 100).forEach((v) => {
-          const la = Number(v.latitude_degrees),
-            lo = Number(v.longitude_degrees);
-          if (la && lo && !isNaN(la) && !isNaN(lo))
-            bounds.extend({ lat: la, lng: lo });
+        fresh.slice(0, 100).forEach(v => {
+          const la = Number(v.latitude_degrees), lo = Number(v.longitude_degrees);
+          if (la && lo && !isNaN(la) && !isNaN(lo)) bounds.extend({ lat: la, lng: lo });
         });
-        if (!bounds.isEmpty())
-          mapObj.current.fitBounds(bounds, { padding: 60 });
+        if (!bounds.isEmpty()) mapObj.current.fitBounds(bounds, { padding: 60 });
       }, 1200); // after all 50-per-frame batches have settled
     }
 
@@ -1262,8 +628,7 @@ const MapView = forwardRef(function MapView(
       const end = Math.min(idx + BATCH, fresh.length);
       for (; idx < end; idx++) {
         const v = fresh[idx];
-        const lat = Number(v.latitude_degrees),
-          lng = Number(v.longitude_degrees);
+        const lat = Number(v.latitude_degrees), lng = Number(v.longitude_degrees);
         if (!lat || !lng || isNaN(lat) || isNaN(lng)) continue;
         const id = String(v.imo_number);
         const al = alertMap[v.vessel_name] || null;
@@ -1273,39 +638,27 @@ const MapView = forwardRef(function MapView(
           const m = markersRef.current[id];
           // Only call setPosition if coords actually changed (skip no-op updates)
           const curPos = m.getPosition();
-          if (
-            !curPos ||
-            Math.abs(curPos.lat() - lat) > 0.00001 ||
-            Math.abs(curPos.lng() - lng) > 0.00001
-          ) {
+          if (!curPos || Math.abs(curPos.lat() - lat) > 0.00001 || Math.abs(curPos.lng() - lng) > 0.00001) {
             m.setPosition({ lat, lng });
             // Re-show if it was culled but coords moved into viewport
-            if (
-              !m.getMap() &&
-              mapObj.current?.getBounds()?.contains({ lat, lng })
-            ) {
+            if (!m.getMap() && mapObj.current?.getBounds()?.contains({ lat, lng })) {
               m.setMap(mapObj.current);
             }
           }
           const pv = m._vessel;
-          const speedChanged =
-            Math.abs((pv?.speed || 0) - (v.speed || 0)) > 0.1;
-          const headingChanged =
-            Math.abs((pv?.heading || 0) - (v.heading || 0)) > 2;
+          const speedChanged   = Math.abs((pv?.speed || 0) - (v.speed || 0)) > 0.1;
+          const headingChanged = Math.abs((pv?.heading || 0) - (v.heading || 0)) > 2;
           if (speedChanged || headingChanged) m.setIcon(icon);
           m.setZIndex(al === "danger" ? 500 : 10);
           m._vessel = v;
         } else {
           const m = new window.google.maps.Marker({
-            position: { lat, lng },
-            icon,
+            position: { lat, lng }, icon,
             title: v.vessel_name || "Vessel",
             optimized: true,
             zIndex: al === "danger" ? 500 : 10,
             // Only attach to map if inside viewport — culling hook will show it when panned into view
-            map: mapObj.current?.getBounds()?.contains({ lat, lng })
-              ? mapObj.current
-              : null,
+            map: mapObj.current?.getBounds()?.contains({ lat, lng }) ? mapObj.current : null,
           });
           m._vessel = v;
           m.addListener("click", () => {
@@ -1347,8 +700,8 @@ const MapView = forwardRef(function MapView(
     };
     batchRafId = requestAnimationFrame(processBatch);
     return () => cancelAnimationFrame(batchRafId);
-    // Bug #6 fix: onVesselClick removed from deps — it's accessed via onVesselClickRef
-    // so marker batch never re-runs on parent re-renders.
+  // Bug #6 fix: onVesselClick removed from deps — it's accessed via onVesselClickRef
+  // so marker batch never re-runs on parent re-renders.
   }, [freshVessels, alertMap, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
   // NOTE: selectedVessel and mapZoom removed from deps — selection handled in pulse effect,
   // zoom icon scaling uses mapZoomRef.current (live ref, no re-render triggered)
@@ -1360,18 +713,13 @@ const MapView = forwardRef(function MapView(
   const prevSelectedId = useRef(null);
   useEffect(() => {
     clearInterval(pulseTimer.current);
-    if (pulseCirc.current) {
-      pulseCirc.current.setMap(null);
-      pulseCirc.current = null;
-    }
+    if (pulseCirc.current) { pulseCirc.current.setMap(null); pulseCirc.current = null; }
 
     // Restore previous selected marker to normal icon
     if (prevSelectedId.current) {
       const prev = markersRef.current[prevSelectedId.current];
       if (prev?._vessel) {
-        prev.setIcon(
-          getVesselIcon(prev._vessel, false, null, mapZoomRef.current),
-        );
+        prev.setIcon(getVesselIcon(prev._vessel, false, null, mapZoomRef.current));
         prev.setZIndex(10);
       }
     }
@@ -1389,9 +737,7 @@ const MapView = forwardRef(function MapView(
     const selId = String(selectedVessel.imo_number);
     const selMarker = markersRef.current[selId];
     if (selMarker?._vessel) {
-      selMarker.setIcon(
-        getVesselIcon(selectedVessel, true, null, mapZoomRef.current),
-      );
+      selMarker.setIcon(getVesselIcon(selectedVessel, true, null, mapZoomRef.current));
       selMarker.setZIndex(1000);
     }
     prevSelectedId.current = selId;
@@ -1401,19 +747,12 @@ const MapView = forwardRef(function MapView(
     // Pulsing strokeOpacity is ~4x cheaper: no geometry recompute, just a paint update.
     const color = getSpeedColor(selectedVessel.speed);
     pulseCirc.current = new window.google.maps.Circle({
-      center: { lat, lng },
-      radius: 900,
-      fillColor: color,
-      fillOpacity: 0.07,
-      strokeColor: color,
-      strokeOpacity: 0.8,
-      strokeWeight: 2,
-      map: mapObj.current,
-      zIndex: 5,
+      center: { lat, lng }, radius: 900,
+      fillColor: color, fillOpacity: 0.07,
+      strokeColor: color, strokeOpacity: 0.8, strokeWeight: 2,
+      map: mapObj.current, zIndex: 5,
     });
-    let opacity = 0.8,
-      growing = false,
-      lastPulse = 0;
+    let opacity = 0.8, growing = false, lastPulse = 0;
     const PULSE_MS = IS_MOBILE ? 250 : 150; // slower on mobile = less GPU work
     let lastOpacity = -1;
     const pulseFn = (ts) => {
@@ -1428,174 +767,63 @@ const MapView = forwardRef(function MapView(
       const rounded = Math.round(opacity * 50) / 50;
       if (rounded === lastOpacity) return;
       lastOpacity = rounded;
-      try {
-        pulseCirc.current.setOptions({ strokeOpacity: rounded });
-      } catch (_) {}
+      try { pulseCirc.current.setOptions({ strokeOpacity: rounded }); } catch(_) {}
     };
     pulseTimer.current = requestAnimationFrame(pulseFn);
 
     return () => {
       cancelAnimationFrame(pulseTimer.current);
-      if (pulseCirc.current) {
-        pulseCirc.current.setMap(null);
-        pulseCirc.current = null;
-      }
+      if (pulseCirc.current) { pulseCirc.current.setMap(null); pulseCirc.current = null; }
     };
   }, [selectedVessel]);
 
   /* ── Trail + AI trajectory ──────────────────────────────── */
   useEffect(() => {
-    trailObjs.current.forEach((o) => {
-      try {
-        o.setMap(null);
-      } catch (_) {}
-    });
-    aiObjs.current.forEach((o) => {
-      try {
-        o.setMap(null);
-      } catch (_) {}
-    });
-    trailObjs.current = [];
-    aiObjs.current = [];
-    setAiStats(null);
+    trailObjs.current.forEach(o => { try{o.setMap(null);}catch(_){} });
+    aiObjs.current.forEach(o => { try{o.setMap(null);}catch(_){} });
+    trailObjs.current = []; aiObjs.current = []; setAiStats(null);
     if (!trailData?.length || !mapObj.current) return;
-    const raw = trailData
-      .map((p) => ({
-        latitude_degrees: Number(p.latitude_degrees ?? p.lat ?? 0),
-        longitude_degrees: Number(p.longitude_degrees ?? p.lng ?? 0),
-        speed: parseFloat(p.speed ?? 0),
-        heading: parseFloat(p.heading ?? 0),
-        effective_timestamp: p.effective_timestamp,
-      }))
-      .filter(
-        (p) =>
-          p.latitude_degrees &&
-          p.longitude_degrees &&
-          !isNaN(p.latitude_degrees),
-      );
+    const raw = trailData.map(p => ({
+      latitude_degrees:  Number(p.latitude_degrees ?? p.lat ?? 0),
+      longitude_degrees: Number(p.longitude_degrees ?? p.lng ?? 0),
+      speed:   parseFloat(p.speed ?? 0),
+      heading: parseFloat(p.heading ?? 0),
+      effective_timestamp: p.effective_timestamp,
+    })).filter(p => p.latitude_degrees && p.longitude_degrees && !isNaN(p.latitude_degrees));
     if (raw.length < 2) return;
 
-    let pts = raw,
-      aiCount = 0;
+    let pts = raw, aiCount = 0;
     if (layers.aiTrajectory) {
       pts = interpolateTrajectory(raw, 30);
-      aiCount = pts.filter((p) => p.ai_interpolated).length;
-      if (aiCount > 0)
-        setAiStats({
-          total: pts.length,
-          interpolated: aiCount,
-          original: raw.length,
-        });
+      aiCount = pts.filter(p => p.ai_interpolated).length;
+      if (aiCount > 0) setAiStats({ total: pts.length, interpolated: aiCount, original: raw.length });
     }
 
-    const SEG = Math.min(raw.length - 1, 50),
-      step = Math.max(1, Math.floor((raw.length - 1) / SEG));
-    for (let i = 0; i < raw.length - 1; i += step) {
-      const end = Math.min(i + step + 1, raw.length),
-        prog = i / (raw.length - 1);
+    const SEG=Math.min(raw.length-1,50), step=Math.max(1,Math.floor((raw.length-1)/SEG));
+    for (let i=0; i<raw.length-1; i+=step) {
+      const end=Math.min(i+step+1,raw.length), prog=i/(raw.length-1);
       // Trail: vivid orange (start) → bright lime-yellow (end) — maximum contrast on all map styles
-      const r = Math.round(255),
-        g = Math.round(120 + prog * 135),
-        b = Math.round(0);
-      const segPath = raw
-        .slice(i, end)
-        .map((p) => ({ lat: p.latitude_degrees, lng: p.longitude_degrees }));
+      const r=Math.round(255), g=Math.round(120+prog*135), b=Math.round(0);
+      const segPath=raw.slice(i,end).map(p=>({lat:p.latitude_degrees,lng:p.longitude_degrees}));
       // Single vivid trail — removed shadow layer (saves 1/3 of Google Maps objects)
-      trailObjs.current.push(
-        new window.google.maps.Polyline({
-          path: segPath,
-          geodesic: false,
-          strokeColor: `rgb(${r},${g},${b})`,
-          strokeOpacity: 0.9 + prog * 0.1,
-          strokeWeight: 4 + prog * 3,
-          map: mapObj.current,
-          zIndex: 4,
-        }),
-      );
+      trailObjs.current.push(new window.google.maps.Polyline({path:segPath,geodesic:false,strokeColor:`rgb(${r},${g},${b})`,strokeOpacity:0.9+prog*0.10,strokeWeight:4+prog*3,map:mapObj.current,zIndex:4}));
       // Bright white highlight core
-      trailObjs.current.push(
-        new window.google.maps.Polyline({
-          path: segPath,
-          geodesic: false,
-          strokeColor: "#ffffff",
-          strokeOpacity: 0.3 + prog * 0.25,
-          strokeWeight: 1.5,
-          map: mapObj.current,
-          zIndex: 5,
-        }),
-      );
+      trailObjs.current.push(new window.google.maps.Polyline({path:segPath,geodesic:false,strokeColor:"#ffffff",strokeOpacity:0.30+prog*0.25,strokeWeight:1.5,map:mapObj.current,zIndex:5}));
     }
 
     if (layers.aiTrajectory && aiCount > 0) {
       let start = null;
-      for (let i = 0; i < pts.length; i++) {
-        if (pts[i].ai_interpolated) {
-          if (start === null) start = i > 0 ? i - 1 : i;
-        } else {
-          if (start !== null) {
-            const seg = pts
-              .slice(start, i + 1)
-              .map((p) => ({
-                lat: p.latitude_degrees,
-                lng: p.longitude_degrees,
-              }));
-            const conf = pts[Math.floor((start + i) / 2)].confidence || 0.5;
-            aiObjs.current.push(
-              new window.google.maps.Polyline({
-                path: seg,
-                geodesic: true,
-                strokeColor: "#7cdcff",
-                strokeOpacity: 0,
-                strokeWeight: 0,
-                zIndex: 4,
-                map: mapObj.current,
-                icons: [
-                  {
-                    icon: {
-                      path: "M 0,-1 0,1",
-                      strokeOpacity: conf * 0.85,
-                      strokeColor: "#7cdcff",
-                      scale: 3,
-                    },
-                    offset: "0",
-                    repeat: "12px",
-                  },
-                ],
-              }),
-            );
-            start = null;
-          }
-        }
+      for (let i=0; i<pts.length; i++) {
+        if (pts[i].ai_interpolated) { if (start===null) start = i>0?i-1:i; }
+        else { if (start!==null) { const seg=pts.slice(start,i+1).map(p=>({lat:p.latitude_degrees,lng:p.longitude_degrees}));const conf=pts[Math.floor((start+i)/2)].confidence||0.5;aiObjs.current.push(new window.google.maps.Polyline({path:seg,geodesic:true,strokeColor:"#7cdcff",strokeOpacity:0,strokeWeight:0,zIndex:4,map:mapObj.current,icons:[{icon:{path:"M 0,-1 0,1",strokeOpacity:conf*0.85,strokeColor:"#7cdcff",scale:3},offset:"0",repeat:"12px"}]}));start=null;} }
       }
-      for (let i = 1; i < raw.length; i++) {
-        const t1 = new Date(raw[i - 1].effective_timestamp).getTime(),
-          t2 = new Date(raw[i].effective_timestamp).getTime();
-        const gapMin = (t2 - t1) / 60000;
-        if (gapMin > 30 && gapMin < 360) {
-          const ml =
-              (raw[i - 1].latitude_degrees + raw[i].latitude_degrees) / 2,
-            mg = (raw[i - 1].longitude_degrees + raw[i].longitude_degrees) / 2;
-          const m = new window.google.maps.Marker({
-            position: { lat: ml, lng: mg },
-            map: mapObj.current,
-            icon: {
-              path: window.google.maps.SymbolPath.CIRCLE,
-              scale: 5,
-              fillColor: "#7cdcff",
-              fillOpacity: 0.85,
-              strokeColor: "#fff",
-              strokeWeight: 1.5,
-            },
-            title: `AI gap: ${Math.round(gapMin)}min`,
-            zIndex: 10,
-          });
-          m.addListener("click", () => {
-            infoWin.current.setContent(
-              `<div style="font-family:'JetBrains Mono',monospace;background:#061828;border:1px solid #7cdcff;border-radius:10px;padding:12px 15px;color:#fff;max-width:260px"><div style="color:#7cdcff;font-weight:700;font-size:12px;margin-bottom:8px">🤖 AI TRAJECTORY RECONSTRUCTION</div><div style="font-size:11px;color:#cde">AIS data gap: <b style="color:#7cdcff">${Math.round(gapMin)} min</b></div></div>`,
-            );
-            infoWin.current.setPosition({ lat: ml, lng: mg });
-            infoWin.current.open(mapObj.current);
-          });
+      for (let i=1; i<raw.length; i++) {
+        const t1=new Date(raw[i-1].effective_timestamp).getTime(), t2=new Date(raw[i].effective_timestamp).getTime();
+        const gapMin=(t2-t1)/60000;
+        if (gapMin>30 && gapMin<360) {
+          const ml=(raw[i-1].latitude_degrees+raw[i].latitude_degrees)/2, mg=(raw[i-1].longitude_degrees+raw[i].longitude_degrees)/2;
+          const m=new window.google.maps.Marker({position:{lat:ml,lng:mg},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:5,fillColor:"#7cdcff",fillOpacity:0.85,strokeColor:"#fff",strokeWeight:1.5},title:`AI gap: ${Math.round(gapMin)}min`,zIndex:10});
+          m.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:#061828;border:1px solid #7cdcff;border-radius:10px;padding:12px 15px;color:#fff;max-width:260px"><div style="color:#7cdcff;font-weight:700;font-size:12px;margin-bottom:8px">🤖 AI TRAJECTORY RECONSTRUCTION</div><div style="font-size:11px;color:#cde">AIS data gap: <b style="color:#7cdcff">${Math.round(gapMin)} min</b></div></div>`);infoWin.current.setPosition({lat:ml,lng:mg});infoWin.current.open(mapObj.current);});
           aiObjs.current.push(m);
         }
       }
@@ -1606,9 +834,7 @@ const MapView = forwardRef(function MapView(
     // re-triggered fitBounds and snapped the map viewport unexpectedly.
     if (trailData?.length) {
       const bounds = new window.google.maps.LatLngBounds();
-      raw.forEach((p) =>
-        bounds.extend({ lat: p.latitude_degrees, lng: p.longitude_degrees }),
-      );
+      raw.forEach(p => bounds.extend({ lat: p.latitude_degrees, lng: p.longitude_degrees }));
       mapObj.current.fitBounds(bounds, { padding: 90 });
     }
     // Bug #8 fix: layers.aiTrajectory intentionally excluded from deps.
@@ -1618,30 +844,20 @@ const MapView = forwardRef(function MapView(
 
   /* ── Predict route overlay ──────────────────────────────── */
   useEffect(() => {
-    predRouteObjs.current.forEach((o) => {
-      try {
-        o.setMap(null);
-      } catch (_) {}
-    });
+    predRouteObjs.current.forEach(o => { try{ o.setMap(null); }catch(_){} });
     predRouteObjs.current = [];
     const wps = predictRoute?.route_waypoints;
     if (!wps || wps.length < 2 || !mapObj.current) return;
-    const path = wps.map((wp) => ({ lat: wp.lat, lng: wp.lng }));
-    const dest = wps[wps.length - 1],
-      start = wps[0],
-      pred = predictRoute?.prediction;
+    const path = wps.map(wp => ({ lat: wp.lat, lng: wp.lng }));
+    const dest = wps[wps.length-1], start = wps[0], pred = predictRoute?.prediction;
 
     const segmentsByType = [];
-    let curSeg = [],
-      curType = null;
+    let curSeg = [], curType = null;
     for (const wp of wps) {
       const t = wp.lane_type || wp.type || "waypoint";
       const segType = t === "TSS" ? "TSS" : t === "DWR" ? "DWR" : "AIS";
       if (segType !== curType) {
-        if (curSeg.length > 0) {
-          segmentsByType.push({ pts: curSeg, type: curType });
-          curSeg = [curSeg[curSeg.length - 1]];
-        }
+        if (curSeg.length > 0) { segmentsByType.push({ pts: curSeg, type: curType }); curSeg = [curSeg[curSeg.length-1]]; }
         curType = segType;
       }
       curSeg.push({ lat: wp.lat, lng: wp.lng });
@@ -1649,218 +865,37 @@ const MapView = forwardRef(function MapView(
     if (curSeg.length > 1) segmentsByType.push({ pts: curSeg, type: curType });
 
     const typeColors = {
-      TSS: { outer: "#ff0000", inner: "#ff6666", glow: "#ffcccc" }, // blazing red
-      DWR: { outer: "#e6a800", inner: "#ffe040", glow: "#fff9a0" }, // blazing amber/gold
-      AIS: { outer: "#9b00c0", inner: "#e040fb", glow: "#ffd6ff" }, // blazing magenta/purple
+      TSS:  { outer:"#ff0000", inner:"#ff6666", glow:"#ffcccc" },   // blazing red
+      DWR:  { outer:"#e6a800", inner:"#ffe040", glow:"#fff9a0" },   // blazing amber/gold
+      AIS:  { outer:"#9b00c0", inner:"#e040fb", glow:"#ffd6ff" },   // blazing magenta/purple
     };
 
     // Dark shadow/halo for contrast on all map types
-    predRouteObjs.current.push(
-      new window.google.maps.Polyline({
-        path,
-        geodesic: true,
-        strokeColor: "#000000",
-        strokeOpacity: 0.35,
-        strokeWeight: 28,
-        zIndex: 5,
-        map: mapObj.current,
-      }),
-    );
-    predRouteObjs.current.push(
-      new window.google.maps.Polyline({
-        path,
-        geodesic: true,
-        strokeColor: "#1a0020",
-        strokeOpacity: 0.25,
-        strokeWeight: 22,
-        zIndex: 5,
-        map: mapObj.current,
-      }),
-    );
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#000000",strokeOpacity:0.35,strokeWeight:28,zIndex:5,map:mapObj.current}));
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeColor:"#1a0020",strokeOpacity:0.25,strokeWeight:22,zIndex:5,map:mapObj.current}));
     for (const seg of segmentsByType) {
       const c = typeColors[seg.type] || typeColors.AIS;
       // Glow halo
-      predRouteObjs.current.push(
-        new window.google.maps.Polyline({
-          path: seg.pts,
-          geodesic: true,
-          strokeColor: c.outer,
-          strokeOpacity: 0.45,
-          strokeWeight: 16,
-          zIndex: 6,
-          map: mapObj.current,
-        }),
-      );
+      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.outer,strokeOpacity:0.45,strokeWeight:16,zIndex:6,map:mapObj.current}));
       // Main vivid line
-      predRouteObjs.current.push(
-        new window.google.maps.Polyline({
-          path: seg.pts,
-          geodesic: true,
-          strokeColor: c.inner,
-          strokeOpacity: 1.0,
-          strokeWeight: 5,
-          zIndex: 8,
-          map: mapObj.current,
-        }),
-      );
+      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.inner,strokeOpacity:1.0,strokeWeight:5,zIndex:8,map:mapObj.current}));
       // Bright highlight core
-      predRouteObjs.current.push(
-        new window.google.maps.Polyline({
-          path: seg.pts,
-          geodesic: true,
-          strokeColor: c.glow,
-          strokeOpacity: 0.85,
-          strokeWeight: 2,
-          zIndex: 9,
-          map: mapObj.current,
-        }),
-      );
+      predRouteObjs.current.push(new window.google.maps.Polyline({path:seg.pts,geodesic:true,strokeColor:c.glow,strokeOpacity:0.85,strokeWeight:2,zIndex:9,map:mapObj.current}));
     }
-    predRouteObjs.current.push(
-      new window.google.maps.Polyline({
-        path,
-        geodesic: true,
-        strokeOpacity: 0,
-        strokeWeight: 0,
-        zIndex: 10,
-        map: mapObj.current,
-        icons: [
-          {
-            icon: {
-              path: "M 0,-1 0,1",
-              strokeOpacity: 0.9,
-              strokeColor: "#ffe0ff",
-              scale: 2.2,
-            },
-            offset: "0",
-            repeat: "16px",
-          },
-        ],
-      }),
-    );
-    predRouteObjs.current.push(
-      new window.google.maps.Polyline({
-        path,
-        geodesic: true,
-        strokeOpacity: 0,
-        strokeWeight: 0,
-        zIndex: 11,
-        map: mapObj.current,
-        icons: [
-          "6%",
-          "16%",
-          "26%",
-          "36%",
-          "46%",
-          "56%",
-          "66%",
-          "76%",
-          "86%",
-          "96%",
-        ].map((offset) => ({
-          icon: {
-            path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-            scale: 2.8,
-            strokeColor: "#7b0e87",
-            strokeWeight: 1,
-            fillColor: "#e040fb",
-            fillOpacity: 1,
-            strokeOpacity: 1,
-          },
-          offset,
-        })),
-      }),
-    );
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:10,map:mapObj.current,icons:[{icon:{path:"M 0,-1 0,1",strokeOpacity:0.90,strokeColor:"#ffe0ff",scale:2.2},offset:"0",repeat:"16px"}]}));
+    predRouteObjs.current.push(new window.google.maps.Polyline({path,geodesic:true,strokeOpacity:0,strokeWeight:0,zIndex:11,map:mapObj.current,icons:["6%","16%","26%","36%","46%","56%","66%","76%","86%","96%"].map(offset=>({icon:{path:window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,scale:2.8,strokeColor:"#7b0e87",strokeWeight:1,fillColor:"#e040fb",fillOpacity:1,strokeOpacity:1},offset}))}));
 
-    wps.slice(1, -1).forEach((wp, i) => {
-      const dot = new window.google.maps.Marker({
-        position: { lat: wp.lat, lng: wp.lng },
-        map: mapObj.current,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 6,
-          fillColor: "#e040fb",
-          fillOpacity: 1,
-          strokeColor: "#ffe0ff",
-          strokeWeight: 2,
-        },
-        title: wp.label || `Waypoint ${i + 1}`,
-        zIndex: 10,
-      });
-      dot.addListener("click", () => {
-        infoWin.current.setContent(
-          `<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#12082a,#1e0f40);border:1px solid #7c3aed88;border-radius:8px;padding:10px 14px;color:#fff;min-width:220px"><div style="color:#a78bfa;font-weight:700;font-size:10px">⚓ WAYPOINT</div><div style="font-size:13px;font-weight:700;color:#ede9fe;margin:4px 0 5px">${wp.label || "Waypoint"}</div>${wp.eta_hours_from_now ? `<div style="font-size:9px;color:#c4b5fd">ETA: ~${wp.eta_hours_from_now}h</div>` : ""}</div>`,
-        );
-        infoWin.current.setPosition({ lat: wp.lat, lng: wp.lng });
-        infoWin.current.open(mapObj.current);
-      });
+    wps.slice(1,-1).forEach((wp,i) => {
+      const dot=new window.google.maps.Marker({position:{lat:wp.lat,lng:wp.lng},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:6,fillColor:"#e040fb",fillOpacity:1,strokeColor:"#ffe0ff",strokeWeight:2},title:wp.label||`Waypoint ${i+1}`,zIndex:10});
+      dot.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#12082a,#1e0f40);border:1px solid #7c3aed88;border-radius:8px;padding:10px 14px;color:#fff"><div style="color:#a78bfa;font-weight:700;font-size:10px">⚓ WAYPOINT</div><div style="font-size:13px;font-weight:700;color:#ede9fe;margin:4px 0">${wp.label||"Waypoint"}</div>${wp.eta_hours_from_now?`<div style="font-size:9px;color:#c4b5fd">ETA: ~${wp.eta_hours_from_now}h</div>`:""}</div>`);infoWin.current.setPosition({lat:wp.lat,lng:wp.lng});infoWin.current.open(mapObj.current);});
       predRouteObjs.current.push(dot);
     });
-    predRouteObjs.current.push(
-      new window.google.maps.Marker({
-        position: { lat: start.lat, lng: start.lng },
-        map: mapObj.current,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 8,
-          fillColor: "#00e5ff",
-          fillOpacity: 1,
-          strokeColor: "#fff",
-          strokeWeight: 2,
-        },
-        title: "Current Position",
-        zIndex: 12,
-      }),
-    );
-    predRouteObjs.current.push(
-      new window.google.maps.Circle({
-        center: { lat: start.lat, lng: start.lng },
-        radius: 8000,
-        map: mapObj.current,
-        fillColor: "#00e5ff",
-        fillOpacity: 0.06,
-        strokeColor: "#00e5ff",
-        strokeWeight: 1.5,
-        strokeOpacity: 0.4,
-        zIndex: 6,
-      }),
-    );
-    const destMarker = new window.google.maps.Marker({
-      position: { lat: dest.lat, lng: dest.lng },
-      map: mapObj.current,
-      icon: {
-        path: "M -1 -10 L -1 4 M -1 -10 L 8 -6 L -1 -2",
-        strokeColor: "#f5a9ff",
-        strokeWeight: 2.5,
-        strokeOpacity: 1,
-        fillColor: "#e040fb",
-        fillOpacity: 0.9,
-        scale: 1.8,
-      },
-      title: `🏁 ${dest.label}`,
-      zIndex: 15,
-    });
-    destMarker.addListener("click", () => {
-      infoWin.current.setContent(
-        `<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#1a0a2e,#2d1b4e);border:1px solid #a78bfa88;border-radius:10px;padding:14px 18px;color:#fff;min-width:220px"><div style="color:#a78bfa;font-weight:700;font-size:10px">🎯 PREDICTED DESTINATION</div><div style="font-size:18px;font-weight:700;color:#ede9fe;margin:7px 0 5px">${dest.label}</div>${pred ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px"><div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px"><div style="font-size:8px;color:#a78bfa">ETA</div><div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.eta_label}</div></div><div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px"><div style="font-size:8px;color:#a78bfa">DISTANCE</div><div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.distance_nm} NM</div></div></div>` : ""}</div>`,
-      );
-      infoWin.current.setPosition({ lat: dest.lat, lng: dest.lng });
-      infoWin.current.open(mapObj.current);
-    });
+    predRouteObjs.current.push(new window.google.maps.Marker({position:{lat:start.lat,lng:start.lng},map:mapObj.current,icon:{path:window.google.maps.SymbolPath.CIRCLE,scale:8,fillColor:"#00e5ff",fillOpacity:1,strokeColor:"#fff",strokeWeight:2},title:"Current Position",zIndex:12}));
+    predRouteObjs.current.push(new window.google.maps.Circle({center:{lat:start.lat,lng:start.lng},radius:8000,map:mapObj.current,fillColor:"#00e5ff",fillOpacity:0.06,strokeColor:"#00e5ff",strokeWeight:1.5,strokeOpacity:0.4,zIndex:6}));
+    const destMarker=new window.google.maps.Marker({position:{lat:dest.lat,lng:dest.lng},map:mapObj.current,icon:{path:"M -1 -10 L -1 4 M -1 -10 L 8 -6 L -1 -2",strokeColor:"#f5a9ff",strokeWeight:2.5,strokeOpacity:1,fillColor:"#e040fb",fillOpacity:0.9,scale:1.8},title:`🏁 ${dest.label}`,zIndex:15});
+    destMarker.addListener("click",()=>{infoWin.current.setContent(`<div style="font-family:'JetBrains Mono',monospace;background:linear-gradient(135deg,#1a0a2e,#2d1b4e);border:1px solid #a78bfa88;border-radius:10px;padding:14px 18px;color:#fff;min-width:220px"><div style="color:#a78bfa;font-weight:700;font-size:10px">🎯 PREDICTED DESTINATION</div><div style="font-size:18px;font-weight:700;color:#ede9fe;margin:7px 0 5px">${dest.label}</div>${pred?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px"><div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px"><div style="font-size:8px;color:#a78bfa">ETA</div><div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.eta_label}</div></div><div style="background:rgba(124,58,237,0.2);border-radius:6px;padding:6px 8px"><div style="font-size:8px;color:#a78bfa">DISTANCE</div><div style="font-size:12px;font-weight:700;color:#e9d5ff">${pred.distance_nm} NM</div></div></div>`:""}</div>`);infoWin.current.setPosition({lat:dest.lat,lng:dest.lng});infoWin.current.open(mapObj.current);});
     predRouteObjs.current.push(destMarker);
-    predRouteObjs.current.push(
-      new window.google.maps.Circle({
-        center: { lat: dest.lat, lng: dest.lng },
-        radius: 15000,
-        map: mapObj.current,
-        fillColor: "#e040fb",
-        fillOpacity: 0.06,
-        strokeColor: "#f5a9ff",
-        strokeWeight: 1.5,
-        strokeOpacity: 0.45,
-        zIndex: 6,
-      }),
-    );
+    predRouteObjs.current.push(new window.google.maps.Circle({center:{lat:dest.lat,lng:dest.lng},radius:15000,map:mapObj.current,fillColor:"#e040fb",fillOpacity:0.06,strokeColor:"#f5a9ff",strokeWeight:1.5,strokeOpacity:0.45,zIndex:6}));
   }, [predictRoute]);
 
   /* ── Weather station markers ──────────────────────────── */
@@ -1870,65 +905,30 @@ const MapView = forwardRef(function MapView(
     // weatherStations was disabled, because weatherData changed and this effect re-ran.
     if (!layers.weatherStations) {
       if (weatherObjs.current.length > 0) {
-        weatherObjs.current.forEach((o) => {
-          try {
-            o.setMap(null);
-          } catch (_) {}
-        });
+        weatherObjs.current.forEach(o => { try{o.setMap(null);}catch(_){} });
         weatherObjs.current = [];
       }
       return;
     }
-    weatherObjs.current.forEach((o) => {
-      try {
-        o.setMap(null);
-      } catch (_) {}
-    });
+    weatherObjs.current.forEach(o => { try{o.setMap(null);}catch(_){} });
     weatherObjs.current = [];
     if (!mapReady || !mapObj.current || !weatherData) return;
     const stations = weatherData?.live?.stations || [];
-    stations.forEach((s) => {
+    stations.forEach(s => {
       if (!s.lat || !s.lng) return;
       const spd = s.wind_speed_ms || 0;
-      const col =
-        spd < 3.4
-          ? "#00e5ff"
-          : spd < 8
-            ? "#00ff9d"
-            : spd < 13.9
-              ? "#ffcc00"
-              : spd < 20.8
-                ? "#ff8800"
-                : "#ff2244";
+      const col = spd < 3.4 ? "#00e5ff" : spd < 8 ? "#00ff9d" : spd < 13.9 ? "#ffcc00" : spd < 20.8 ? "#ff8800" : "#ff2244";
       const hdg = s.wind_direction ?? 0;
       const marker = new window.google.maps.Marker({
-        position: { lat: s.lat, lng: s.lng },
-        map: mapObj.current,
-        icon: {
-          path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-          scale: 7,
-          rotation: hdg,
-          fillColor: col,
-          fillOpacity: 0.92,
-          strokeColor: "#000",
-          strokeWeight: 0.8,
-        },
-        title: `${s.station_name}: ${s.wind_speed_kn} kn`,
-        zIndex: 15,
+        position: { lat: s.lat, lng: s.lng }, map: mapObj.current,
+        icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 7, rotation: hdg, fillColor: col, fillOpacity: 0.92, strokeColor: "#000", strokeWeight: 0.8 },
+        title: `${s.station_name}: ${s.wind_speed_kn} kn`, zIndex: 15,
       });
       const label = new window.google.maps.Marker({
-        position: { lat: s.lat - 0.012, lng: s.lng },
-        map: mapObj.current,
+        position: { lat: s.lat - 0.012, lng: s.lng }, map: mapObj.current,
         icon: { path: "M 0 0", scale: 0 },
-        label: {
-          text: `${s.wind_speed_kn}kn`,
-          color: col,
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: "9px",
-          fontWeight: "800",
-        },
-        zIndex: 14,
-        clickable: false,
+        label: { text: `${s.wind_speed_kn}kn`, color: col, fontFamily: "'JetBrains Mono', monospace", fontSize: "9px", fontWeight: "800" },
+        zIndex: 14, clickable: false,
       });
       marker.addListener("click", () => {
         infoWin.current.setContent(
@@ -1948,8 +948,8 @@ const MapView = forwardRef(function MapView(
             </div>
             ${s.wind_direction != null ? `<div style="margin-top:6px;font-size:9px;color:#6a9ab0">Direction: ${s.wind_direction}°</div>` : ""}
             ${s.rainfall_mm != null && s.rainfall_mm > 0 ? `<div style="margin-top:4px;font-size:9px;color:#44c8ff">🌧️ Rainfall: ${s.rainfall_mm.toFixed(1)} mm</div>` : ""}
-            ${s.alert ? `<div style="margin-top:6px;font-size:9px;font-weight:700;color:${s.alert === "danger" ? "#ff6688" : "#ffaa44"}">${s.alert === "danger" ? "⚠️ GALE WARNING" : "〰️ ELEVATED WINDS"}</div>` : ""}
-          </div>`,
+            ${s.alert ? `<div style="margin-top:6px;font-size:9px;font-weight:700;color:${s.alert==="danger"?"#ff6688":"#ffaa44"}">${s.alert==="danger"?"⚠️ GALE WARNING":"〰️ ELEVATED WINDS"}</div>` : ""}
+          </div>`
         );
         infoWin.current.open(mapObj.current, marker);
       });
@@ -1961,7 +961,7 @@ const MapView = forwardRef(function MapView(
   const cycleStyle = useCallback(() => {
     if (!mapObj.current) return;
     const order = ["sea", "satellite", "dark"];
-    const next = order[(order.indexOf(mapStyle) + 1) % order.length];
+    const next  = order[(order.indexOf(mapStyle) + 1) % order.length];
     if (next === "sea") {
       // Plain roadmap, NO style overrides → Google sea/ferry routes visible
       mapObj.current.setMapTypeId("roadmap");
@@ -1978,7 +978,7 @@ const MapView = forwardRef(function MapView(
   }, [mapStyle]);
 
   // Zoom helpers — wrapped in rAF so Google Maps paint doesn't block touch feedback
-  const zoomIn = useCallback(() => {
+  const zoomIn  = useCallback(() => {
     if (!mapObj.current) return;
     requestAnimationFrame(() => {
       const z = mapObj.current?.getZoom() ?? 11;
@@ -1993,16 +993,10 @@ const MapView = forwardRef(function MapView(
     });
   }, []);
 
-  const liveCount = useMemo(() => freshVessels.length, [freshVessels]); // freshVessels already filtered stale
-  const dangerCount = useMemo(
-    () => alerts.filter((a) => a.level === "danger").length,
-    [alerts],
-  );
-  const warnCount = useMemo(
-    () => alerts.filter((a) => a.level === "warning").length,
-    [alerts],
-  );
-  const handleWeatherData = useCallback((d) => setWeatherData(d), []);
+  const liveCount   = useMemo(() => freshVessels.length, [freshVessels]); // freshVessels already filtered stale
+  const dangerCount = useMemo(() => alerts.filter(a => a.level === "danger").length, [alerts]);
+  const warnCount   = useMemo(() => alerts.filter(a => a.level === "warning").length, [alerts]);
+  const handleWeatherData  = useCallback((d) => setWeatherData(d), []);
   const handleStationHover = useCallback((s) => {
     if (!mapObj.current || !s?.lat || !s?.lng) return;
     const z = mapObj.current.getZoom() || 10;
@@ -2010,11 +1004,8 @@ const MapView = forwardRef(function MapView(
   }, []);
   const handleStationLeave = useCallback(() => {}, []);
 
-  const toggleLayer = useCallback(
-    (key) => setLayers((prev) => ({ ...prev, [key]: !prev[key] })),
-    [],
-  );
-  const STYLE_ICON = { sea: "🌊", satellite: "🛰️", dark: "🗺️" };
+  const toggleLayer = useCallback(key => setLayers(prev => ({ ...prev, [key]: !prev[key] })), []);
+  const STYLE_ICON  = { sea:"🌊", satellite:"🛰️", dark:"🗺️" };
 
   /* ── JSX ────────────────────────────────────────────────── */
   return (
@@ -2024,210 +1015,88 @@ const MapView = forwardRef(function MapView(
       {/* RIGHT-CENTER ICON STRIP — moved up by 60px from center */}
       <div className="mv-icon-strip">
         <button
-          className={
-            "mv-strip-btn" +
-            (portPanelOpen ? " mv-strip-active mv-strip-port" : "")
-          }
-          onClick={onTogglePortPanel}
-          title="Port Activity"
+          className={"mv-strip-btn" + (portPanelOpen ? " mv-strip-active mv-strip-port" : "")}
+          onClick={onTogglePortPanel} title="Port Activity"
         >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          >
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            <polyline points="9 22 9 12 15 12 15 22" />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
           </svg>
           <span className="mv-strip-lbl">PORT</span>
         </button>
 
         <button className="mv-strip-btn" onClick={cycleStyle} title="Map style">
           <span className="mv-strip-icon">{STYLE_ICON[mapStyle] || "🌊"}</span>
-          <span className="mv-strip-lbl">
-            {mapStyle === "sea"
-              ? "SEA"
-              : mapStyle === "satellite"
-                ? "SAT"
-                : "DARK"}
-          </span>
+          <span className="mv-strip-lbl">{mapStyle === "sea" ? "SEA" : mapStyle === "satellite" ? "SAT" : "DARK"}</span>
         </button>
 
         <button
-          className={
-            "mv-strip-btn mv-strip-weather-btn" +
-            (showWeatherPanel ? " mv-strip-active mv-strip-weather" : "")
-          }
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowWeatherPanel((p) => !p);
-          }}
-          title="Weather"
+          className={"mv-strip-btn mv-strip-weather-btn" + (showWeatherPanel ? " mv-strip-active mv-strip-weather" : "")}
+          onClick={e => { e.stopPropagation(); setShowWeatherPanel(p => !p); }} title="Weather"
         >
           <span className="mv-strip-icon">🌤️</span>
           <span className="mv-strip-lbl">WEATHER</span>
         </button>
 
         <button
-          className={
-            "mv-strip-btn" + (showLayerPanel ? " mv-strip-active" : "")
-          }
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowLayerPanel((p) => !p);
-          }}
-          title="Nautical Layers"
+          className={"mv-strip-btn" + (showLayerPanel ? " mv-strip-active" : "")}
+          onClick={e => { e.stopPropagation(); setShowLayerPanel(p => !p); }} title="Nautical Layers"
         >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          >
-            <polygon points="12 2 2 7 12 12 22 7 12 2" />
-            <polyline points="2 17 12 22 22 17" />
-            <polyline points="2 12 12 17 22 12" />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+            <polyline points="2 17 12 22 22 17"/>
+            <polyline points="2 12 12 17 22 12"/>
           </svg>
-          {loadingGIS && <span className="mv-strip-dot" />}
+          {loadingGIS && <span className="mv-strip-dot"/>}
           <span className="mv-strip-lbl">LAYERS</span>
         </button>
 
         {/* ZOOM — with min/max guards */}
         <div className="mv-strip-zoom">
-          <button
-            className="mv-strip-zoom-btn"
-            onClick={zoomIn}
-            title="Zoom in"
-          >
-            +
-          </button>
-          <button
-            className="mv-strip-zoom-btn"
-            onClick={zoomOut}
-            title="Zoom out"
-          >
-            −
-          </button>
+          <button className="mv-strip-zoom-btn" onClick={zoomIn} title="Zoom in">+</button>
+          <button className="mv-strip-zoom-btn" onClick={zoomOut} title="Zoom out">−</button>
         </div>
       </div>
 
       {/* LAYER PANEL */}
       {showLayerPanel && (
-        <div className="mv-layer-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="mv-layer-panel" onClick={e => e.stopPropagation()}>
           <div className="mv-lp-head">
             <span className="mv-lp-title">⚓ NAUTICAL LAYERS</span>
-            <button
-              className="mv-lp-close"
-              onClick={() => setShowLayerPanel(false)}
-            >
-              ✕
-            </button>
+            <button className="mv-lp-close" onClick={() => setShowLayerPanel(false)}>✕</button>
           </div>
           {[
-            {
-              key: "nauticalChart",
-              label: "Nautical Chart",
-              icon: "🗺️",
-              col: "#1e7fff",
-            },
-            {
-              key: "dangers",
-              label: "Dangers & Hazards",
-              icon: "⛔",
-              col: "#ff2244",
-            },
-            {
-              key: "depths",
-              label: "Depth Contours",
-              icon: "🌊",
-              col: "#0055aa",
-            },
-            {
-              key: "regulated",
-              label: "Regulated Areas",
-              icon: "⚠️",
-              col: "#ffcc00",
-            },
-            {
-              key: "tracks",
-              label: "Tracks & Routes",
-              icon: "🛣️",
-              col: "#00aaff",
-            },
-            {
-              key: "aids",
-              label: "Aids to Navigation",
-              icon: "💡",
-              col: "#ffee44",
-            },
-            {
-              key: "ports",
-              label: "Ports & Services",
-              icon: "⚓",
-              col: "#44aaff",
-            },
-            {
-              key: "tides",
-              label: "Tides & Currents",
-              icon: "🌊",
-              col: "#00eeff",
-            },
-            {
-              key: "cultural",
-              label: "Bridges & Cables",
-              icon: "🌉",
-              col: "#aaaaaa",
-            },
-            {
-              key: "seabed",
-              label: "Seabed Hazards",
-              icon: "🪨",
-              col: "#aa6600",
-            },
-            {
-              key: "vesselProximity",
-              label: "Proximity Alerts",
-              icon: "📡",
-              col: "#ff8800",
-            },
-            {
-              key: "aiTrajectory",
-              label: "AI Trajectory Fill",
-              icon: "🤖",
-              col: "#7cdcff",
-            },
-            {
-              key: "weatherStations",
-              label: "Wind Stations",
-              icon: "🌬️",
-              col: "#00e5ff",
-            },
+            { key:"nauticalChart",   label:"Nautical Chart",     icon:"🗺️", col:"#1e7fff" },
+            { key:"dangers",         label:"Dangers & Hazards",  icon:"⛔", col:"#ff2244" },
+            { key:"depths",          label:"Depth Contours",     icon:"🌊", col:"#0055aa" },
+            { key:"regulated",       label:"Regulated Areas",    icon:"⚠️", col:"#ffcc00" },
+            { key:"tracks",          label:"Tracks & Routes",    icon:"🛣️", col:"#00aaff" },
+            { key:"aids",            label:"Aids to Navigation", icon:"💡", col:"#ffee44" },
+            { key:"ports",           label:"Ports & Services",   icon:"⚓", col:"#44aaff" },
+            { key:"tides",           label:"Tides & Currents",   icon:"🌊", col:"#00eeff" },
+            { key:"cultural",        label:"Bridges & Cables",   icon:"🌉", col:"#aaaaaa" },
+            { key:"seabed",          label:"Seabed Hazards",     icon:"🪨", col:"#aa6600" },
+            { key:"vesselProximity", label:"Proximity Alerts",   icon:"📡", col:"#ff8800" },
+            { key:"aiTrajectory",    label:"AI Trajectory Fill", icon:"🤖", col:"#7cdcff" },
+            { key:"weatherStations", label:"Wind Stations",      icon:"🌬️", col:"#00e5ff" },
           ].map(({ key, label, icon, col }) => (
-            <div
-              key={key}
-              className={`mv-lp-row ${layers[key] ? "mv-lp-on" : ""}`}
-              onClick={() => toggleLayer(key)}
-            >
+            <div key={key} className={`mv-lp-row ${layers[key] ? "mv-lp-on" : ""}`} onClick={() => toggleLayer(key)}>
               <span className="mv-lp-icon">{icon}</span>
               <span className="mv-lp-label">{label}</span>
               <div className="mv-lp-toggle" style={{ "--tc": col }}>
-                <div
-                  className={`mv-lp-knob ${layers[key] ? "mv-lp-knob-on" : ""}`}
-                />
+                <div className={`mv-lp-knob ${layers[key] ? "mv-lp-knob-on" : ""}`} />
               </div>
             </div>
           ))}
         </div>
       )}
 
+
+
+
       {/* ALERT PANEL */}
       {alerts.length > 0 && showAlerts && (
-        <div className="mv-alert-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="mv-alert-panel" onClick={e => e.stopPropagation()}>
           <div className="mv-ap-radar">
             <div className="mv-ap-radar-sweep" />
             <div className="mv-ap-radar-ring mv-ap-radar-r1" />
@@ -2238,45 +1107,19 @@ const MapView = forwardRef(function MapView(
             <div className="mv-ap-title-row">
               <span className="mv-ap-title">⚡ COLLISION ALERTS</span>
               <div className="mv-ap-badges">
-                {dangerCount > 0 && (
-                  <span className="mv-ap-badge mv-ap-danger">
-                    🚨 {dangerCount}
-                  </span>
-                )}
-                {warnCount > 0 && (
-                  <span className="mv-ap-badge mv-ap-warn">⚠️ {warnCount}</span>
-                )}
+                {dangerCount > 0 && <span className="mv-ap-badge mv-ap-danger">🚨 {dangerCount}</span>}
+                {warnCount   > 0 && <span className="mv-ap-badge mv-ap-warn">⚠️ {warnCount}</span>}
               </div>
             </div>
-            <button
-              className="mv-ap-close"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowAlerts(false);
-              }}
-            >
-              ✕
-            </button>
+            <button className="mv-ap-close" onClick={e => { e.stopPropagation(); setShowAlerts(false); }}>✕</button>
           </div>
           <div className="mv-ap-list">
             {(showAllAlerts ? alerts : alerts.slice(0, 5)).map((a, i) => (
-              <div
-                key={i}
-                className={`mv-ap-item mv-ap-${a.level}`}
-                onClick={(e) => {
+              <div key={i} className={`mv-ap-item mv-ap-${a.level}`}
+                onClick={e => {
                   e.stopPropagation();
-                  if (a.lat && a.lng && mapObj.current) {
-                    mapObj.current.panTo({ lat: a.lat, lng: a.lng });
-                    mapObj.current.setZoom(15);
-                  }
-                  if (a.imo)
-                    onVesselClickRef.current(
-                      vessels.find(
-                        (v) =>
-                          v.imo_number === a.imo ||
-                          String(v.imo_number) === String(a.imo),
-                      ) || null,
-                    );
+                  if (a.lat && a.lng && mapObj.current) { mapObj.current.panTo({ lat: a.lat, lng: a.lng }); mapObj.current.setZoom(15); }
+                  if (a.imo) onVesselClickRef.current(vessels.find(v => v.imo_number===a.imo || String(v.imo_number)===String(a.imo)) || null);
                 }}
               >
                 <div className="mv-ap-item-left">
@@ -2290,31 +1133,16 @@ const MapView = forwardRef(function MapView(
               </div>
             ))}
             {alerts.length > 5 && (
-              <button
-                className="mv-ap-more-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowAllAlerts((x) => !x);
-                }}
-              >
+              <button className="mv-ap-more-btn" onClick={e => { e.stopPropagation(); setShowAllAlerts(x => !x); }}>
                 {showAllAlerts ? "▲ Show less" : `▼ +${alerts.length - 5} more`}
               </button>
             )}
           </div>
-          <div className="mv-ap-footer">
-            <span>LIVE MONITORING · {alerts.length} ACTIVE</span>
-          </div>
+          <div className="mv-ap-footer"><span>LIVE MONITORING · {alerts.length} ACTIVE</span></div>
         </div>
       )}
       {alerts.length > 0 && !showAlerts && (
-        <button
-          className="mv-ap-bubble"
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowAlerts(true);
-            setShowAllAlerts(false);
-          }}
-        >
+        <button className="mv-ap-bubble" onClick={e => { e.stopPropagation(); setShowAlerts(true); setShowAllAlerts(false); }}>
           <span className="mv-ap-bubble-ping" />
           🚨 <span>{dangerCount > 0 ? dangerCount : alerts.length}</span>
           <span className="mv-ap-bubble-label">DANGER</span>
@@ -2326,9 +1154,7 @@ const MapView = forwardRef(function MapView(
           <span className="mv-ai-icon">🤖</span>
           <div>
             <div className="mv-ai-title">AI TRAJECTORY</div>
-            <div className="mv-ai-sub">
-              +{aiStats.interpolated} pts reconstructed
-            </div>
+            <div className="mv-ai-sub">+{aiStats.interpolated} pts reconstructed</div>
           </div>
         </div>
       )}
@@ -2343,40 +1169,24 @@ const MapView = forwardRef(function MapView(
         {trailData?.length > 0 && (
           <div className="mv-bh-trail">
             🛤️ <span>{trailData.length} pts</span>
-            {selectedVessel && (
-              <span className="mv-bh-tname">{selectedVessel.vessel_name}</span>
-            )}
+            {selectedVessel && <span className="mv-bh-tname">{selectedVessel.vessel_name}</span>}
           </div>
         )}
         {/* Coords written directly to DOM — no React re-render on mousemove */}
-        {!IS_MOBILE && <div ref={coordsDomRef} className="mv-bh-coords" />}
+        {!IS_MOBILE && (
+          <div ref={coordsDomRef} className="mv-bh-coords" />
+        )}
       </div>
 
       {/* RANGE LEGEND */}
       <div className="mv-range-legend">
-        <div className="mv-rl-row">
-          <span className="mv-rl-dot" style={{ background: "#ff2244" }} />
-          <span>DANGER &lt;{RADIUS.DANGER}m</span>
-        </div>
-        <div className="mv-rl-row">
-          <span className="mv-rl-dot" style={{ background: "#ffaa00" }} />
-          <span>CAUTION &lt;{RADIUS.WARNING}m</span>
-        </div>
-        <div className="mv-rl-row">
-          <span className="mv-rl-dot" style={{ background: "#00cc44" }} />
-          <span>SAFE</span>
-        </div>
-        {layers.aiTrajectory && (
-          <div className="mv-rl-row">
-            <span className="mv-rl-dot" style={{ background: "#7cdcff" }} />
-            <span>AI FILLED</span>
-          </div>
-        )}
+        <div className="mv-rl-row"><span className="mv-rl-dot" style={{ background:"#ff2244" }} /><span>DANGER &lt;{RADIUS.DANGER}m</span></div>
+        <div className="mv-rl-row"><span className="mv-rl-dot" style={{ background:"#ffaa00" }} /><span>CAUTION &lt;{RADIUS.WARNING}m</span></div>
+        <div className="mv-rl-row"><span className="mv-rl-dot" style={{ background:"#00cc44" }} /><span>SAFE</span></div>
+        {layers.aiTrajectory && <div className="mv-rl-row"><span className="mv-rl-dot" style={{ background:"#7cdcff" }} /><span>AI FILLED</span></div>}
       </div>
 
-      <div className="mv-compass" aria-hidden="true">
-        🧭
-      </div>
+      <div className="mv-compass" aria-hidden="true">🧭</div>
 
       <WeatherPanel
         expanded={showWeatherPanel}
@@ -2393,7 +1203,7 @@ export default MapView;
 
 /* ─── info window helper ─────────────────────────────────── */
 function dangerInfoContent(f) {
-  return `<div style="font-family:'JetBrains Mono',monospace;background:#1a0010;border:1px solid #ff2244;border-radius:8px;padding:10px 14px;color:#fff;min-width:200px"><div style="color:#ff2244;font-weight:700;font-size:12px">⛔ DANGER / HAZARD</div><div style="margin-top:6px;font-size:11px">${f.name || "Unknown Hazard"}</div>${f.depth != null ? `<div style="font-size:10px;color:#ff8899;margin-top:3px">Depth: ${f.depth}m</div>` : ""}${f.info ? `<div style="margin-top:4px;font-size:9px;color:#cc8888">${String(f.info).substring(0, 200)}</div>` : ""}</div>`;
+  return `<div style="font-family:'JetBrains Mono',monospace;background:#1a0010;border:1px solid #ff2244;border-radius:8px;padding:10px 14px;color:#fff;min-width:200px"><div style="color:#ff2244;font-weight:700;font-size:12px">⛔ DANGER / HAZARD</div><div style="margin-top:6px;font-size:11px">${f.name||"Unknown Hazard"}</div>${f.depth!=null?`<div style="font-size:10px;color:#ff8899;margin-top:3px">Depth: ${f.depth}m</div>`:""}${f.info?`<div style="margin-top:4px;font-size:9px;color:#cc8888">${String(f.info).substring(0,200)}</div>`:""}</div>`;
 }
 
 /* ─── map style themes ───────────────────────────────────── */
@@ -2403,41 +1213,17 @@ function dangerInfoContent(f) {
 // Any non-empty styles array suppresses the transit/ferry layer.
 
 const DARK_NAUTICAL_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#0d1a28" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#3d6a8a" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#040810" }] },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#071828" }],
-  },
-  {
-    featureType: "water",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#1a4a6a" }],
-  },
-  {
-    featureType: "landscape",
-    elementType: "geometry",
-    stylers: [{ color: "#111e2c" }],
-  },
-  {
-    featureType: "landscape.natural",
-    elementType: "geometry",
-    stylers: [{ color: "#0d1a28" }],
-  },
-  { featureType: "road", stylers: [{ visibility: "off" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-  {
-    featureType: "administrative.country",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#1a3a5a" }, { weight: 0.8 }],
-  },
-  {
-    featureType: "administrative.locality",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#2a5a7a" }, { visibility: "simplified" }],
-  },
+  { elementType:"geometry",              stylers:[{ color:"#0d1a28" }] },
+  { elementType:"labels.text.fill",      stylers:[{ color:"#3d6a8a" }] },
+  { elementType:"labels.text.stroke",    stylers:[{ color:"#040810" }] },
+  { featureType:"water", elementType:"geometry", stylers:[{ color:"#071828" }] },
+  { featureType:"water", elementType:"labels.text.fill", stylers:[{ color:"#1a4a6a" }] },
+  { featureType:"landscape",             elementType:"geometry", stylers:[{ color:"#111e2c" }] },
+  { featureType:"landscape.natural",     elementType:"geometry", stylers:[{ color:"#0d1a28" }] },
+  { featureType:"road",                  stylers:[{ visibility:"off" }] },
+  { featureType:"poi",                   stylers:[{ visibility:"off" }] },
+  { featureType:"transit",               stylers:[{ visibility:"off" }] },
+  { elementType:"labels.icon",           stylers:[{ visibility:"off" }] },
+  { featureType:"administrative.country", elementType:"geometry.stroke", stylers:[{ color:"#1a3a5a" }, { weight:0.8 }] },
+  { featureType:"administrative.locality", elementType:"labels.text.fill", stylers:[{ color:"#2a5a7a" }, { visibility:"simplified" }] },
 ];
