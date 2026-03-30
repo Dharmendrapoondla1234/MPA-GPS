@@ -16,11 +16,25 @@ const DOMAIN_BLACKLIST = new Set([
   "glassdoor.com","indeed.com","yellowpages.com","tradeindia.com",
   "alibaba.com","manta.com","hoovers.com",
 ]);
+
+// Root domains whose subdomains should also be blocked (r.bing.com, th.bing.com, etc.)
+const BLACKLISTED_ROOT_DOMAINS = [
+  "bing.com", "google.com", "google.co", "gstatic.com",
+  "microsoft.com", "msn.com", "live.com", "bing.net",
+  "duckduckgo.com", "yahoo.com", "baidu.com", "yandex.com",
+];
+
 const DIRECTORY_RE = /yellowpages|\/directory|\/listing|bizfile|registrar|companieshouse|opencorporate|kompass|manta\.com/;
 
 function isBlacklisted(d) {
   d = d.toLowerCase().replace(/^www\./, "");
-  return DOMAIN_BLACKLIST.has(d) || DIRECTORY_RE.test(d);
+  if (DOMAIN_BLACKLIST.has(d)) return true;
+  if (DIRECTORY_RE.test(d)) return true;
+  // Block ALL subdomains of major search engines (r.bing.com, th.bing.com, etc.)
+  for (const root of BLACKLISTED_ROOT_DOMAINS) {
+    if (d === root || d.endsWith("." + root)) return true;
+  }
+  return false;
 }
 
 async function dnsExists(domain) {

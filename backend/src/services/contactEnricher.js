@@ -17,7 +17,6 @@
 "use strict";
 require("dotenv").config();
 const { BigQuery }  = require("@google-cloud/bigquery");
-const Anthropic     = require("@anthropic-ai/sdk");
 const logger        = require("../utils/logger");
 const { lookupPortAgents, rankAgents } = require("./portAgentDB");
 const { findCompanyContactsWeb, searchMaritimeDBsForIMO } = require("./webContactFinder");
@@ -25,7 +24,6 @@ const { findCompanyContactsWeb, searchMaritimeDBsForIMO } = require("./webContac
 const PROJECT     = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
 const DATASET     = process.env.BIGQUERY_DATASET    || "MPA";
 const BQ_LOCATION = process.env.BIGQUERY_LOCATION   || "asia-southeast1";
-const MODEL       = "claude-haiku-4-5-20251001"; // corrected model ID
 
 // ── BigQuery client ────────────────────────────────────────────────
 let bq;
@@ -39,10 +37,7 @@ if (_creds && _creds.trim().startsWith("{")) {
   bq = new BigQuery({ projectId: PROJECT, location: BQ_LOCATION });
 }
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-if (!process.env.ANTHROPIC_API_KEY) {
-  logger.warn("[contactEnricher] ⚠️  ANTHROPIC_API_KEY is not set — all AI enrichment steps will be skipped");
-}
+// AI enrichment removed — using web-only pipeline
 
 // ── Caches ─────────────────────────────────────────────────────────
 const enrichCache    = new Map();
@@ -770,32 +765,10 @@ async function fetchFromVesselFinder(imo) {
 // STEP 4: AI IMO LOOKUP — falls back to web scraping when API unavailable
 // ═════════════════════════════════════════════════════════════════
 async function aiLookupByIMO(imo, vesselName) {
-  // Always try web scraping first (free, no API needed)
+  // Web-only: search maritime databases without AI
   const webResult = await searchMaritimeDBsForIMO(imo, vesselName).catch(() => null);
-  if (webResult?.owner_name) return webResult;
-
-  if (!process.env.ANTHROPIC_API_KEY) { logger.debug("[ai-imo] API key not set, returning web result"); return webResult || null; }
-  try {
-    const resp = await withTimeout(anthropic.messages.create({
-      model: MODEL, max_tokens: 1000,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content:
-        `Search for IMO number ${imo}${vesselName ? ` vessel "${vesselName}"` : ""} across maritime databases.
-Check: MarineTraffic, VesselFinder, FleetMon, Equasis, VesselTracker, ShipSpotting, Lloyd's List.
-Find: registered owner company name, ISM manager, ship manager, operator, flag state, and contact details.
-
-Return ONLY valid JSON (no markdown, no text before or after):
-{"vessel_name":null,"owner_name":null,"manager_name":null,"ship_manager":null,"operator_name":null,"flag":null,"website":null,"email":null,"phone":null,"address":null,"confidence":0.65,"sources_checked":[]}` }],
-    }), 45000);
-    const text = resp.content.find(b => b.type === "text")?.text;
-    const data = safeJson(text);
-    if (!data) return webResult || null;
-    if (data.owner_name && !isValidCompanyName(data.owner_name)) data.owner_name = null;
-    if (data.manager_name && !isValidCompanyName(data.manager_name)) data.manager_name = null;
-    if (!data.vessel_name && !data.owner_name) return webResult || null;
-    logger.info(`[ai-imo] IMO ${imo}: vessel="${data.vessel_name}" owner="${data.owner_name}"`);
-    return { ...data, source: "ai_imo_search" };
-  } catch (err) { logger.warn(`[ai-imo] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return webResult || null; }
+  if (webResult) logger.info(`[imo-lookup] IMO ${imo}: owner="${webResult.owner_name || "none"}" source=web`);
+  return webResult || null;
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -803,32 +776,10 @@ Return ONLY valid JSON (no markdown, no text before or after):
 // ═════════════════════════════════════════════════════════════════
 async function aiSearchCompanyContacts(companyName, country) {
   if (!companyName) return null;
-  // Always try web-based search first (free)
+  // Web-only: scrape maritime directories without AI
   const webResult = await findCompanyContactsWeb(companyName, country).catch(() => null);
-  if (webResult?.email) return webResult;
-
-  if (!process.env.ANTHROPIC_API_KEY) { logger.debug("[ai-company] API key not set, returning web result"); return webResult || null; }
-  try {
-    const resp = await withTimeout(anthropic.messages.create({
-      model: MODEL, max_tokens: 800,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content:
-        `Find official contact information for shipping company: "${companyName}"${country ? ` (${country})` : ""}.
-Search: official website, maritime directories (BIMCO, Intercargo, Intertanko), company registries, Google.
-Look for: official email, operations email, phone number, website URL, registered office address, LinkedIn page.
-
-Return ONLY valid JSON (no markdown):
-{"website":null,"email":null,"email_ops":null,"phone":null,"phone_alt":null,"address":null,"linkedin":null,"confidence":0.7}
-Rules: verified only, null for uncertain. confidence: 0.9=official site, 0.75=directory, 0.6=uncertain.` }],
-    }), 40000);
-    const text = resp.content.find(b => b.type === "text")?.text;
-    const data = safeJson(text);
-    if (!data) return webResult || null;
-    if (data.email && !data.email.includes("@")) data.email = null;
-    if (data.email && data.email.includes("example")) data.email = null;
-    logger.info(`[ai-company] "${companyName}": email=${data.email} web=${data.website}`);
-    return { ...data, source: "ai_web_search" };
-  } catch (err) { logger.warn(`[ai-company] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return webResult || null; }
+  if (webResult) logger.info(`[company-search] "${companyName}": email=${webResult.email || "none"} web=${webResult.website || "none"}`);
+  return webResult || null;
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -883,22 +834,8 @@ async function googleSearchContacts(companyName) {
 // STEP 8: LINKEDIN SEARCH (via Claude AI web search)
 // ═════════════════════════════════════════════════════════════════
 async function linkedinSearch(companyName, country) {
-  if (!companyName || !process.env.ANTHROPIC_API_KEY) return null;
-  try {
-    const resp = await withTimeout(anthropic.messages.create({
-      model: MODEL, max_tokens: 400,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content:
-        `Find the LinkedIn company page URL for shipping company "${companyName}"${country ? ` (${country})` : ""}.
-Also note their official website if found during search.
-Return ONLY valid JSON: {"linkedin_url":null,"website":null,"found":false}` }],
-    }), 20000);
-    const text = resp.content.find(b => b.type === "text")?.text;
-    const data = safeJson(text);
-    if (!data?.linkedin_url && !data?.website) return null;
-    logger.info(`[linkedin] "${companyName}": ${data.linkedin_url}`);
-    return data;
-  } catch (err) { logger.warn(`[linkedin] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
+  // LinkedIn search requires AI — skipped (no API key required logic removed)
+  return null;
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -918,26 +855,9 @@ async function resolvePortAgents({ portName, portCode, vesselType, ownerName, po
       return cacheSet(portAgentCache, cacheKey, ranked);
     }
 
-    // STEP 10: AI port agent search
-    if (!process.env.ANTHROPIC_API_KEY) return cacheSet(portAgentCache, cacheKey, []);
-    const resp = await withTimeout(anthropic.messages.create({
-      model: MODEL, max_tokens: 1400,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content:
-        `Find port agents / ship agents at port "${portName || portCode}"${vesselType ? ` for ${vesselType} vessels` : ""}.
-Search shipping directories, port authority websites, FONASBA agent lists, and agent company websites.
-Include major international agents (GAC, Inchcape, Wilhelmsen, Gulf Agency, Mariner Logistics) and local agents.
-
-Return ONLY a valid JSON array (no markdown, no text outside the array):
-[{"agent_name":null,"agency_company":null,"port_code":"${portCode || ""}","port_name":"${portName || ""}","email_primary":null,"email_ops":null,"phone_main":null,"phone_24h":null,"vhf_channel":null,"vessel_types_served":"ALL","services":[],"website":null,"port_context":"${portContext || "current"}","confidence":0.65,"data_source":"ai_web_search"}]` }],
-    }), 45000);
-    const text = resp.content.find(b => b.type === "text")?.text;
-    let arr = null;
-    try { const m = text && text.match(/\[[\s\S]*\]/); arr = m ? JSON.parse(m[0]) : null; } catch { arr = null; }
-    const result = Array.isArray(arr) ? arr.filter(a => a.agency_company || a.agent_name) : [];
-    result.forEach(a => { a.port_context = portContext; });
-    logger.info(`[ai-agents] ${portName}: ${result.length} agents found`);
-    return cacheSet(portAgentCache, cacheKey, result);
+    // STEP 10: No AI fallback — static DB is the only source
+    logger.info(`[port-agents] No static DB match for "${portName || portCode}" — returning empty`);
+    return cacheSet(portAgentCache, cacheKey, []);
   } catch (err) {
     logger.warn(`[port-agents] error: ${err?.message?.slice(0,120) || String(err).slice(0,120)}`);
     return cacheSet(portAgentCache, cacheKey, []);
@@ -948,47 +868,18 @@ Return ONLY a valid JSON array (no markdown, no text outside the array):
 // STEP 11: AGENT ORGANISATION ENRICHMENT
 // ═════════════════════════════════════════════════════════════════
 async function enrichAgentOrganisation({ ownerName, managerName, vesselName, vesselType, flag, imo }) {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  const company = ownerName || managerName;
-  if (!company && !vesselName) return null;
-  try {
-    const resp = await withTimeout(anthropic.messages.create({
-      model: MODEL, max_tokens: 1200,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content:
-        `Find the ship husbandry agent or ship management organisation for:
-Vessel: ${vesselName || "Unknown"} (IMO ${imo})  Owner/Manager: ${company || "Unknown"}
-Vessel Type: ${vesselType || "General"}  Flag: ${flag || "Unknown"}
-
-Search for appointed ship agents, husbandry agents, ship chandlers (GAC, Inchcape, Wilhelmsen, Gulf Agency, etc.)
-Return ONLY valid JSON (no markdown):
-{"agent_org_name":null,"agent_org_type":null,"appointment_basis":null,"agent_org_email":null,"agent_org_email_ops":null,"agent_org_phone":null,"agent_org_phone_24h":null,"agent_org_website":null,"agent_org_address":null,"services":[],"regions_covered":[],"confidence":0.6,"source":"ai_web_search"}` }],
-    }), 40000);
-    const text = resp.content.find(b => b.type === "text")?.text;
-    return safeJson(text);
-  } catch (err) { logger.warn(`[agent-org] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
+  // Agent org search requires AI — not available without API key
+  return null;
 }
 
 // ═════════════════════════════════════════════════════════════════
 // STEP 12: VESSEL MASTER / CAPTAIN CONTACT CHANNEL
 // ═════════════════════════════════════════════════════════════════
 async function enrichMasterContact({ ownerName, managerName, shipManager, flag, imo, vesselName }) {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  try {
-    const resp = await withTimeout(anthropic.messages.create({
-      model: MODEL, max_tokens: 800,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content:
-        `For vessel IMO ${imo} (${vesselName || "Unknown"}) flagged in ${flag || "Unknown"}, find captain/crew contact channels.
-Owner/ISM Manager: ${ownerName || managerName || shipManager || "Unknown"}
-Find: crew management company contact, MRCC for this flag state, satellite phone access info.
-Return ONLY valid JSON (no markdown):
-{"master_contact_note":null,"preferred_channel":null,"contact_protocol":null,"crew_dept_company":null,"crew_dept_email":null,"crew_dept_phone":null,"mrcc_name":null,"mrcc_country":null,"mrcc_email":null,"mrcc_phone":null,"sat_phone_public":null,"radio_call_sign":null,"inmarsat_number":null,"confidence":0.5,"source":"ai_web_search"}` }],
-    }), 35000);
-    const text = resp.content.find(b => b.type === "text")?.text;
-    return safeJson(text);
-  } catch (err) { logger.warn(`[master-contact] error: ${err?.status ?? ""} ${err?.message || String(err)}`); return null; }
+  // Master contact search requires AI — returns null when no API key
+  return null;
 }
+
 
 // ═════════════════════════════════════════════════════════════════
 // STEP 13: SAVE TO BIGQUERY (fire-and-forget)

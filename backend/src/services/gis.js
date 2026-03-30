@@ -67,8 +67,7 @@ async function getDangers() {
 
     // Points (wrecks, rocks, shoals)
     const [pRows] = await bigquery.query({ location: LOCATION, query: `
-      SELECT feature_id, OBJNAM AS name, INFORM AS info,
-             FCSubtype AS subtype, VALSOU AS depth,
+      SELECT feature_id, OBJNAM AS name, FCSubtype AS subtype, VALSOU AS depth,
              CATWRK AS wreck_cat, WATLEV AS water_level,
              ST_AsText(geom) AS geom
       FROM ${gTable("tmpa_dangersp")}
@@ -76,33 +75,31 @@ async function getDangers() {
     `});
     pRows.forEach(r => {
       const coords = wktToCoords(geomField(r));
-      if (coords) results.push({ type: "danger_point", id: r.feature_id, name: r.name, info: r.info, depth: r.depth, subtype: r.subtype, coords });
+      if (coords) results.push({ type: "danger_point", id: r.feature_id, name: r.name, info: null, depth: r.depth, subtype: r.subtype, coords });
     });
 
     // Areas
     const [aRows] = await bigquery.query({ location: LOCATION, query: `
-      SELECT feature_id, OBJNAM AS name, INFORM AS info,
-             FCSubtype AS subtype, VALSOU AS depth,
+      SELECT feature_id, OBJNAM AS name, FCSubtype AS subtype, VALSOU AS depth,
              ST_AsText(geom) AS geom
       FROM ${gTable("tmpa_dangersa")}
       WHERE IS_DELETE = 0 LIMIT 500
     `});
     aRows.forEach(r => {
       const coords = wktToCoords(geomField(r));
-      if (coords) results.push({ type: "danger_area", id: r.feature_id, name: r.name, info: r.info, depth: r.depth, subtype: r.subtype, coords });
+      if (coords) results.push({ type: "danger_area", id: r.feature_id, name: r.name, info: null, depth: r.depth, subtype: r.subtype, coords });
     });
 
     // Lines
     const [lRows] = await bigquery.query({ location: LOCATION, query: `
-      SELECT feature_id, OBJNAM AS name, INFORM AS info,
-             FCSubtype AS subtype, VALSOU AS depth,
+      SELECT feature_id, OBJNAM AS name, FCSubtype AS subtype, VALSOU AS depth,
              ST_AsText(geom) AS geom
       FROM ${gTable("tmpa_dangersl")}
       WHERE IS_DELETE = 0 LIMIT 500
     `});
     lRows.forEach(r => {
       const coords = wktToCoords(geomField(r));
-      if (coords) results.push({ type: "danger_line", id: r.feature_id, name: r.name, info: r.info, depth: r.depth, subtype: r.subtype, coords });
+      if (coords) results.push({ type: "danger_line", id: r.feature_id, name: r.name, info: null, depth: r.depth, subtype: r.subtype, coords });
     });
 
     logger.info && logger.info(`[GIS] dangers → ${results.length} features`);
@@ -130,7 +127,7 @@ async function getDepths() {
 async function getRegulatedAreas() {
   return cachedQuery("regulated", async () => {
     const [rows] = await bigquery.query({ location: LOCATION, query: `
-      SELECT feature_id, OBJNAM AS name, INFORM AS info, STATUS AS status,
+      SELECT feature_id, OBJNAM AS name, STATUS AS status,
              CATREA AS cat_area, RESTRN AS restriction,
              ST_AsText(geom_wkt) AS geom
       FROM ${gTable("tmpa_regulatedareasandlimitsa")}
@@ -154,7 +151,7 @@ async function getTracks() {
     const results = [];
 
     const [aRows] = await bigquery.query({ location: LOCATION, query: `
-      SELECT feature_id, OBJNAM AS name, INFORM AS info,
+      SELECT feature_id, OBJNAM AS name, 
              CATTRK AS track_cat, CATTSS AS tss_cat, TRAFIC AS traffic,
              DRVAL1 AS depth, ST_AsText(geom_wkt) AS geom
       FROM ${gTable("tmpa_tracksandroutesa")}
@@ -231,7 +228,7 @@ async function getSeabed() {
 async function getPortsAndServices() {
   return cachedQuery("ports", async () => {
     const [rows] = await bigquery.query({ location: LOCATION, query: `
-      SELECT feature_id, OBJNAM AS name, INFORM AS info,
+      SELECT feature_id, OBJNAM AS name, 
              CATMOR AS mooring_cat, CATHAF AS harbour_cat,
              HORLEN AS length, HORWID AS width, DRVAL1 AS depth,
              ST_AsText(geom_wkt) AS geom
@@ -276,7 +273,7 @@ async function getCulturalFeatures() {
     const results = [];
     // Bridges, cables, pipelines — points only for performance
     const [pRows] = await bigquery.query({ location: LOCATION, query: `
-      SELECT feature_id, OBJNAM AS name, INFORM AS info,
+      SELECT feature_id, OBJNAM AS name, 
              CATCBL AS cable_cat, CATPIP AS pipe_cat,
              ST_AsText(geom) AS geom
       FROM ${gTable("tmpa_culturalfeaturesp")}
@@ -286,7 +283,7 @@ async function getCulturalFeatures() {
 
     // Area features (bridges)
     const [aRows] = await bigquery.query({ location: LOCATION, query: `
-      SELECT feature_id, OBJNAM AS name, INFORM AS info, CATBRG AS bridge_cat,
+      SELECT feature_id, OBJNAM AS name,  CATBRG AS bridge_cat,
              ST_AsText(geom) AS geom
       FROM ${gTable("tmpa_culturalfeaturesa")}
       WHERE IS_DELETE = 0 AND CATBRG IS NOT NULL AND CATBRG != '' LIMIT 200
