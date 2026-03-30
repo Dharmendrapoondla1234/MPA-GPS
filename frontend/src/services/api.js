@@ -142,8 +142,12 @@ export async function fetchVesselHistory(imo, hours = 24) {
 }
 
 // ── ARRIVALS & DEPARTURES ─────────────────────────────────────────
-export async function fetchArrivals(limit = 500)   { return call(`/arrivals?limit=${limit}`); }
-export async function fetchDepartures(limit = 500) { return call(`/departures?limit=${limit}`); }
+export async function fetchArrivals(limit = 2000, days = 30, bustCache = false) {
+  return call(`/arrivals?limit=${limit}&days=${days}`, { bustCache });
+}
+export async function fetchDepartures(limit = 2000, days = 30, bustCache = false) {
+  return call(`/departures?limit=${limit}&days=${days}`, { bustCache });
+}
 export async function fetchPortActivity()         { return call("/port-activity"); }
 
 // ── CONTACT ENRICHMENT ────────────────────────────────────────────
@@ -358,4 +362,3 @@ export async function fetchVesselFuelEfficiency(imo) {
 export async function fetchFleetFuelEfficiency(limit = 200) {
   return call(`/fuel/fleet?limit=${limit}`);
 }
-

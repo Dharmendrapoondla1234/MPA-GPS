@@ -477,3 +477,67 @@
 .pa-download-btn:hover {
   background: rgba(0,229,255,0.18);
 }
+
+/* ── v5: Day range filter pills ───────────────────────────────── */
+.pa-filter-row {
+  padding: 6px 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pa-day-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #4a7a9b;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pa-day-pills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.pa-day-pill {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #4a7a9b;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.pa-day-pill:hover {
+  background: rgba(0,229,255,0.08);
+  border-color: rgba(0,229,255,0.25);
+  color: #00e5ff;
+}
+
+.pa-day-pill--on {
+  background: rgba(0,229,255,0.15);
+  border-color: rgba(0,229,255,0.5);
+  color: #00e5ff;
+  box-shadow: 0 0 8px rgba(0,229,255,0.15);
+}
+
+/* Upcoming time chip */
+.pa-chip-future {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Empty sub-text */
+.pa-empty-sub {
+  font-size: 11px;
+  color: #2a5a7b;
+  margin-top: 4px;
+}

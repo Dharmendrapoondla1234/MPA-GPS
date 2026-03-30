@@ -397,9 +397,10 @@ router.get("/vessels/:imo/history", async (req, res, next) => {
 // Enhanced: supports ?imo=&mmsi=&name=&flag= filters + download
 router.get("/arrivals", async (req, res, next) => {
   try {
-    const { limit, imo, mmsi, name, flag, download } = req.query;
-    const lim = parseInt(limit) || 50;
-    const raw = await getRecentArrivals(lim);
+    const { limit, imo, mmsi, name, flag, download, days } = req.query;
+    const lim = Math.min(parseInt(limit) || 2000, 5000);
+    const d   = Math.min(parseInt(days)  || 30,   90);
+    const raw = await getRecentArrivals(lim, d);
     let data = raw.map(normalizeArrival);
 
     // Apply identifier filters
@@ -429,9 +430,10 @@ router.get("/arrivals", async (req, res, next) => {
 // Enhanced: supports ?imo=&mmsi=&name=&flag= filters + download
 router.get("/departures", async (req, res, next) => {
   try {
-    const { limit, imo, mmsi, name, flag, download } = req.query;
-    const lim = parseInt(limit) || 50;
-    const raw = await getRecentDepartures(lim);
+    const { limit, imo, mmsi, name, flag, download, days } = req.query;
+    const lim = Math.min(parseInt(limit) || 2000, 5000);
+    const d   = Math.min(parseInt(days)  || 30,   90);
+    const raw = await getRecentDepartures(lim, d);
     let data = raw.map(normalizeDeparture);
 
     // Apply identifier filters

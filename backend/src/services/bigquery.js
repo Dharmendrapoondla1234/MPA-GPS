@@ -356,23 +356,27 @@ async function getVesselDetail(imoNumber) {
 // ════════════════════════════════════════════════════════════════
 //  ARRIVALS
 // ════════════════════════════════════════════════════════════════
-async function getRecentArrivals(limit = 500) {
-  const hit = fromCache("arrivals");
+async function getRecentArrivals(limit = 2000, days = 30) {
+  const cacheKey = `arrivals_${days}`;
+  const hit = fromCache(cacheKey);
   if (hit) return hit;
   const dbt = await useDbt();
-  const lim = Math.min(parseInt(limit) || 500, 2000);
+  const lim = Math.min(parseInt(limit) || 2000, 5000);
+  const d   = Math.min(parseInt(days)  || 30,   90);
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
         query: `SELECT *,
                   CASE WHEN arrival_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
                 FROM ${T.ARRIVALS}
-                WHERE arrival_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-                   OR arrival_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
+                WHERE arrival_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+                  AND arrival_time <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL ${d} DAY)
                 ORDER BY arrival_time ASC LIMIT ${lim}`,
         location: BQ_LOCATION,
       });
-      return toCache("arrivals", rows);
+      if (!cache["arrivals"]) cache["arrivals"] = { data: null, ts: 0, ttl: 60_000 };
+      cache[cacheKey] = { data: rows, ts: Date.now(), ttl: 60_000 };
+      return rows;
     } catch (e) {
       logger.warn(
         `[BQ] f_vessel_arrivals not ready, falling back: ${e.message.slice(0, 80)}`,
@@ -382,33 +386,37 @@ async function getRecentArrivals(limit = 500) {
   const [rows] = await bigquery.query({
     query: `SELECT * FROM ${T.LEGACY_ARRIVALS}
             WHERE TIMESTAMP(COALESCE(arrivedTime, arrived_time, arrival_time))
-              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
             ORDER BY TIMESTAMP(COALESCE(arrivedTime, arrived_time, arrival_time)) ASC LIMIT ${lim}`,
     location: BQ_LOCATION,
   });
-  return toCache("arrivals", rows);
+  cache[cacheKey] = { data: rows, ts: Date.now(), ttl: 60_000 };
+  return rows;
 }
 
 // ════════════════════════════════════════════════════════════════
 //  DEPARTURES
 // ════════════════════════════════════════════════════════════════
-async function getRecentDepartures(limit = 500) {
-  const hit = fromCache("departures");
-  if (hit) return hit;
+async function getRecentDepartures(limit = 2000, days = 30) {
+  const cacheKey = `departures_${days}`;
+  const hit = cache[cacheKey];
+  if (hit && hit.data && Date.now() - hit.ts < 60_000) return hit.data;
   const dbt = await useDbt();
-  const lim = Math.min(parseInt(limit) || 500, 2000);
+  const lim = Math.min(parseInt(limit) || 2000, 5000);
+  const d   = Math.min(parseInt(days)  || 30,   90);
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
         query: `SELECT *,
                   CASE WHEN departure_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
                 FROM ${T.DEPARTURES}
-                WHERE departure_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-                  AND departure_date <= DATE_ADD(CURRENT_DATE(), INTERVAL 7 DAY)
+                WHERE departure_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+                  AND departure_time <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL ${d} DAY)
                 ORDER BY departure_time ASC LIMIT ${lim}`,
         location: BQ_LOCATION,
       });
-      return toCache("departures", rows);
+      cache[cacheKey] = { data: rows, ts: Date.now(), ttl: 60_000 };
+      return rows;
     } catch (e) {
       logger.warn(
         `[BQ] f_vessel_departures not ready, falling back: ${e.message.slice(0, 80)}`,
@@ -418,11 +426,12 @@ async function getRecentDepartures(limit = 500) {
   const [rows] = await bigquery.query({
     query: `SELECT * FROM ${T.LEGACY_DEPARTURES}
             WHERE TIMESTAMP(COALESCE(departedTime, departed_time, departure_time))
-              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+              >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
             ORDER BY TIMESTAMP(COALESCE(departedTime, departed_time, departure_time)) ASC LIMIT ${lim}`,
     location: BQ_LOCATION,
   });
-  return toCache("departures", rows);
+  cache[cacheKey] = { data: rows, ts: Date.now(), ttl: 60_000 };
+  return rows;
 }
 
 // ════════════════════════════════════════════════════════════════
