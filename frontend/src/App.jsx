@@ -161,12 +161,19 @@ export default function App() {
     return v;
   }, [rawVessels, filters.flag]);
 
-  // Vessels shown on map — filtered to watchlist when watchlistMapFilter is on
+  // Vessels shown on map — only render the selected vessel when one is active;
+  // fall back to watchlist filter or all vessels when nothing is selected.
   const mapVessels = useMemo(() => {
-    if (!watchlistMapFilter || !watchlistList.length) return vessels;
-    const imoSet = new Set(watchlistList.map(w => String(w.imo_number)));
-    return vessels.filter(v => imoSet.has(String(v.imo_number)));
-  }, [vessels, watchlistMapFilter, watchlistList]);
+    if (selectedVessel) {
+      // Only render the one selected vessel so the map isn't cluttered
+      return vessels.filter(v => String(v.imo_number) === String(selectedVessel.imo_number));
+    }
+    if (watchlistMapFilter && watchlistList.length) {
+      const imoSet = new Set(watchlistList.map(w => String(w.imo_number)));
+      return vessels.filter(v => imoSet.has(String(v.imo_number)));
+    }
+    return vessels;
+  }, [vessels, selectedVessel, watchlistMapFilter, watchlistList]);
 
   // Unique flag codes for the TopBar dropdown — derived from live data
   const flagOptions = useMemo(() => {

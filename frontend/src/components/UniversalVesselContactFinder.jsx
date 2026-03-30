@@ -39,19 +39,7 @@ const SOURCE_MAP = {
   enricher:      { label: "Enricher", color: "#26de81" },
 };
 
-const PIPELINE_STEPS = [
-  { id: "equasis",        label: "Equasis IMO lookup",         icon: "🗂", conf: 0.92 },
-  { id: "marinetraffic",  label: "MarineTraffic vessel data",  icon: "🛳", conf: 0.80 },
-  { id: "vesselfinder",   label: "VesselFinder owner search",  icon: "🔭", conf: 0.75 },
-  { id: "ai_imo",         label: "AI multi-DB IMO scan",       icon: "🤖", conf: 0.70 },
-  { id: "ai_company",     label: "AI company contact search",  icon: "🔍", conf: 0.75 },
-  { id: "scrape",         label: "Website contact scrape",     icon: "🕸", conf: 0.85 },
-  { id: "google_cse",     label: "Google CSE extraction",      icon: "🔎", conf: 0.65 },
-  { id: "linkedin",       label: "LinkedIn profile search",    icon: "💼", conf: 0.60 },
-  { id: "port_agents",    label: "Port agent + AI lookup",     icon: "⚓", conf: 0.80 },
-  { id: "agent_org",      label: "Husbandry agent org search", icon: "🏗", conf: 0.70 },
-  { id: "master_channel", label: "Master contact channel",     icon: "👨‍✈️", conf: 0.50 },
-];
+
 
 function SourcePill({ src }) {
   if (!src) return null;
@@ -167,18 +155,6 @@ function AgentCard({ agent, rank }) {
   );
 }
 
-function PipelineRow({ step, status }) {
-  return (
-    <div className={`ucf-pipe-row${status === "running" ? " ucf-pipe-running" : ""}`}>
-      <span className="ucf-pipe-icon" style={{ color: status === "running" ? "#00e5ff" : status === "done" ? "#00ff9d" : "#1a2e50" }}>
-        {status === "done" ? "✓" : status === "running" ? "⟳" : step.icon}
-      </span>
-      <span className="ucf-pipe-label">{step.label}</span>
-      {status === "done"    && <span className="ucf-pipe-conf" style={{ color: confColor(step.conf) }}>{Math.round(step.conf * 100)}%</span>}
-      {status === "running" && <span className="ucf-pipe-scanning">scanning…</span>}
-    </div>
-  );
-}
 
 function SearchForm({ onSearch, loading }) {
   const [imo,      setImo]      = useState("");
@@ -244,7 +220,6 @@ const TABS = [
   { id: "PERSONNEL", icon: "👥", label: "Personnel"   },
   { id: "AGENTS",    icon: "⚓", label: "Port Agents"  },
   { id: "MASTER",    icon: "👨‍✈️", label: "Master"      },
-  { id: "PIPELINE",  icon: "🔬", label: "Pipeline"    },
 ];
 
 const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder({ isOpen, onClose, selectedVessel }) {
@@ -252,8 +227,6 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState(null);
   const [tab,        setTab]        = useState("OWNER");
-  const [stepStates, setStepStates] = useState({});
-  const [curStep,    setCurStep]    = useState(-1);
   const [lastQuery,  setLastQuery]  = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const abortRef = useRef(null);
@@ -275,23 +248,6 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // Animate pipeline steps while the real request runs (~20s backend)
-  async function animatePipeline() {
-    const states = {};
-    for (let i = 0; i < PIPELINE_STEPS.length; i++) {
-      const step = PIPELINE_STEPS[i];
-      setCurStep(i);
-      states[step.id] = "running";
-      setStepStates({ ...states });
-      // Faster animation since backend is now ~20s not ~70s
-      const delay = 300 + Math.random() * 300;
-      await new Promise(r => setTimeout(r, delay));
-      states[step.id] = "done";
-      setStepStates({ ...states });
-    }
-    setCurStep(-1);
-  }
-
   const doSearch = useCallback(async (q, retries = 0) => {
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -301,30 +257,24 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
     setError(null);
     setResult(null);
     setTab("OWNER");
-    setStepStates({});
-    setCurStep(-1);
     setRetryCount(retries);
 
     const clientTimer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
     try {
-      // Run animation and API call in parallel
-      const [, response] = await Promise.all([
-        animatePipeline(),
-        fetch(`${BASE_URL}/ai-contact/enrich`, {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          signal:  controller.signal,
-          body: JSON.stringify({
-            imo:      q.imo      || null,
-            mmsi:     q.mmsi     || null,
-            name:     q.name     || null,
-            curPort:  q.curPort  || null,
-            nextPort: q.nextPort || null,
-            vtype:    q.vtype    || null,
-          }),
+      const response = await fetch(`${BASE_URL}/ai-contact/enrich`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        signal:  controller.signal,
+        body: JSON.stringify({
+          imo:      q.imo      || null,
+          mmsi:     q.mmsi     || null,
+          name:     q.name     || null,
+          curPort:  q.curPort  || null,
+          nextPort: q.nextPort || null,
+          vtype:    q.vtype    || null,
         }),
-      ]);
+      });
 
       clearTimeout(clientTimer);
 
@@ -341,9 +291,8 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
     } catch (err) {
       clearTimeout(clientTimer);
       if (err.name === "AbortError") {
-        // Auto-retry once on timeout
         if (retries < 1) { setError(null); return doSearch(q, retries + 1); }
-        setError("Request timed out — the enrichment pipeline took too long. Please try again.");
+        setError("Request timed out — please try again.");
       } else {
         setError(`Enrichment failed: ${err.message}`);
       }
@@ -377,7 +326,7 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
             </div>
             <div>
               <div className="ucf-title">UNIVERSAL VESSEL CONTACT INTELLIGENCE</div>
-              <div className="ucf-subtitle">Any vessel worldwide · 12-step enrichment pipeline · Equasis + web scraping + port agents</div>
+              <div className="ucf-subtitle">Any vessel worldwide · Equasis + web scraping + port agents</div>
             </div>
           </div>
           <button className="ucf-close" onClick={onClose}>✕</button>
@@ -388,27 +337,35 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
           <SearchForm onSearch={handleSearch} loading={loading} />
         </div>
 
+        {/* Status strip */}
+        {(loading || r) && (
+          <div className="ucf-status-strip">
+            <div
+              className={`ucf-status-dot${loading ? " scanning" : ""}`}
+              style={{ background: loading ? "#00e5ff" : confColor(r?.confidence) }}
+            />
+            {loading ? (
+              <span className="ucf-status-label">ENRICHING · Querying maritime registries…</span>
+            ) : (
+              <>
+                <span className="ucf-status-label" style={{ color: confColor(r?.confidence) }}>
+                  {confLabel(r?.confidence)} · {Math.round((r?.confidence || 0) * 100)}%
+                </span>
+                {enrich?.pipeline_ran && <span className="ucf-live-badge" style={{ marginLeft: 6 }}>⚡ LIVE</span>}
+                {enrich?.sources_used?.length > 0 && (
+                  <div className="ucf-status-sources">
+                    <SourcePill src={enrich.sources_used.join("+")} />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* Body */}
         <div className="ucf-body">
 
-          {/* Sidebar — pipeline steps */}
-          <div className="ucf-sidebar">
-            <div className="ucf-sidebar-title">ENRICHMENT PIPELINE</div>
-            {PIPELINE_STEPS.map(step => (
-              <PipelineRow key={step.id} step={step} status={stepStates[step.id] || "idle"} />
-            ))}
-            {r && enrich && (
-              <div className="ucf-pipeline-result">
-                <div className="ucf-pipeline-conf" style={{ color: confColor(enrich.confidence) }}>
-                  {confLabel(enrich.confidence)} CONFIDENCE
-                  <span className="ucf-pipeline-pct">{Math.round(enrich.confidence * 100)}%</span>
-                </div>
-                {enrich.sources_used?.length > 0 && <SourcePill src={enrich.sources_used.join("+")} />}
-              </div>
-            )}
-          </div>
-
-          {/* Content area */}
+          {/* Content area — full width without sidebar */}
           <div className="ucf-content">
 
             {/* Empty state */}
@@ -449,9 +406,8 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
               <div className="ucf-loading">
                 <div className="ucf-loading-radar"><div className="ucf-loading-sweep" /></div>
                 <div className="ucf-loading-text">
-                  {curStep >= 0 && <div className="ucf-loading-step">{PIPELINE_STEPS[curStep]?.label}…</div>}
-                  <div className="ucf-loading-step" style={{ animationDelay: "1.2s" }}>Querying maritime registries…</div>
-                  <div className="ucf-loading-step" style={{ animationDelay: "2.4s" }}>Resolving port agents…</div>
+                  <div className="ucf-loading-step">Querying maritime registries…</div>
+                  <div className="ucf-loading-step" style={{ animationDelay: "1.2s" }}>Resolving port agents…</div>
                   {retryCount > 0 && <div className="ucf-loading-step ucf-retry-note">Retry {retryCount}…</div>}
                 </div>
               </div>
@@ -568,30 +524,6 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
                     </div>
                   )}
 
-                  {tab === "PIPELINE" && (
-                    <div>
-                      <div className="ucf-pipe-table">
-                        {PIPELINE_STEPS.map((step, i) => (
-                          <div key={step.id} className="ucf-pipe-table-row">
-                            <span className="ucf-pipe-num">{String(i + 1).padStart(2, "0")}</span>
-                            <span className="ucf-pipe-icon-lg">{step.icon}</span>
-                            <span className="ucf-pipe-label-lg">{step.label}</span>
-                            <span className="ucf-pipe-done">✓</span>
-                            <div className="ucf-pipe-conf-bar">
-                              <div className="ucf-pipe-bar-fill" style={{ width: `${Math.round(step.conf * 100)}%`, background: confColor(step.conf) }} />
-                            </div>
-                            <span className="ucf-pipe-conf-val" style={{ color: confColor(step.conf) }}>{Math.round(step.conf * 100)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="ucf-pipe-summary">
-                        <span>Sources: Equasis · MarineTraffic · VesselFinder · Web Scraping · Port Agents</span>
-                        <span className="ucf-pipe-overall" style={{ color: confColor(r.confidence) }}>
-                          Overall: {Math.round((r.confidence || 0) * 100)}% confidence
-                        </span>
-                      </div>
-                    </div>
-                  )}
 
                 </div>
               </div>
