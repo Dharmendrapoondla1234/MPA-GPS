@@ -316,23 +316,43 @@ const MapView = forwardRef(function MapView(
         hoverWin.current.close();
         setShowLayerPanel(false);
       });
+      // Zoom rescale rAF id — cancel in-flight batch when zoom fires again mid-animation
+      let zoomRescaleRafId = null;
       map.addListener("zoom_changed", () => {
         const z = map.getZoom() ?? 11;
         mapZoomRef.current = z;
         if (z < MIN_ZOOM) map.setZoom(MIN_ZOOM);
         if (z > MAX_ZOOM) map.setZoom(MAX_ZOOM);
-        // Re-scale only VISIBLE markers on zoom — not all 3000
-        // Defer to after tiles settle so it doesn't fight the zoom animation
-        requestAnimationFrame(() => {
+        // Cancel any previous in-flight rescale so rapid zoom doesn't stack work
+        if (zoomRescaleRafId) { cancelAnimationFrame(zoomRescaleRafId); zoomRescaleRafId = null; }
+        // Defer one rAF so Google Maps tile animation gets priority on the current frame
+        zoomRescaleRafId = requestAnimationFrame(() => {
           const bounds = mapObj.current?.getBounds();
           if (!bounds) return;
-          Object.values(markersRef.current).forEach(m => {
-            if (!m.getMap() || !m._vessel) return;
+          // Collect only visible markers — avoids iterating culled-out markers
+          const visible = Object.values(markersRef.current).filter(m => {
+            if (!m.getMap() || !m._vessel) return false;
             const pos = m.getPosition();
-            if (pos && bounds.contains(pos)) {
-              m.setIcon(getVesselIcon(m._vessel, false, null, z));
-            }
+            return pos && bounds.contains(pos);
           });
+          if (!visible.length) { zoomRescaleRafId = null; return; }
+          // Rescale in batches of 50 per frame — keeps each frame well under 16ms
+          const ZOOM_BATCH = IS_MOBILE ? 25 : 50;
+          let zi = 0;
+          const rescaleChunk = () => {
+            if (!mapObj.current) { zoomRescaleRafId = null; return; }
+            const end = Math.min(zi + ZOOM_BATCH, visible.length);
+            for (; zi < end; zi++) {
+              const m = visible[zi];
+              if (m._vessel) m.setIcon(getVesselIcon(m._vessel, false, null, z));
+            }
+            if (zi < visible.length) {
+              zoomRescaleRafId = requestAnimationFrame(rescaleChunk);
+            } else {
+              zoomRescaleRafId = null;
+            }
+          };
+          rescaleChunk();
         });
       });
 
