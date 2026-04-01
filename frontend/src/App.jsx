@@ -163,16 +163,17 @@ export default function App() {
     return v;
   }, [rawVessels, filters.flag]);
 
-  // Vessels shown on map — only render the selected vessel when one is active;
-  // fall back to watchlist filter or all vessels when nothing is selected.
+  // Vessels shown on map — watchlist filter takes priority when active.
+  // selectedVessel is passed separately to the map for highlighting only,
+  // not for filtering — so the watchlist view stays intact after clicking a vessel.
   const mapVessels = useMemo(() => {
-    if (selectedVessel) {
-      // Only render the one selected vessel so the map isn't cluttered
-      return vessels.filter(v => String(v.imo_number) === String(selectedVessel.imo_number));
-    }
     if (watchlistMapFilter && watchlistList.length) {
       const imoSet = new Set(watchlistList.map(w => String(w.imo_number)));
       return vessels.filter(v => imoSet.has(String(v.imo_number)));
+    }
+    if (selectedVessel && !watchlistMapFilter) {
+      // Only collapse to single vessel when NOT in watchlist mode
+      return vessels.filter(v => String(v.imo_number) === String(selectedVessel.imo_number));
     }
     return vessels;
   }, [vessels, selectedVessel, watchlistMapFilter, watchlistList]);
@@ -344,7 +345,17 @@ export default function App() {
             trailData={trailData}   predictRoute={predictRoute}
             portPanelOpen={portPanelOpen} onTogglePortPanel={handleTogglePortPanel}
             showWatchlistOnly={watchlistMapFilter}
-            onToggleWatchlistOnly={() => setWatchlistMapFilter(p => !p)}
+            onToggleWatchlistOnly={() => {
+              const next = !watchlistMapFilter;
+              setWatchlistMapFilter(next);
+              // Clear any selected vessel when entering watchlist mode so the
+              // selectedVessel guard doesn't override the watchlist filter
+              if (next) {
+                setSelectedVessel(null);
+                setTrailData(null);
+                setPredictRoute(null);
+              }
+            }}
             watchlistCount={watchlistCount}
           />
 
