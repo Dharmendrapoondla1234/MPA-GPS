@@ -399,3 +399,145 @@
   .vc-card { flex: 0 0 180px; min-width: 170px; padding: 10px; }
   .vc-speed-val { font-size: 18px; }
 }
+/* ── Intel tab: Gemini AI badges & tips ─────────────────────────── */
+.intel-badge-gemini {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: linear-gradient(135deg, rgba(66,133,244,0.18), rgba(138,43,226,0.18));
+  border: 1px solid rgba(138,43,226,0.35);
+  border-radius: 10px; padding: 2px 8px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.6px;
+  color: #c084fc; text-transform: uppercase;
+}
+.intel-badge-cached {
+  display: inline-flex; align-items: center;
+  background: rgba(0,229,255,0.08); border: 1px solid rgba(0,229,255,0.2);
+  border-radius: 10px; padding: 2px 8px;
+  font-size: 9px; font-weight: 700; color: #00e5ff; letter-spacing: 0.6px;
+}
+.intel-badge-smtp {
+  display: inline-flex; align-items: center;
+  background: rgba(38,222,129,0.12); border: 1px solid rgba(38,222,129,0.3);
+  border-radius: 8px; padding: 1px 6px;
+  font-size: 8px; font-weight: 700; color: #26de81;
+}
+.intel-badge-rejected {
+  display: inline-flex; align-items: center;
+  background: rgba(255,51,85,0.1); border: 1px solid rgba(255,51,85,0.25);
+  border-radius: 8px; padding: 1px 6px;
+  font-size: 8px; font-weight: 700; color: #ff3355;
+}
+.intel-badge-mx {
+  display: inline-flex; align-items: center;
+  background: rgba(253,150,68,0.1); border: 1px solid rgba(253,150,68,0.3);
+  border-radius: 8px; padding: 1px 6px;
+  font-size: 8px; font-weight: 700; color: #fd9644;
+}
+.intel-meta-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 12px; margin-bottom: 8px;
+  background: rgba(0,0,0,0.2); border-radius: 6px;
+  border: 1px solid rgba(0,229,255,0.06);
+}
+.intel-meta-label { font-size: 9px; font-weight: 700; color: var(--text-3,#3d6a8a); text-transform: uppercase; letter-spacing: 0.6px; }
+.intel-meta-val { font-size: 10px; color: var(--text-2,#8ab4d0); font-family: var(--font-mono,'JetBrains Mono',monospace); }
+.intel-meta-steps { font-size: 8px; color: var(--text-3,#3d6a8a); margin-left: auto; }
+
+.intel-gemini-tip {
+  margin-top: 12px; padding: 10px 14px; border-radius: 8px;
+  background: rgba(138,43,226,0.06); border: 1px solid rgba(138,43,226,0.2);
+  font-size: 11px; color: var(--text-2,#8ab4d0); line-height: 1.5;
+}
+.intel-gemini-tip code {
+  background: rgba(0,0,0,0.3); border-radius: 3px; padding: 1px 4px;
+  font-family: var(--font-mono,'JetBrains Mono',monospace); font-size: 10px; color: #c084fc;
+}
+.intel-gemini-tip a { color: #7c3aed; text-decoration: underline; }
+.intel-gemini-tip-active {
+  background: rgba(138,43,226,0.1); border-color: rgba(138,43,226,0.35); color: #c084fc;
+}
+
+.intel-section { margin-bottom: 14px; }
+.intel-section-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; margin-bottom: 6px;
+  background: rgba(0,0,0,0.25); border-radius: 6px;
+  border-left: 3px solid rgba(0,229,255,0.4);
+}
+.intel-section-icon { font-size: 13px; }
+.intel-section-title { font-size: 9px; font-weight: 700; letter-spacing: 0.8px; color: var(--text-2,#8ab4d0); text-transform: uppercase; }
+.intel-section-count { margin-left: auto; font-size: 9px; font-weight: 700; color: #00e5ff; background: rgba(0,229,255,0.1); border-radius: 8px; padding: 1px 7px; }
+
+.intel-email-list { display: flex; flex-direction: column; gap: 4px; }
+.intel-email-list-compact { gap: 3px; margin-top: 4px; }
+.intel-email-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 6px;
+  background: rgba(0,229,255,0.03); border: 1px solid rgba(0,229,255,0.06);
+  transition: background 0.15s;
+}
+.intel-email-row:hover { background: rgba(0,229,255,0.07); }
+.intel-email {
+  font-family: var(--font-mono,'JetBrains Mono',monospace);
+  font-size: 11px; color: #00e5ff; text-decoration: none; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.intel-email:hover { text-decoration: underline; }
+.intel-email-meta { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.intel-conf { font-size: 9px; font-weight: 700; border-radius: 8px; padding: 1px 6px; }
+.intel-conf-high { background: rgba(38,222,129,0.12); color: #26de81; }
+.intel-conf-mid  { background: rgba(253,150,68,0.12); color: #fd9644; }
+.intel-conf-low  { background: rgba(255,51,85,0.1);   color: #ff6b6b; }
+.intel-source { font-size: 8px; color: var(--text-3,#3d6a8a); max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.intel-phone-list { display: flex; flex-direction: column; gap: 3px; }
+.intel-phone-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; border-radius: 6px;
+  background: rgba(253,150,68,0.03); border: 1px solid rgba(253,150,68,0.08);
+}
+.intel-phone-icon { font-size: 11px; color: #fd9644; }
+.intel-phone { font-family: var(--font-mono,'JetBrains Mono',monospace); font-size: 11px; color: #fd9644; flex: 1; }
+
+.intel-company-block {
+  margin-bottom: 10px; padding: 10px 12px; border-radius: 8px;
+  background: rgba(0,0,0,0.2); border: 1px solid rgba(0,229,255,0.06);
+}
+.intel-company-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.intel-company-name { font-size: 12px; font-weight: 700; color: var(--text-1,#f0f8ff); flex: 1; }
+.intel-company-role {
+  font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+  background: rgba(167,139,250,0.12); border: 1px solid rgba(167,139,250,0.25);
+  border-radius: 8px; padding: 2px 7px; color: #a78bfa;
+}
+.intel-domain-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  padding: 5px 8px; border-radius: 5px; background: rgba(0,229,255,0.04);
+}
+.intel-domain-icon { font-size: 12px; }
+.intel-domain-link {
+  font-size: 11px; color: #00e5ff; text-decoration: none; flex: 1;
+  font-family: var(--font-mono,'JetBrains Mono',monospace);
+}
+.intel-domain-link:hover { text-decoration: underline; }
+.intel-domain-meta { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.intel-no-domain {
+  padding: 6px 8px; border-radius: 5px; font-size: 10px;
+  color: var(--text-3,#3d6a8a); background: rgba(255,51,85,0.04);
+  border: 1px solid rgba(255,51,85,0.1); margin-bottom: 4px;
+}
+.intel-address-row { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; }
+.intel-address-icon { font-size: 11px; flex-shrink: 0; margin-top: 1px; }
+.intel-address { font-size: 10px; color: var(--text-2,#8ab4d0); line-height: 1.4; }
+.intel-external-links {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid rgba(0,229,255,0.06);
+}
+.intel-external-links a {
+  font-size: 10px; color: #7c3aed; text-decoration: none;
+  padding: 3px 8px; border-radius: 5px;
+  background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.2);
+  transition: background 0.15s;
+}
+.intel-external-links a:hover { background: rgba(124,58,237,0.15); }
+.intel-tab { padding: 8px 4px; }

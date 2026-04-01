@@ -2,7 +2,7 @@
 // Tabs: Owner/Operator · Port Agents · 🔎 Contact Intelligence · Agent Org · Master
 // Intelligence tab shows domain, verified emails, phones from the no-AI pipeline
 import React, { useState, useEffect, useCallback, memo } from "react";
-import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment, fetchVesselIntelligence } from "../services/api";
+import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment, fetchVesselIntelligence, checkGeminiStatus, geminiEnrichCompany } from "../services/api";
 import "./VesselContactPanel.css";
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ function AgentCard({ agent }) {
 }
 
 // ── Intelligence Tab — domain + verified emails + phones ──────────
-function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, imo }) {
+function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, imo, geminiConfigured }) {
   if (intelLoading) {
     return (
       <div className="cp-loading">
@@ -182,6 +182,17 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
           Select a vessel with Equasis data (owner/manager names) to auto-run the pipeline.
           Or click <strong>↻ Refresh</strong> to trigger manually.
         </div>
+        {geminiConfigured === false && (
+          <div className="intel-gemini-tip">
+            💡 <strong>Boost accuracy:</strong> Add <code>GEMINI_API_KEY</code> to your backend <code>.env</code> for AI-powered contact discovery.{" "}
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Get free key →</a>
+          </div>
+        )}
+        {geminiConfigured === true && (
+          <div className="intel-gemini-tip intel-gemini-tip-active">
+            ✨ <strong>Gemini AI active</strong> — will boost search if standard pipeline finds nothing.
+          </div>
+        )}
       </div>
     );
   }
@@ -195,7 +206,8 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
         <span className="intel-meta-label">Pipeline</span>
         <span className="intel-meta-val">{pipeline_ran_at ? new Date(pipeline_ran_at).toLocaleTimeString() : "—"}</span>
         {cached && <span className="intel-badge-cached">cached</span>}
-        <span className="intel-meta-steps">Domain → Crawl → MX → SMTP</span>
+        {intelligence?.gemini_used && <span className="intel-badge-gemini">✨ Gemini AI</span>}
+        <span className="intel-meta-steps">Domain → Crawl → MX → SMTP{intelligence?.gemini_used ? " → Gemini" : ""}</span>
       </div>
 
       {/* Top contacts across all companies */}
@@ -341,6 +353,7 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
   const [enriching,     setEnriching]     = useState(false);
   const [error,         setError]         = useState(null);
   const [activeTab,     setActiveTab]     = useState("company");
+  const [geminiConfigured, setGeminiConfigured] = useState(null);
 
   const imo         = vessel?.imo_number  || null;
   const mmsi        = vessel?.mmsi_number || null;
@@ -348,6 +361,11 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
   const currentPort = portCode || vessel?.location_to || vessel?.port_name || null;
   const nextPort    = vessel?.next_port_destination || vessel?.destination || null;
   const vesselType  = vessel?.vessel_type || null;
+
+  // Check Gemini status once on mount
+  useEffect(() => {
+    checkGeminiStatus().then(s => setGeminiConfigured(s?.configured ?? null)).catch(() => {});
+  }, []);
 
   // Reset when vessel changes
   useEffect(() => {
@@ -522,6 +540,7 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
             intelligence={intelligence}
             intelLoading={intelLoading}
             intelError={intelError}
+            geminiConfigured={geminiConfigured}
             onRefresh={() => {
               const ownerName = contacts?.owner?.company_name || null;
               const managerName = contacts?.manager?.company_name || null;

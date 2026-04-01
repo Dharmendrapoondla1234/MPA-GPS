@@ -37,6 +37,8 @@ const SOURCE_MAP = {
   port_agent_db: { label: "Agents",   color: "#26de81" },
   bigquery:      { label: "Cached",   color: "#38bdf8" },
   enricher:      { label: "Enricher", color: "#26de81" },
+  gemini_ai:     { label: "Gemini AI", color: "#c084fc" },
+  gemini:        { label: "Gemini AI", color: "#c084fc" },
 };
 
 
@@ -262,6 +264,7 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
     const clientTimer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
     try {
+      // Step 1: Try the standard AI contact pipeline
       const response = await fetch(`${BASE_URL}/ai-contact/enrich`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
@@ -286,7 +289,53 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
       const json = await response.json();
       if (!json.success) throw new Error(json.error || "Enrichment returned no data");
 
-      setResult(json.data);
+      let resultData = json.data;
+
+      // Step 2: Gemini AI boost — if standard pipeline found company name but no email/website
+      const hasOwner = resultData?.owner?.company_name;
+      const hasEmail = resultData?.owner?.email || resultData?.owner?.email_ops;
+      if (hasOwner && !hasEmail && q.imo) {
+        try {
+          const gemCtrl = new AbortController();
+          const gemTimer = setTimeout(() => gemCtrl.abort(), 30000);
+          const gemRes = await fetch(`${BASE_URL}/gemini/enrich`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: gemCtrl.signal,
+            body: JSON.stringify({
+              imo: q.imo,
+              owner: resultData.owner?.company_name || null,
+              manager: resultData.ism_manager?.company_name || null,
+            }),
+          });
+          clearTimeout(gemTimer);
+          if (gemRes.ok) {
+            const gemJson = await gemRes.json();
+            if (gemJson.success && gemJson.top_contacts?.length > 0) {
+              // Merge Gemini email/phone into result
+              const topEmail = gemJson.top_contacts[0]?.email || null;
+              const topPhone = gemJson.top_phones?.[0] || null;
+              const topDomain = gemJson.companies?.[0]?.domain || null;
+              if (topEmail || topPhone || topDomain) {
+                resultData = {
+                  ...resultData,
+                  owner: {
+                    ...resultData.owner,
+                    email:        resultData.owner?.email        || topEmail,
+                    website:      resultData.owner?.website      || (topDomain ? `https://${topDomain}` : null),
+                    phone:        resultData.owner?.phone        || topPhone,
+                    data_source: (resultData.owner?.data_source || "") + "+gemini_ai",
+                  },
+                  gemini_boosted: true,
+                  gemini_contacts: gemJson.top_contacts,
+                };
+              }
+            }
+          }
+        } catch { /* non-fatal — use standard result */ }
+      }
+
+      setResult(resultData);
 
     } catch (err) {
       clearTimeout(clientTimer);
@@ -326,7 +375,7 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
             </div>
             <div>
               <div className="ucf-title">UNIVERSAL VESSEL CONTACT INTELLIGENCE</div>
-              <div className="ucf-subtitle">Any vessel worldwide · Equasis + web scraping + port agents</div>
+              <div className="ucf-subtitle">Any vessel worldwide · Equasis + web scraping + Gemini AI + port agents</div>
             </div>
           </div>
           <button className="ucf-close" onClick={onClose}>✕</button>
@@ -375,7 +424,8 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
                 <div className="ucf-empty-title">Enter vessel identifiers above</div>
                 <div className="ucf-empty-sub">
                   Search any vessel by IMO, MMSI, or name. The pipeline queries Equasis,
-                  MarineTraffic, VesselFinder, company websites and the port agent database.
+                  MarineTraffic, VesselFinder, company websites, and the port agent database.
+                  Gemini AI automatically boosts results when scraping finds no contacts.
                 </div>
                 <div className="ucf-example-chips">
                   {[
@@ -457,6 +507,23 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
                     <div>
                       <CompanyCard title="REGISTERED OWNER" accent="#00e5ff" data={r.owner} />
                       {r.notes && <div className="ucf-notes-banner">💡 {r.notes}</div>}
+                      {r.gemini_boosted && (
+                        <div className="ucf-gemini-banner">
+                          <span className="ucf-gemini-badge">✨ Gemini AI</span>
+                          <span>Contact details enriched with Gemini AI — verify before use.</span>
+                        </div>
+                      )}
+                      {r.gemini_contacts?.length > 0 && (
+                        <div className="ucf-gemini-contacts">
+                          <div className="ucf-gemini-contacts-title">✨ GEMINI AI CONTACTS</div>
+                          {r.gemini_contacts.map((c, i) => (
+                            <div key={i} className="ucf-gemini-contact-row">
+                              <a href={`mailto:${c.email}`} className="ucf-gemini-email">{c.email}</a>
+                              <span className="ucf-gemini-conf">{c.confidence}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 

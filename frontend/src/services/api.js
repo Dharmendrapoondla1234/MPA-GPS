@@ -54,7 +54,7 @@ async function call(path, { bustCache = false, method = "GET", body } = {}) {
         method,
         headers,
         signal: ctrl.signal,
-        ...(body ? { body: JSON.stringify(body) } : {}),
+        ...(body ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
       });
 
       if (res.status === 304 && cached) {
@@ -75,6 +75,11 @@ async function call(path, { bustCache = false, method = "GET", body } = {}) {
         const data = json?.data !== undefined ? json.data : json;
         if (method === "GET") respCache.set(url, { data, ts: Date.now(), etag: res.headers.get("etag") || null });
         return data;
+      }
+      // Gemini endpoints: return full response (not wrapped in .data)
+      if (path.includes("/gemini/")) {
+        if (json?.success === false) throw new Error(json.error || "Gemini API error");
+        return json;
       }
 
       if (json?.success === false) throw new Error(json.error || "API error");
@@ -225,8 +230,8 @@ export async function fetchVesselContactSpec(imo, {
 
 /**
  * Fetch enriched company intelligence (domain + emails + phones)
- * Uses the no-AI pipeline: DuckDuckGo + DNS + website scraping + SMTP validation
- * Requires owner/manager names from Equasis first.
+ * Primary: standard pipeline (DuckDuckGo + DNS + website scraping + SMTP)
+ * Fallback: Gemini AI enrichment when standard pipeline finds nothing
  */
 export async function fetchVesselIntelligence(imo, { owner, manager, operator, ship_manager, address, forceRefresh = false } = {}) {
   const p = new URLSearchParams();
@@ -236,7 +241,45 @@ export async function fetchVesselIntelligence(imo, { owner, manager, operator, s
   if (ship_manager) p.set("ship_manager", ship_manager);
   if (address)      p.set("address",      address);
   if (forceRefresh) p.set("forceRefresh", "true");
-  return call(`/vessel/${encodeURIComponent(imo)}/contact?${p}`, { bustCache: forceRefresh });
+
+  // Try standard pipeline first
+  const standard = await call(`/vessel/${encodeURIComponent(imo)}/contact?${p}`, { bustCache: forceRefresh }).catch(() => null);
+  const hasData = standard?.top_contacts?.length > 0 ||
+    standard?.companies?.some(c => c.emails?.length > 0 || c.domain);
+  if (hasData) return standard;
+
+  // Fallback: Gemini AI enrichment
+  if (owner || manager) {
+    try {
+      const gemini = await call(`/gemini/enrich`, {
+        method: "POST",
+        body: JSON.stringify({ imo, owner, manager, operator, ship_manager, forceRefresh }),
+        bustCache: forceRefresh,
+      });
+      if (gemini?.companies?.length) return { ...gemini, gemini_used: true };
+    } catch { /* non-fatal */ }
+  }
+  return standard;
+}
+
+/** Check Gemini API key status */
+export async function checkGeminiStatus() {
+  return call("/gemini/status").catch(() => ({ configured: false }));
+}
+
+/** Directly enrich a company by name using Gemini AI */
+export async function geminiEnrichCompany(companyName, domain = null) {
+  return call("/gemini/company", {
+    method: "POST",
+    body: JSON.stringify({ company_name: companyName, domain }),
+  });
+}
+
+/** Find port agents using Gemini AI */
+export async function geminiFindPortAgents(portName, vesselType = "") {
+  const p = new URLSearchParams({ port: portName });
+  if (vesselType) p.set("vesselType", vesselType);
+  return call(`/gemini/port-agents?${p}`);
 }
 
 /**
