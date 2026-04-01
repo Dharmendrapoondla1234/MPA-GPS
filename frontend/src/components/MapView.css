@@ -107,6 +107,13 @@ img[src*="watermark"], a[title="Report a map error"] { display: none !important;
   color: #7cdcff;
   background: rgba(0,180,255,0.07);
 }
+/* Watchlist filter active — gold star when filtering, cyan when "show all" */
+.mv-strip-btn.mv-strip-watch-on {
+  border-color: rgba(0,229,255,0.55);
+  color: #00e5ff;
+  background: rgba(0,229,255,0.09);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.55), 0 0 22px rgba(0,229,255,0.18);
+}
 .mv-strip-btn.mv-strip-alert {
   border-color: rgba(255,50,80,0.5) !important;
   animation: mvStripAlertPulse 2.2s ease-in-out infinite;

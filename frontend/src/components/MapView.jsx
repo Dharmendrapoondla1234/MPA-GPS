@@ -42,35 +42,8 @@ function distanceM(lat1, lng1, lat2, lng2) {
 }
 
 
-function getVesselIcon(vessel, isSelected, alertLevel = null, zoom = 5) {
-  const speed   = parseFloat(vessel.speed)   || 0;
-  const heading = parseFloat(vessel.heading) || 0;
-  const zs = zoom <= 3 ? 4.0 : zoom <= 4 ? 3.0 : zoom <= 5 ? 2.2
-           : zoom <= 6 ? 1.7 : zoom <= 7 ? 1.35 : zoom <= 8 ? 1.15 : 1.0;
-  const color = alertLevel === "danger"  ? "#ff2244"
-              : alertLevel === "warning" ? "#ffcc00"
-              : speed > 0.3 ? getSpeedColor(speed)
-              : "#00e5ff";
-  if (speed > 0.3) {
-    const base = isSelected ? 12 : alertLevel ? 9 : 8;
-    return {
-      path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-      scale: base * zs, rotation: heading,
-      fillColor: color, fillOpacity: 1.0,
-      strokeColor: isSelected ? "#ffffff" : "#000000",
-      strokeWeight: isSelected ? 2.5 : 0.8,
-      anchor: new window.google.maps.Point(0, 2.5),
-    };
-  }
-  const base = isSelected ? 7 : 5;
-  return {
-    path: window.google.maps.SymbolPath.CIRCLE,
-    scale: base * zs, fillColor: color,
-    fillOpacity: isSelected ? 1 : 0.92,
-    strokeColor: isSelected ? "#ffffff" : "#000000",
-    strokeWeight: isSelected ? 2.5 : 0.8,
-  };
-}
+// getVesselIcon removed — vessel icons are now drawn directly on the Canvas OverlayView.
+// Speed color and heading are read inside _paintAll() in createVesselOverlay().
 
 function wktToLatLng(coords, type) {
   if (!coords) return null;
@@ -122,15 +95,137 @@ function interpolateTrajectory(points, gapThresholdMinutes = 30) {
 
 
 /* ══════════════════════════════════════════════════════════════
+   CANVAS OVERLAY — replaces all google.maps.Marker instances.
+   One <canvas> = one GPU texture.  During zoom the browser just
+   CSS-transforms that texture: zero JS, zero DOM mutations.
+   Click/hover use a pixel-space hit array for vessel lookup.
+══════════════════════════════════════════════════════════════ */
+function createVesselOverlay(map) {
+  class VesselCanvasOverlay extends window.google.maps.OverlayView {
+    constructor() {
+      super();
+      this._vessels   = [];
+      this._selected  = null;
+      this._alertMap  = {};
+      this._canvas    = null;
+      this._ctx       = null;
+      this._pixelHits = [];   // [{x,y,r,vessel}] updated every draw()
+      this._rafId     = null;
+    }
+    onAdd() {
+      const c = document.createElement("canvas");
+      c.style.cssText = "position:absolute;top:0;left:0;pointer-events:none;";
+      this._canvas = c;
+      this._ctx    = c.getContext("2d");
+      this.getPanes().overlayMouseTarget.appendChild(c);
+    }
+    onRemove() {
+      if (this._canvas?.parentNode) this._canvas.parentNode.removeChild(this._canvas);
+      this._canvas = null; this._ctx = null;
+      if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+    }
+    draw() {
+      if (!this._canvas || !this._ctx) return;
+      const proj = this.getProjection();
+      if (!proj) return;
+      const bounds = this.getMap()?.getBounds();
+      if (!bounds) return;
+      const sw = proj.fromLatLngToDivPixel(bounds.getSouthWest());
+      const ne = proj.fromLatLngToDivPixel(bounds.getNorthEast());
+      if (!sw || !ne) return;
+      const left = Math.round(sw.x), top = Math.round(ne.y);
+      const w    = Math.round(ne.x - sw.x), h = Math.round(sw.y - ne.y);
+      this._canvas.width  = w; this._canvas.height = h;
+      this._canvas.style.left = left + "px"; this._canvas.style.top = top + "px";
+      this._paintAll(proj, sw, ne, w, h);
+    }
+    _paintAll(proj, sw, ne, w, h) {
+      const ctx = this._ctx;
+      ctx.clearRect(0, 0, w, h);
+      this._pixelHits = [];
+      const z   = this.getMap()?.getZoom() ?? 11;
+      const zs  = z<=3?4.0:z<=4?3.0:z<=5?2.2:z<=6?1.7:z<=7?1.35:z<=8?1.15:1.0;
+      const bA  = Math.round(8*zs),  bC = Math.round(5*zs);
+      const sA  = Math.round(12*zs), sC = Math.round(7*zs);
+      for (const v of this._vessels) {
+        const lat = Number(v.latitude_degrees), lng = Number(v.longitude_degrees);
+        if (!lat||!lng||isNaN(lat)||isNaN(lng)) continue;
+        const pt = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(lat, lng));
+        if (!pt) continue;
+        const px = pt.x - sw.x, py = pt.y - ne.y;
+        if (px<-24||py<-24||px>w+24||py>h+24) continue;
+        const id    = String(v.imo_number);
+        const isSel = id === this._selected;
+        const alert = this._alertMap[v.vessel_name] || null;
+        const spd   = parseFloat(v.speed)   || 0;
+        const hdg   = parseFloat(v.heading) || 0;
+        const color = alert==="danger"?"#ff2244":alert==="warning"?"#ffcc00":spd>0.3?getSpeedColor(spd):"#00e5ff";
+        ctx.save(); ctx.translate(px, py);
+        if (spd > 0.3) {
+          const sz  = isSel ? sA : alert ? Math.round(9*zs) : bA;
+          ctx.rotate((hdg - 90) * Math.PI / 180);
+          ctx.beginPath();
+          ctx.moveTo(0,-sz); ctx.lineTo(sz*0.45,sz*0.5); ctx.lineTo(0,sz*0.2); ctx.lineTo(-sz*0.45,sz*0.5);
+          ctx.closePath();
+          ctx.fillStyle=color; ctx.strokeStyle=isSel?"#fff":"#000"; ctx.lineWidth=isSel?2:0.7;
+          ctx.fill(); ctx.stroke();
+          this._pixelHits.push({x:px,y:py,r:sz,vessel:v});
+        } else {
+          const sz = isSel ? sC : bC;
+          ctx.beginPath(); ctx.arc(0,0,sz,0,Math.PI*2);
+          ctx.fillStyle=color; ctx.globalAlpha=isSel?1:0.92;
+          ctx.strokeStyle=isSel?"#fff":"#000"; ctx.lineWidth=isSel?2:0.7;
+          ctx.fill(); ctx.stroke(); ctx.globalAlpha=1;
+          this._pixelHits.push({x:px,y:py,r:sz,vessel:v});
+        }
+        if (isSel) {
+          ctx.beginPath(); ctx.arc(0,0,(spd>0.3?sA:sC)+5,0,Math.PI*2);
+          ctx.strokeStyle="#fff"; ctx.lineWidth=1.5; ctx.globalAlpha=0.6; ctx.stroke(); ctx.globalAlpha=1;
+        }
+        if (alert) {
+          ctx.beginPath(); ctx.arc(0,0,bA+6,0,Math.PI*2);
+          ctx.strokeStyle=alert==="danger"?"#ff2244":"#ffcc00"; ctx.lineWidth=1.5; ctx.globalAlpha=0.55; ctx.stroke(); ctx.globalAlpha=1;
+        }
+        ctx.restore();
+      }
+    }
+    setVessels(vessels, selected, alertMap) {
+      this._vessels=vessels; this._selected=selected; this._alertMap=alertMap||{};
+      if (this._rafId) return;
+      this._rafId = requestAnimationFrame(() => { this._rafId=null; try{this.draw();}catch(_){} });
+    }
+    hitTest(divPt) {
+      // divPt is fromLatLngToDivPixel result — convert to canvas-local coords
+      const proj=this.getProjection(); if(!proj) return null;
+      const bounds=this.getMap()?.getBounds(); if(!bounds) return null;
+      const sw=proj.fromLatLngToDivPixel(bounds.getSouthWest());
+      const ne=proj.fromLatLngToDivPixel(bounds.getNorthEast());
+      if(!sw||!ne) return null;
+      const px=divPt.x-sw.x, py=divPt.y-ne.y;
+      let best=null, bd=Infinity;
+      const R=IS_MOBILE?24:16;
+      for(const h of this._pixelHits){
+        const dx=px-h.x,dy=py-h.y,d=Math.sqrt(dx*dx+dy*dy);
+        if(d<=Math.max(h.r+R,R)&&d<bd){bd=d;best=h.vessel;}
+      }
+      return best;
+    }
+  }
+  const o=new VesselCanvasOverlay(); o.setMap(map); return o;
+}
+
+/* ══════════════════════════════════════════════════════════════
    COMPONENT
 ══════════════════════════════════════════════════════════════ */
 const MapView = forwardRef(function MapView(
   { vessels, selectedVessel, onVesselClick, trailData, predictRoute,
-    portPanelOpen, onTogglePortPanel }, ref
+    portPanelOpen, onTogglePortPanel,
+    showWatchlistOnly = false, onToggleWatchlistOnly, watchlistCount = 0,
+  }, ref
 ) {
   const mapRef         = useRef(null);
   const mapObj         = useRef(null);
-  const markersRef     = useRef({});
+  const overlayRef     = useRef(null);   // VesselCanvasOverlay
   const infoWin        = useRef(null);
   const hoverWin       = useRef(null);
   const trailObjs      = useRef([]);
@@ -298,11 +393,14 @@ const MapView = forwardRef(function MapView(
       infoWin.current  = new window.google.maps.InfoWindow({ maxWidth: IS_MOBILE ? 280 : 340 });
       hoverWin.current = new window.google.maps.InfoWindow({ maxWidth: 240, disableAutoPan: true });
 
-      // Write coords directly to DOM — never call setState during map interaction
+      // ── Canvas OverlayView (replaces individual Marker DOM elements) ──
+      overlayRef.current = createVesselOverlay(map);
+
+      // Write coords directly to DOM — no React state, no re-renders
       let _mvTimer = null;
       map.addListener("mousemove", e => {
         if (_mvTimer) return;
-        _mvTimer = setTimeout(() => { // 200ms throttle reduces main thread pressure
+        _mvTimer = setTimeout(() => {
           _mvTimer = null;
           if (!coordsDomRef.current) return;
           const lat = e.latLng.lat().toFixed(5);
@@ -311,49 +409,71 @@ const MapView = forwardRef(function MapView(
           coordsDomRef.current.textContent = `${lat}°N · ${lng}°E${region ? ` · ${region}` : ""}`;
         }, 200);
       });
-      map.addListener("click", () => {
+
+      // ── Map click: hit-test the canvas, then fall back to deselect ──
+      map.addListener("click", (e) => {
         infoWin.current.close();
         hoverWin.current.close();
         setShowLayerPanel(false);
+        const proj = overlayRef.current?.getProjection();
+        if (proj && e.latLng) {
+          const pt = proj.fromLatLngToDivPixel(e.latLng);
+          if (pt) {
+            const vessel = overlayRef.current?.hitTest(pt);
+            if (vessel) {
+              requestAnimationFrame(() => {
+                if (!infoWin.current || !map) return;
+                infoWin.current.setContent(buildInfoWindowContent(vessel));
+                infoWin.current.setPosition(e.latLng);
+                infoWin.current.open(map);
+              });
+              onVesselClickRef.current(vessel);
+              return;
+            }
+          }
+        }
+        onVesselClickRef.current(null);
       });
-      // Zoom rescale rAF id — cancel in-flight batch when zoom fires again mid-animation
-      let zoomRescaleRafId = null;
+
+      // ── Desktop hover: hit-test for tooltip ──────────────────────────
+      if (!IS_MOBILE) {
+        let _hvTimer = null;
+        map.addListener("mousemove", ev => {
+          clearTimeout(_hvTimer);
+          _hvTimer = setTimeout(() => {
+            const proj = overlayRef.current?.getProjection();
+            if (!proj || !ev.latLng) return;
+            const pt = proj.fromLatLngToDivPixel(ev.latLng);
+            if (!pt) return;
+            const vessel = overlayRef.current?.hitTest(pt);
+            if (vessel) {
+              const imo = vessel.imo_number;
+              if (hoverOpenImo.current === imo) return;
+              clearTimeout(hoverTimer.current);
+              hoverTimer.current = setTimeout(() => {
+                const html = hoverCache.current[imo];
+                if (!html) return;
+                hoverWin.current.setContent(html);
+                hoverWin.current.setPosition(ev.latLng);
+                hoverWin.current.open(map);
+                hoverOpenImo.current = imo;
+              }, 80);
+            } else {
+              clearTimeout(hoverTimer.current);
+              if (hoverOpenImo.current) { hoverOpenImo.current = null; hoverWin.current.close(); }
+            }
+          }, 60);
+        });
+      }
+
+      // zoom_changed: just track zoom level.
+      // The canvas overlay's draw() is called automatically by Maps API —
+      // no manual setIcon loops needed. This is the core perf fix.
       map.addListener("zoom_changed", () => {
         const z = map.getZoom() ?? 11;
         mapZoomRef.current = z;
         if (z < MIN_ZOOM) map.setZoom(MIN_ZOOM);
         if (z > MAX_ZOOM) map.setZoom(MAX_ZOOM);
-        // Cancel any previous in-flight rescale so rapid zoom doesn't stack work
-        if (zoomRescaleRafId) { cancelAnimationFrame(zoomRescaleRafId); zoomRescaleRafId = null; }
-        // Defer one rAF so Google Maps tile animation gets priority on the current frame
-        zoomRescaleRafId = requestAnimationFrame(() => {
-          const bounds = mapObj.current?.getBounds();
-          if (!bounds) return;
-          // Collect only visible markers — avoids iterating culled-out markers
-          const visible = Object.values(markersRef.current).filter(m => {
-            if (!m.getMap() || !m._vessel) return false;
-            const pos = m.getPosition();
-            return pos && bounds.contains(pos);
-          });
-          if (!visible.length) { zoomRescaleRafId = null; return; }
-          // Rescale in batches of 50 per frame — keeps each frame well under 16ms
-          const ZOOM_BATCH = IS_MOBILE ? 25 : 50;
-          let zi = 0;
-          const rescaleChunk = () => {
-            if (!mapObj.current) { zoomRescaleRafId = null; return; }
-            const end = Math.min(zi + ZOOM_BATCH, visible.length);
-            for (; zi < end; zi++) {
-              const m = visible[zi];
-              if (m._vessel) m.setIcon(getVesselIcon(m._vessel, false, null, z));
-            }
-            if (zi < visible.length) {
-              zoomRescaleRafId = requestAnimationFrame(rescaleChunk);
-            } else {
-              zoomRescaleRafId = null;
-            }
-          };
-          rescaleChunk();
-        });
       });
 
       setMapReady(true);
@@ -374,12 +494,15 @@ const MapView = forwardRef(function MapView(
         map._resizeObserver = ro;
       }
     });
-    // Bug #10 fix: clear hoverTimer on unmount so it can't call hoverWin.close() on null
     return () => {
       clearTimeout(hoverTimer.current);
       hoverTimer.current = null;
       if (mapObj.current?._resizeObserver) {
         mapObj.current._resizeObserver.disconnect();
+      }
+      if (overlayRef.current) {
+        overlayRef.current.setMap(null);
+        overlayRef.current = null;
       }
     };
   }, []);
@@ -468,54 +591,11 @@ const MapView = forwardRef(function MapView(
     layers.aids, layers.ports, layers.tides, layers.cultural, layers.seabed,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Viewport culling: hide markers outside bounds, show when back in view ──
-  // This is the single biggest win — 1000 markers all active costs GPU compositing
-  // even for the 800 outside the viewport. At zoom 11 only ~200 are typically visible.
-  const viewportCullRef = useRef(null);
-  useEffect(() => {
-    if (!mapReady || !mapObj.current) return;
-    // Cull in rAF batches — never block the main thread
-    // Process max 200 markers per frame, yield between chunks
-    let cullRafId = null;
-    const cull = () => {
-      const bounds = mapObj.current?.getBounds();
-      if (!bounds) return;
-      const markers = Object.values(markersRef.current);
-      let idx = 0;
-      const CULL_BATCH = 200;
-      const cullChunk = () => {
-        if (!mapObj.current) return;
-        const end = Math.min(idx + CULL_BATCH, markers.length);
-        for (; idx < end; idx++) {
-          const m = markers[idx];
-          const pos = m.getPosition();
-          if (!pos) continue;
-          const inView = bounds.contains(pos);
-          const currently = m.getMap();
-          if (inView && !currently) m.setMap(mapObj.current);
-          else if (!inView && currently) m.setMap(null);
-        }
-        if (idx < markers.length) cullRafId = requestAnimationFrame(cullChunk);
-      };
-      cullRafId = requestAnimationFrame(cullChunk);
-    };
-    // Only cull when map is fully idle — NOT during pan/zoom (that would stutter)
-    let cullTimer = null;
-    const schedule = () => {
-      clearTimeout(cullTimer);
-      if (cullRafId) cancelAnimationFrame(cullRafId);
-      cullTimer = setTimeout(cull, 250);
-    };
-    const l1 = mapObj.current.addListener("idle", schedule);
-    const l2 = mapObj.current.addListener("zoom_changed", schedule);
-    viewportCullRef.current = () => {
-      clearTimeout(cullTimer);
-      if (cullRafId) cancelAnimationFrame(cullRafId);
-      window.google.maps.event.removeListener(l1);
-      window.google.maps.event.removeListener(l2);
-    };
-    return () => viewportCullRef.current?.();
-  }, [mapReady]);
+  /* ── Canvas overlay vessel update ───────────────────────────
+     Replaces the entire batched-Marker useEffect and the viewport
+     culling effect.  Push new data to the overlay; it schedules
+     its own rAF redraw.  Zero DOM mutations per zoom frame.
+  ─────────────────────────────────────────────────────────── */
   useEffect(() => {
     Object.values(alertCircles.current).forEach(c => { try{c.setMap(null);}catch(_){} });
     Object.values(vesselCircles.current).forEach(c => { try{c.setMap(null);}catch(_){} });
@@ -579,170 +659,46 @@ const MapView = forwardRef(function MapView(
     return () => clearTimeout(tid);
   }, [freshVessels, gisData, layers.dangers, layers.vesselProximity]);
 
-  /* ── Markers (with performance optimisations) ───────────────
-     Key perf improvements vs v10:
-     - Batch marker removals with a single setMap(null) sweep
-     - Cap marker redraws at 500 vessels per frame using requestAnimationFrame
-     - Only rebuild hoverCache for vessels whose data actually changed
-     - Throttle icon rebuilds: skip if speed/heading unchanged within 0.1
-  ─────────────────────────────────────────────────────────── */
   useEffect(() => {
-    if (!mapReady || !mapObj.current) return;
-    // Cap total vessels rendered on mobile — prevents frame drops with 1000+ markers
-    const fresh    = IS_MOBILE
-      ? freshVessels.slice(0, MAX_MARKERS)
-      : freshVessels;
-    const activeIds = new Set(fresh.map(v => String(v.imo_number)));
+    if (!mapReady || !overlayRef.current) return;
+    const capped     = IS_MOBILE ? freshVessels.slice(0, MAX_MARKERS) : freshVessels;
+    const selectedId = selectedVessel ? String(selectedVessel.imo_number) : null;
+    overlayRef.current.setVessels(capped, selectedId, alertMap);
 
-    // Incrementally update hover cache — mutate in place, never spread 1000+ entries
-    const cache = hoverCache.current;
-    fresh.forEach(v => {
-      const spd = parseFloat(v.speed || 0);
-      const hdg = parseFloat(v.heading || 0);
-      const prev = markersRef.current[String(v.imo_number)]?._vessel;
-      if (prev && Math.abs((prev.speed || 0) - spd) < 0.3 && Math.abs((prev.heading || 0) - hdg) < 5 && cache[v.imo_number]) return;
-      const col    = getSpeedColor(spd);
-      const region = getRegionName(parseFloat(v.latitude_degrees || 0), parseFloat(v.longitude_degrees || 0));
-      cache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || 'Unknown'}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${hdg}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ''}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
-    });
-    // Evict stale entries
-    Object.keys(cache).forEach(id => { if (!activeIds.has(id)) delete cache[id]; });
-
-    // Remove stale markers
-    Object.keys(markersRef.current).forEach(id => {
-      if (!activeIds.has(id)) {
-        const m = markersRef.current[id];
-        if (m._animId) cancelAnimationFrame(m._animId);
-        m.setMap(null);
-        delete markersRef.current[id];
-      }
-    });
-
-    // Auto-fit on first load — defer to after batch completes so it doesn't block
-    if (!hasFitBounds.current && fresh.length > 0 && mapObj.current) {
+    // Auto-fit on first load
+    if (!hasFitBounds.current && capped.length > 0 && mapObj.current) {
       hasFitBounds.current = true;
       setTimeout(() => {
         if (!mapObj.current) return;
         const bounds = new window.google.maps.LatLngBounds();
-        fresh.slice(0, 100).forEach(v => {
+        capped.slice(0, 100).forEach(v => {
           const la = Number(v.latitude_degrees), lo = Number(v.longitude_degrees);
           if (la && lo && !isNaN(la) && !isNaN(lo)) bounds.extend({ lat: la, lng: lo });
         });
         if (!bounds.isEmpty()) mapObj.current.fitBounds(bounds, { padding: 60 });
-      }, 1200); // after all 50-per-frame batches have settled
+      }, 800);
     }
 
-    // Add/update markers — process in rAF batches to avoid janky frames
-    // Selection highlight is handled separately in the pulse effect (only 2 setIcon calls)
-    // Bug #4 fix: 50 markers per frame instead of 250.
-    // Each Google Maps Marker involves DOM work + event attachment + tile layer hooks.
-    // 250 in one 16ms frame = ~5ms per marker × 250 = 1250ms freeze on initial load.
-    // 50 per frame = smooth staggered render across ~10 frames.
-    const BATCH = IS_MOBILE ? 40 : 80; // fewer per frame on mobile = stays within 16ms budget
-    let idx = 0;
-    // Bug #7 fix: track the rAF id so the current batch is cancelled if freshVessels
-    // changes before it finishes (e.g. 60s refresh arriving mid-render).
-    let batchRafId;
-    const processBatch = () => {
-      if (!mapObj.current) return;
-      const end = Math.min(idx + BATCH, fresh.length);
-      for (; idx < end; idx++) {
-        const v = fresh[idx];
-        const lat = Number(v.latitude_degrees), lng = Number(v.longitude_degrees);
-        if (!lat || !lng || isNaN(lat) || isNaN(lng)) continue;
-        const id = String(v.imo_number);
-        const al = alertMap[v.vessel_name] || null;
-        const icon = getVesselIcon(v, false, al, mapZoomRef.current);
-
-        if (markersRef.current[id]) {
-          const m = markersRef.current[id];
-          // Only call setPosition if coords actually changed (skip no-op updates)
-          const curPos = m.getPosition();
-          if (!curPos || Math.abs(curPos.lat() - lat) > 0.00001 || Math.abs(curPos.lng() - lng) > 0.00001) {
-            m.setPosition({ lat, lng });
-            // Re-show if it was culled but coords moved into viewport
-            if (!m.getMap() && mapObj.current?.getBounds()?.contains({ lat, lng })) {
-              m.setMap(mapObj.current);
-            }
-          }
-          const pv = m._vessel;
-          const speedChanged   = Math.abs((pv?.speed || 0) - (v.speed || 0)) > 0.1;
-          const headingChanged = Math.abs((pv?.heading || 0) - (v.heading || 0)) > 2;
-          if (speedChanged || headingChanged) m.setIcon(icon);
-          m.setZIndex(al === "danger" ? 500 : 10);
-          m._vessel = v;
-        } else {
-          const m = new window.google.maps.Marker({
-            position: { lat, lng }, icon,
-            title: v.vessel_name || "Vessel",
-            optimized: true,
-            zIndex: al === "danger" ? 500 : 10,
-            // Only attach to map if inside viewport — culling hook will show it when panned into view
-            map: mapObj.current?.getBounds()?.contains({ lat, lng }) ? mapObj.current : null,
-          });
-          m._vessel = v;
-          m.addListener("click", () => {
-            hoverWin.current.close();
-            // Defer the heavy HTML string build to next frame so the tap/click
-            // feedback (marker highlight, panel open) is instant on mobile.
-            requestAnimationFrame(() => {
-              if (!infoWin.current || !mapObj.current) return;
-              infoWin.current.setContent(buildInfoWindowContent(m._vessel));
-              infoWin.current.open(mapObj.current, m);
-            });
-            onVesselClickRef.current(m._vessel);
-          });
-          if (!IS_MOBILE) {
-            m.addListener("mouseover", () => {
-              const imo = m._vessel?.imo_number;
-              if (hoverOpenImo.current === imo) return;
-              clearTimeout(hoverTimer.current);
-              hoverTimer.current = setTimeout(() => {
-                if (!m.getMap()) return;
-                const html = hoverCache.current[imo];
-                if (!html) return;
-                hoverWin.current.setContent(html);
-                hoverWin.current.open(mapObj.current, m);
-                hoverOpenImo.current = imo;
-              }, 80);
-            });
-            m.addListener("mouseout", () => {
-              clearTimeout(hoverTimer.current);
-              hoverTimer.current = null;
-              hoverOpenImo.current = null;
-              hoverWin.current.close();
-            });
-          }
-          markersRef.current[id] = m;
-        }
-      }
-      if (idx < fresh.length) batchRafId = requestAnimationFrame(processBatch);
-    };
-    batchRafId = requestAnimationFrame(processBatch);
-    return () => cancelAnimationFrame(batchRafId);
-  // Bug #6 fix: onVesselClick removed from deps — it's accessed via onVesselClickRef
-  // so marker batch never re-runs on parent re-renders.
-  }, [freshVessels, alertMap, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
-  // NOTE: selectedVessel and mapZoom removed from deps — selection handled in pulse effect,
-  // zoom icon scaling uses mapZoomRef.current (live ref, no re-render triggered)
+    // Rebuild hover cache (used by desktop mousemove tooltip)
+    const cache = hoverCache.current;
+    const activeIds = new Set(capped.map(v => String(v.imo_number)));
+    capped.forEach(v => {
+      const spd = parseFloat(v.speed || 0), hdg = parseFloat(v.heading || 0);
+      const col = getSpeedColor(spd);
+      const region = getRegionName(parseFloat(v.latitude_degrees || 0), parseFloat(v.longitude_degrees || 0));
+      cache[v.imo_number] = `<div style="font-family:'JetBrains Mono',monospace;background:#0b1525;border:1px solid ${col}66;border-radius:10px;padding:9px 13px;min-width:175px;color:#f0f8ff;box-shadow:0 8px 28px rgba(0,0,0,0.85)"><div style="font-size:12px;font-weight:700;color:#00e5ff">${v.vessel_name || "Unknown"}</div><div style="margin-top:5px;display:flex;align-items:center;gap:10px"><span style="font-size:14px;font-weight:700;color:${col}">${spd.toFixed(1)} kn</span><span style="font-size:9px;color:#6a9ab0">${hdg}° HDG</span></div>${region ? `<div style="font-size:9px;color:#00e5ff;margin-top:4px">📍 ${region}</div>` : ""}<div style="margin-top:4px;font-size:8px;color:#3d6a8a;font-style:italic">Click for details</div></div>`;
+    });
+    Object.keys(cache).forEach(id => { if (!activeIds.has(id)) delete cache[id]; });
+  }, [freshVessels, selectedVessel, alertMap, mapReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Pulse ring + selection highlight ──────────────────────
-     PERF FIX: Only 2 setIcon calls on click (prev + new selected).
-     Old code did forEach over ALL 1000+ markers = freeze.
+     Canvas overlay handles the selected icon automatically via
+     setVessels(). The pulse circle below adds the animated ring.
   ─────────────────────────────────────────────────────────── */
   const prevSelectedId = useRef(null);
   useEffect(() => {
     clearInterval(pulseTimer.current);
     if (pulseCirc.current) { pulseCirc.current.setMap(null); pulseCirc.current = null; }
-
-    // Restore previous selected marker to normal icon
-    if (prevSelectedId.current) {
-      const prev = markersRef.current[prevSelectedId.current];
-      if (prev?._vessel) {
-        prev.setIcon(getVesselIcon(prev._vessel, false, null, mapZoomRef.current));
-        prev.setZIndex(10);
-      }
-    }
 
     if (!selectedVessel || !mapObj.current) {
       prevSelectedId.current = null;
@@ -753,14 +709,7 @@ const MapView = forwardRef(function MapView(
     const lng = Number(selectedVessel.longitude_degrees);
     if (!lat || !lng) return;
 
-    // Highlight only the newly selected marker
-    const selId = String(selectedVessel.imo_number);
-    const selMarker = markersRef.current[selId];
-    if (selMarker?._vessel) {
-      selMarker.setIcon(getVesselIcon(selectedVessel, true, null, mapZoomRef.current));
-      selMarker.setZIndex(1000);
-    }
-    prevSelectedId.current = selId;
+    prevSelectedId.current = String(selectedVessel.imo_number);
 
     // Pulse circle animation — use rAF + opacity-only updates instead of setInterval + setRadius.
     // setRadius triggers a Google Maps geometry recalc every 80ms = continuous main-thread jank.
@@ -1045,6 +994,31 @@ const MapView = forwardRef(function MapView(
           <span className="mv-strip-lbl">PORT</span>
         </button>
 
+        {/* ── WATCHLIST TOGGLE — "Show Watchlist Vessels" / "Show All Vessels" ── */}
+        {onToggleWatchlistOnly && (
+          <button
+            className={"mv-strip-btn" + (showWatchlistOnly ? " mv-strip-active mv-strip-watch-on" : "")}
+            onClick={onToggleWatchlistOnly}
+            title={showWatchlistOnly ? "Show All Vessels" : "Show Watchlist Vessels"}
+            style={{ position: "relative" }}
+          >
+            <span style={{ fontSize: 15 }}>★</span>
+            {watchlistCount > 0 && (
+              <span style={{
+                position:"absolute",top:5,right:5,
+                background: showWatchlistOnly ? "#00e5ff" : "#ff8800",
+                color:"#000",fontSize:8,fontWeight:800,
+                borderRadius:"50%",width:14,height:14,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                lineHeight:1,
+              }}>{watchlistCount > 9 ? "9+" : watchlistCount}</span>
+            )}
+            <span className="mv-strip-lbl" style={{ fontSize: 8, lineHeight: 1.2, textAlign:"center" }}>
+              {showWatchlistOnly ? "ALL" : "WATCH"}
+            </span>
+          </button>
+        )}
+
         <button className="mv-strip-btn" onClick={cycleStyle} title="Map style">
           <span className="mv-strip-icon">{STYLE_ICON[mapStyle] || "🌊"}</span>
           <span className="mv-strip-lbl">{mapStyle === "sea" ? "SEA" : mapStyle === "satellite" ? "SAT" : "DARK"}</span>
@@ -1184,7 +1158,7 @@ const MapView = forwardRef(function MapView(
         <div className="mv-bh-vessels">
           <span className="mv-live-dot" />
           <span className="mv-bh-count">{liveCount.toLocaleString()}</span>
-          <span className="mv-bh-label">LIVE</span>
+          <span className="mv-bh-label">{showWatchlistOnly ? "WATCH" : "LIVE"}</span>
         </div>
         {trailData?.length > 0 && (
           <div className="mv-bh-trail">

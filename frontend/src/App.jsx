@@ -45,13 +45,15 @@ const MemoVesselPanel       = memo(VesselPanel);
 const MemoVesselDetailPanel = memo(VesselDetailPanel);
 const MemoPortActivityPanel = memo(PortActivityPanel);
 const MemoMapView           = memo(MapView, (prev, next) => (
-  prev.vessels         === next.vessels         &&
-  prev.selectedVessel  === next.selectedVessel  &&
-  prev.trailData       === next.trailData        &&
-  prev.predictRoute    === next.predictRoute     &&
-  prev.portPanelOpen   === next.portPanelOpen    &&
-  prev.onVesselClick   === next.onVesselClick    &&
-  prev.onTogglePortPanel === next.onTogglePortPanel
+  prev.vessels              === next.vessels              &&
+  prev.selectedVessel       === next.selectedVessel       &&
+  prev.trailData            === next.trailData             &&
+  prev.predictRoute         === next.predictRoute          &&
+  prev.portPanelOpen        === next.portPanelOpen         &&
+  prev.onVesselClick        === next.onVesselClick         &&
+  prev.onTogglePortPanel    === next.onTogglePortPanel     &&
+  prev.showWatchlistOnly    === next.showWatchlistOnly     &&
+  prev.watchlistCount       === next.watchlistCount
 ));
 
 export default function App() {
@@ -341,6 +343,9 @@ export default function App() {
             selectedVessel={selectedVessel} onVesselClick={handleSelectVessel}
             trailData={trailData}   predictRoute={predictRoute}
             portPanelOpen={portPanelOpen} onTogglePortPanel={handleTogglePortPanel}
+            showWatchlistOnly={watchlistMapFilter}
+            onToggleWatchlistOnly={() => setWatchlistMapFilter(p => !p)}
+            watchlistCount={watchlistCount}
           />
 
           <div className="map-legend-overlay"><SpeedLegend /></div>
