@@ -2,7 +2,8 @@
 // Tabs: Owner/Operator · Port Agents · 🔎 Contact Intelligence · Agent Org · Master
 // Intelligence tab shows domain, verified emails, phones from the no-AI pipeline
 import React, { useState, useEffect, useCallback, memo } from "react";
-import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment, fetchVesselIntelligence, checkGeminiStatus } from "../services/api";
+import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment, fetchVesselIntelligence, checkGeminiStatus, geminiEnrichCompany } from "../services/api";
+import GeminiContactFinder from "./GeminiContactFinder";
 import "./VesselContactPanel.css";
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -354,6 +355,7 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
   const [error,         setError]         = useState(null);
   const [activeTab,     setActiveTab]     = useState("company");
   const [geminiConfigured, setGeminiConfigured] = useState(null);
+  const [geminiOpen,      setGeminiOpen]      = useState(false);
 
   const imo         = vessel?.imo_number  || null;
   const mmsi        = vessel?.mmsi_number || null;
@@ -477,6 +479,13 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
           </button>
         ))}
         <div className="cp-tab-actions">
+          <button
+            className="cp-gemini-btn"
+            onClick={() => setGeminiOpen(true)}
+            title="Find contacts with Gemini AI"
+          >
+            ✨ Gemini AI
+          </button>
           {imo && (
             <button className="cp-enrich-btn" onClick={triggerEnrich} disabled={enriching || loading} title="Re-run full enrichment pipeline">
               {enriching ? "🔍 Searching…" : "🤖 Re-enrich"}
@@ -644,6 +653,12 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
           </div>
         )}
       </div>
+      {/* Gemini AI Contact Finder modal */}
+      <GeminiContactFinder
+        isOpen={geminiOpen}
+        onClose={() => setGeminiOpen(false)}
+        vessel={vessel}
+      />
     </div>
   );
 });
