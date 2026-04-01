@@ -163,25 +163,17 @@ export default function App() {
     return v;
   }, [rawVessels, filters.flag]);
 
-  // Vessels shown on map — watchlist filter takes priority when active.
-  // selectedVessel is passed separately to the map for highlighting only,
-  // not for filtering — so the watchlist view stays intact after clicking a vessel.
+  // Vessels shown on map.
+  // watchlistMapFilter=true  → show only watchlist vessels (selectedVessel is just highlighted, not a filter)
+  // watchlistMapFilter=false → show all vessels (selectedVessel highlighted via MapView's selectedVessel prop)
   const mapVessels = useMemo(() => {
     if (watchlistMapFilter) {
-      // Watchlist mode is ON: always filter to watchlist vessels only.
-      // If the list is empty (still loading or user has no watchlist entries),
-      // return an empty array so the map correctly shows nothing rather than
-      // falling through to show ALL vessels.
       if (!watchlistList.length) return [];
       const imoSet = new Set(watchlistList.map(w => String(w.imo_number)));
       return vessels.filter(v => imoSet.has(String(v.imo_number)));
     }
-    if (selectedVessel) {
-      // Only collapse to single vessel when NOT in watchlist mode
-      return vessels.filter(v => String(v.imo_number) === String(selectedVessel.imo_number));
-    }
-    return vessels;
-  }, [vessels, selectedVessel, watchlistMapFilter, watchlistList]);
+    return vessels;  // Always show all vessels; MapView highlights selectedVessel internally
+  }, [vessels, watchlistMapFilter, watchlistList]);
 
   // Unique flag codes for the TopBar dropdown — derived from live data
   const flagOptions = useMemo(() => {

@@ -173,12 +173,11 @@ function WatchlistCard({ vessel, liveData, fuel, onSelect, onRemove, onLocate })
   );
 }
 
-export default function WatchlistPanel({ vessels = [], onSelectVessel, onLocateVessel, isOpen, onClose }) {
+export default function WatchlistPanel({ vessels = [], onSelectVessel, onLocateVessel, isOpen, onClose, watchlistMapFilter = false, onToggleMapFilter }) {
   const watchlist  = useWatchlist();
   const [query,       setQuery]       = useState("");
   const [sortBy,      setSortBy]      = useState("added");
   const [fuelData,    setFuelData]    = useState({});
-  const [showMapOnly, setShowMapOnly] = useState(false);
   const [fuelLoading, setFuelLoading] = useState(false);
   const fetchedImos = useRef(new Set());
 
@@ -220,7 +219,7 @@ export default function WatchlistPanel({ vessels = [], onSelectVessel, onLocateV
           (v.next_port_destination || "").toLowerCase().includes(q) ||
           (v.flag || "").toLowerCase().includes(q))
       : enriched;
-    if (showMapOnly) list = list.filter(v => liveMap.has(String(v.imo_number)));
+    if (watchlistMapFilter) list = list.filter(v => liveMap.has(String(v.imo_number)));
     switch (sortBy) {
       case "name":       return [...list].sort((a,b) => (a.vessel_name||"").localeCompare(b.vessel_name||""));
       case "speed":      return [...list].sort((a,b) => (parseFloat(b.speed)||0)-(parseFloat(a.speed)||0));
@@ -231,7 +230,7 @@ export default function WatchlistPanel({ vessels = [], onSelectVessel, onLocateV
       });
       default:           return [...list].sort((a,b) => new Date(b.added_at||0)-new Date(a.added_at||0));
     }
-  }, [enriched, query, sortBy, showMapOnly, liveMap, fuelData]);
+  }, [enriched, query, sortBy, watchlistMapFilter, liveMap, fuelData]);
 
   const fuelVals  = Object.values(fuelData);
   const underway  = vessels.filter(v => isInWatchlist(v.imo_number) && parseFloat(v.speed||0) > 0.5).length;
@@ -283,9 +282,13 @@ export default function WatchlistPanel({ vessels = [], onSelectVessel, onLocateV
             {query && <button className="wl-search-clear" onClick={() => setQuery("")}>✕</button>}
           </div>
           <div className="wl-sort-row">
-            <label className="wl-toggle-label">
-              <input type="checkbox" checked={showMapOnly} onChange={e => setShowMapOnly(e.target.checked)} />
-              Map only
+            <label className="wl-toggle-label" title="Filter map to show only watchlist vessels">
+              <input
+                type="checkbox"
+                checked={watchlistMapFilter}
+                onChange={() => onToggleMapFilter?.()}
+              />
+              Map filter {watchlistMapFilter && <span className="wl-map-filter-on">ON</span>}
             </label>
             <span className="wl-sort-label">Sort:</span>
             {[

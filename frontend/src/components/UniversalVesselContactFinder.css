@@ -638,3 +638,13 @@
   background: rgba(138,43,226,0.15); border-radius: 8px; padding: 2px 6px;
   color: #c084fc; flex-shrink: 0;
 }
+
+/* ── Gemini tip banner when no contacts found ────────────────── */
+.ucf-gemini-tip-banner {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-top: 10px; padding: 12px 14px; border-radius: 8px;
+  background: linear-gradient(135deg, rgba(138,43,226,0.08), rgba(66,133,244,0.06));
+  border: 1px solid rgba(138,43,226,0.25);
+  font-size: 11px; color: var(--text-2,#8ab4d0); line-height: 1.5;
+}
+.ucf-gemini-tip-banner strong { color: #c084fc; }
