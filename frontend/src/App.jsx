@@ -167,11 +167,16 @@ export default function App() {
   // selectedVessel is passed separately to the map for highlighting only,
   // not for filtering — so the watchlist view stays intact after clicking a vessel.
   const mapVessels = useMemo(() => {
-    if (watchlistMapFilter && watchlistList.length) {
+    if (watchlistMapFilter) {
+      // Watchlist mode is ON: always filter to watchlist vessels only.
+      // If the list is empty (still loading or user has no watchlist entries),
+      // return an empty array so the map correctly shows nothing rather than
+      // falling through to show ALL vessels.
+      if (!watchlistList.length) return [];
       const imoSet = new Set(watchlistList.map(w => String(w.imo_number)));
       return vessels.filter(v => imoSet.has(String(v.imo_number)));
     }
-    if (selectedVessel && !watchlistMapFilter) {
+    if (selectedVessel) {
       // Only collapse to single vessel when NOT in watchlist mode
       return vessels.filter(v => String(v.imo_number) === String(selectedVessel.imo_number));
     }

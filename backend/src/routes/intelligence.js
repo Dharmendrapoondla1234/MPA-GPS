@@ -21,7 +21,33 @@ router.get("/vessel/:imo/contact", async (req, res, next) => {
     const { owner, manager, operator, ship_manager, address, forceRefresh } = req.query;
     if (!owner && !manager && !operator && !ship_manager) {
       const stored = db.getIntelligenceByImo(imo);
-      if (stored.length) return res.json({ success: true, imo_number: imo, source: "stored", data: stored });
+      if (stored.length) {
+        // Re-shape stored db records into the same format the pipeline returns so the
+        // frontend's top_contacts / companies checks work correctly.
+        const companies = stored.map(({ company, contacts }) => ({
+          company:    company.name,
+          role:       company.role || "unknown",
+          domain:     company.domain || null,
+          emails:     (contacts || []).map(c => ({ email: c.email, confidence: c.confidence || 70, source: c.source || "stored" })),
+          phones:     [],
+          addresses:  [],
+          scraped:    false,
+          mx_exists:  false,
+        }));
+        const allEmails = companies
+          .flatMap(c => c.emails)
+          .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        return res.json({
+          success:         true,
+          imo_number:      imo,
+          source:          "stored",
+          cached:          true,
+          companies,
+          top_contacts:    allEmails.slice(0, 8),
+          top_phones:      [],
+          pipeline_ran_at: null,
+        });
+      }
     }
     const result = await withTimeout(runPipeline({ imo, owner, manager, operator, ship_manager, address, forceRefresh: forceRefresh==="true" }), 140_000, `pipeline IMO ${imo}`);
     res.json({ success: true, ...result });

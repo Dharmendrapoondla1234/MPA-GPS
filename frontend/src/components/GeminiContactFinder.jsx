@@ -372,15 +372,18 @@ export default function GeminiContactFinder({ isOpen, onClose, vessel }) {
   const [activeTab,   setActiveTab]   = useState("emails");
 
   // Pre-fill from selected vessel
-  useEffect(() => {
-    if (vessel && isOpen) {
-      setImo(String(vessel.imo_number || ""));
-      setCompany("");
-      setResult(null);
-      setSteps([]);
-      setError(null);
-    }
-  }, [vessel?.imo_number, isOpen]);
+const imoNumber = vessel?.imo_number;
+
+useEffect(() => {
+  if (!isOpen || !imoNumber) return;
+
+  setImo(String(imoNumber));
+  setCompany("");
+  setResult(null);
+  setSteps([]);
+  setError(null);
+
+}, [isOpen, imoNumber]);
 
   const saveKey = useCallback((k) => {
     const trimmed = k.trim();

@@ -2,7 +2,7 @@
 // Tabs: Owner/Operator · Port Agents · 🔎 Contact Intelligence · Agent Org · Master
 // Intelligence tab shows domain, verified emails, phones from the no-AI pipeline
 import React, { useState, useEffect, useCallback, memo } from "react";
-import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment, fetchVesselIntelligence, checkGeminiStatus, geminiEnrichCompany } from "../services/api";
+import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment, fetchVesselIntelligence, checkGeminiStatus } from "../services/api";
 import GeminiContactFinder from "./GeminiContactFinder";
 import "./VesselContactPanel.css";
 
