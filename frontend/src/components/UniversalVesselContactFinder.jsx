@@ -456,11 +456,8 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
               <div className="ucf-loading">
                 <div className="ucf-loading-radar"><div className="ucf-loading-sweep" /></div>
                 <div className="ucf-loading-text">
-                  <div className="ucf-loading-step">Step 1/5 · Querying Equasis &amp; maritime registries…</div>
-                  <div className="ucf-loading-step" style={{ animationDelay: "1.5s" }}>Step 2/5 · Scraping company website…</div>
-                  <div className="ucf-loading-step" style={{ animationDelay: "3s" }}>Step 3/5 · Searching web for contact details…</div>
-                  <div className="ucf-loading-step" style={{ animationDelay: "5s" }}>Step 4/5 · Resolving port agents…</div>
-                  <div className="ucf-loading-step" style={{ animationDelay: "7s" }}>Step 5/5 · Gemini AI boost (if needed)…</div>
+                  <div className="ucf-loading-step">Querying maritime registries…</div>
+                  <div className="ucf-loading-step" style={{ animationDelay: "1.2s" }}>Resolving port agents…</div>
                   {retryCount > 0 && <div className="ucf-loading-step ucf-retry-note">Retry {retryCount}…</div>}
                 </div>
               </div>
@@ -510,12 +507,6 @@ const UniversalVesselContactFinder = memo(function UniversalVesselContactFinder(
                     <div>
                       <CompanyCard title="REGISTERED OWNER" accent="#00e5ff" data={r.owner} />
                       {r.notes && <div className="ucf-notes-banner">💡 {r.notes}</div>}
-                      {r.owner?.company_name && !r.owner?.email && !r.owner?.phone && (
-                        <div className="ucf-gemini-tip-banner">
-                          <span>📭 No contact details found via standard scraping.</span>
-                          <span>Try the <strong>✨ Gemini AI</strong> button in the Contacts tab for AI-powered extraction.</span>
-                        </div>
-                      )}
                       {r.gemini_boosted && (
                         <div className="ucf-gemini-banner">
                           <span className="ucf-gemini-badge">✨ Gemini AI</span>
