@@ -1,9 +1,9 @@
-// VesselContactPanel.jsx — v5
-// Tabs: Owner/Operator · Port Agents · 🔎 Contact Intelligence · Agent Org · Master
-// Intelligence tab shows domain, verified emails, phones from the no-AI pipeline
+// VesselContactPanel.jsx — v6
+// Auto-loads contact intelligence when vessel is selected.
+// Gemini AI finder is completely hidden from user — runs server-side via GEMINI_API_KEY.
+// Default tab is "Contact Intel" so contacts appear immediately.
 import React, { useState, useEffect, useCallback, memo } from "react";
 import { fetchVesselContacts, fetchPortAgents, triggerVesselEnrichment, fetchVesselIntelligence, checkGeminiStatus } from "../services/api";
-import GeminiContactFinder from "./GeminiContactFinder";
 import "./VesselContactPanel.css";
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -11,7 +11,7 @@ function confidenceBadge(score) {
   if (score == null) return null;
   const pct = typeof score === "number" && score <= 1 ? Math.round(score * 100) : Math.round(score);
   const cls  = pct >= 85 ? "conf-high" : pct >= 60 ? "conf-mid" : "conf-low";
-  return <span className={`conf-badge ${cls}`} title={`${cls.replace("conf-","")} confidence`}>{pct}%</span>;
+  return <span className={`conf-badge ${cls}`} title={`${pct}% confidence`}>{pct}%</span>;
 }
 
 function SourcePills({ source }) {
@@ -23,6 +23,7 @@ function SourcePills({ source }) {
     smtp_validated:"SMTP✓", pattern_generated:"Pattern",
     "search+content_validated":"Search+Verified", "search+dns":"Search+DNS",
     "heuristic+content_validated":"Heuristic+Verified", "heuristic+dns":"Heuristic+DNS",
+    gemini_ai:"AI",
   };
   return (
     <div className="cp-source-pills">
@@ -51,11 +52,9 @@ function CopyBtn({ value, label }) {
 
 function ContactRow({ icon, label, value, href, type }) {
   if (!value) return null;
-  // type: "email" | "phone" | "web" | "text"
   const isEmail = type === "email" || (href && href.startsWith("mailto:"));
   const isPhone = type === "phone";
   const isWeb   = type === "web"   || (href && href.startsWith("http"));
-
   return (
     <div className="cp-contact-row">
       <span className="cp-icon">{icon}</span>
@@ -64,30 +63,22 @@ function ContactRow({ icon, label, value, href, type }) {
         {isEmail && (
           <div className="cp-contact-inline">
             <span className="cp-value cp-value-email">{value}</span>
-            <a className="cp-action-btn" href={`mailto:${value}`} title="Open email client">
-              ✉ Mail
-            </a>
+            <a className="cp-action-btn" href={`mailto:${value}`} title="Open email client">✉ Mail</a>
           </div>
         )}
         {isPhone && (
           <div className="cp-contact-inline">
             <span className="cp-value">{value}</span>
-            <a className="cp-action-btn" href={`tel:${value.replace(/\s/g,"")}`} title="Call">
-              ☎ Call
-            </a>
+            <a className="cp-action-btn" href={`tel:${value.replace(/\s/g,"")}`} title="Call">☎ Call</a>
           </div>
         )}
         {isWeb && (
           <div className="cp-contact-inline">
             <span className="cp-value cp-value-web">{value}</span>
-            <a className="cp-action-btn" href={href} target="_blank" rel="noopener noreferrer" title="Open website">
-              🌐 Open
-            </a>
+            <a className="cp-action-btn" href={href} target="_blank" rel="noopener noreferrer" title="Open website">🌐 Open</a>
           </div>
         )}
-        {!isEmail && !isPhone && !isWeb && (
-          <span className="cp-value">{value}</span>
-        )}
+        {!isEmail && !isPhone && !isWeb && <span className="cp-value">{value}</span>}
       </div>
       <CopyBtn value={value} label={label} />
     </div>
@@ -153,14 +144,14 @@ function AgentCard({ agent }) {
   );
 }
 
-// ── Intelligence Tab — domain + verified emails + phones ──────────
-function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, imo, geminiConfigured }) {
+// ── Intelligence Tab — auto-loaded, shown by default ─────────────
+function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, imo, geminiActive }) {
   if (intelLoading) {
     return (
       <div className="cp-loading">
         <div className="cp-spinner" />
-        <span>Running contact intelligence pipeline…</span>
-        <span className="cp-loading-sub">Domain discovery → Website crawl → SMTP validation</span>
+        <span>Finding contacts…</span>
+        <span className="cp-loading-sub">Domain discovery → Website crawl → SMTP validation{geminiActive ? " → AI boost" : ""}</span>
       </div>
     );
   }
@@ -178,20 +169,15 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
     return (
       <div className="cp-no-data">
         <div className="cp-no-data-icon">🔎</div>
-        <div>No contact intelligence yet.</div>
+        <div>Searching for contacts…</div>
         <div className="cp-no-data-sub">
-          Select a vessel with Equasis data (owner/manager names) to auto-run the pipeline.
-          Or click <strong>↻ Refresh</strong> to trigger manually.
+          The pipeline runs automatically. If no results appear, click <strong>↻ Refresh</strong>.
         </div>
-        {geminiConfigured === false && (
-          <div className="intel-gemini-tip">
-            💡 <strong>Boost accuracy:</strong> Add <code>GEMINI_API_KEY</code> to your backend <code>.env</code> for AI-powered contact discovery.{" "}
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Get free key →</a>
-          </div>
-        )}
-        {geminiConfigured === true && (
-          <div className="intel-gemini-tip intel-gemini-tip-active">
-            ✨ <strong>Gemini AI active</strong> — will boost search if standard pipeline finds nothing.
+        {imo && (
+          <div className="cp-no-data-links">
+            <a href={`https://www.equasis.org`} target="_blank" rel="noopener noreferrer">Equasis</a>
+            {" · "}
+            <a href={`https://www.marinetraffic.com/en/ais/details/ships/imo:${imo}`} target="_blank" rel="noopener noreferrer">MarineTraffic</a>
           </div>
         )}
       </div>
@@ -204,19 +190,19 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
     <div className="intel-tab">
       {/* Pipeline metadata bar */}
       <div className="intel-meta-bar">
-        <span className="intel-meta-label">Pipeline</span>
+        <span className="intel-meta-label">Updated</span>
         <span className="intel-meta-val">{pipeline_ran_at ? new Date(pipeline_ran_at).toLocaleTimeString() : "—"}</span>
         {cached && <span className="intel-badge-cached">cached</span>}
-        {intelligence?.gemini_used && <span className="intel-badge-gemini">✨ Gemini AI</span>}
-        <span className="intel-meta-steps">Domain → Crawl → MX → SMTP{intelligence?.gemini_used ? " → Gemini" : ""}</span>
+        {intelligence?.gemini_used && <span className="intel-badge-gemini">✨ AI</span>}
+        <span className="intel-meta-steps">Domain · Crawl · MX · SMTP{intelligence?.gemini_used ? " · AI" : ""}</span>
       </div>
 
-      {/* Top contacts across all companies */}
+      {/* Top contacts */}
       {top_contacts?.length > 0 && (
         <div className="intel-section">
           <div className="intel-section-header">
             <span className="intel-section-icon">✉</span>
-            <span className="intel-section-title">TOP VERIFIED CONTACTS</span>
+            <span className="intel-section-title">VERIFIED CONTACTS</span>
             <span className="intel-section-count">{top_contacts.length}</span>
           </div>
           <div className="intel-email-list">
@@ -238,7 +224,7 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
         </div>
       )}
 
-      {/* Top phones */}
+      {/* Phones */}
       {top_phones?.length > 0 && (
         <div className="intel-section">
           <div className="intel-section-header">
@@ -268,8 +254,6 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
               <span className="intel-company-name">{co.company}</span>
               <span className="intel-company-role">{co.role}</span>
             </div>
-
-            {/* Domain */}
             {co.domain ? (
               <div className="intel-domain-row">
                 <span className="intel-domain-icon">🌐</span>
@@ -285,10 +269,8 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
                 </div>
               </div>
             ) : (
-              <div className="intel-no-domain">⚠ Domain not found — email pattern generation skipped</div>
+              <div className="intel-no-domain">⚠ Domain not found</div>
             )}
-
-            {/* Emails for this company */}
             {co.emails?.length > 0 && (
               <div className="intel-email-list intel-email-list-compact">
                 {co.emails.slice(0, 5).map((e, j) => (
@@ -298,7 +280,7 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
                       <span className={`intel-conf intel-conf-${e.confidence >= 80 ? "high" : e.confidence >= 60 ? "mid" : "low"}`}>
                         {e.confidence}%
                       </span>
-                      {e.smtp_valid === true  && <span className="intel-badge-smtp">✓ SMTP</span>}
+                      {e.smtp_valid === true && <span className="intel-badge-smtp">✓ SMTP</span>}
                       <span className="intel-source">{e.source?.replace(/_/g," ")}</span>
                     </div>
                     <CopyBtn value={e.email} label="email" />
@@ -306,24 +288,19 @@ function IntelligenceTab({ intelligence, intelLoading, intelError, onRefresh, im
                 ))}
               </div>
             )}
-
-            {/* Phones for this company */}
-            {co.phones?.slice(0, 2).map((p, j) => (
+            {co.phones?.slice(0,2).map((p, j) => (
               <div key={j} className="intel-phone-row">
                 <span className="intel-phone-icon">☎</span>
                 <span className="intel-phone">{p}</span>
                 <CopyBtn value={p} label="phone" />
               </div>
             ))}
-
-            {/* Addresses */}
-            {co.addresses?.slice(0, 1).map((a, j) => (
+            {co.addresses?.slice(0,1).map((a, j) => (
               <div key={j} className="intel-address-row">
                 <span className="intel-address-icon">📍</span>
                 <span className="intel-address">{a}</span>
               </div>
             ))}
-
             {!co.domain && !co.emails?.length && (
               <div className="intel-no-domain">No contact data found for this company</div>
             )}
@@ -353,9 +330,9 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
   const [loading,       setLoading]       = useState(false);
   const [enriching,     setEnriching]     = useState(false);
   const [error,         setError]         = useState(null);
-  const [activeTab,     setActiveTab]     = useState("company");
-  const [geminiConfigured, setGeminiConfigured] = useState(null);
-  const [geminiOpen,      setGeminiOpen]      = useState(false);
+  // Default to "intel" tab so contacts appear immediately on vessel select
+  const [activeTab,     setActiveTab]     = useState("intel");
+  const [geminiActive,  setGeminiActive]  = useState(false);
 
   const imo         = vessel?.imo_number  || null;
   const mmsi        = vessel?.mmsi_number || null;
@@ -364,12 +341,14 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
   const nextPort    = vessel?.next_port_destination || vessel?.destination || null;
   const vesselType  = vessel?.vessel_type || null;
 
-  // Check Gemini status once on mount
+  // Check if Gemini is configured server-side (no key shown to user)
   useEffect(() => {
-    checkGeminiStatus().then(s => setGeminiConfigured(s?.configured ?? null)).catch(() => {});
+    checkGeminiStatus()
+      .then(s => setGeminiActive(s?.configured === true))
+      .catch(() => {});
   }, []);
 
-  // Reset when vessel changes
+  // Reset state when vessel changes, then auto-load
   useEffect(() => {
     setContacts(null);
     setAgents([]);
@@ -378,9 +357,10 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
     setIntelligence(null);
     setIntelError(null);
     setIntelLoading(false);
+    setActiveTab("intel"); // always snap to contact intel tab on vessel change
   }, [imo, mmsi, name]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Run intelligence pipeline when we have company names from Equasis
+  // Run intelligence pipeline automatically
   const runIntelPipeline = useCallback(async (ownerName, managerName, operatorName, shipMgrName, address, forceRefresh = false) => {
     if (!imo || (!ownerName && !managerName)) return;
     setIntelLoading(true);
@@ -413,19 +393,22 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
         manager:      raw.manager      ? { company_name: raw.manager.name,      data_source: raw.manager.data_source }      : null,
         ship_manager: raw.ship_manager ? { company_name: raw.ship_manager.name, data_source: raw.ship_manager.data_source } : null,
         vessel_name:  raw.vessel?.name || null,
-        enrichment: raw.enrichment ? { source: raw.enrichment.source, confidence: raw.enrichment.confidence, last_checked: raw.enrichment.last_checked, pipeline_ran: raw.enrichment.pipeline_ran } : null,
+        enrichment:   raw.enrichment   ? { source: raw.enrichment.source, confidence: raw.enrichment.confidence, last_checked: raw.enrichment.last_checked, pipeline_ran: raw.enrichment.pipeline_ran } : null,
       } : null;
       setContacts(data);
       setAgents(data?.port_agents || []);
 
-      // Auto-run intelligence pipeline with Equasis company names
-      const ownerName   = data?.owner?.company_name   || null;
-      const managerName = data?.manager?.company_name  || null;
-      const operatorName= data?.operator?.company_name || null;
-      const shipMgrName = data?.ship_manager?.company_name || null;
-      const address     = data?.owner?.registered_address || null;
+      // Auto-run intelligence pipeline immediately with company names
+      const ownerName    = data?.owner?.company_name        || null;
+      const managerName  = data?.manager?.company_name      || null;
+      const operatorName = data?.operator?.company_name     || null;
+      const shipMgrName  = data?.ship_manager?.company_name || null;
+      const address      = data?.owner?.registered_address  || null;
       if (ownerName || managerName) {
         runIntelPipeline(ownerName, managerName, operatorName, shipMgrName, address, bustCache);
+      } else if (imo) {
+        // Fallback: run pipeline with just IMO — backend will look up company names
+        runIntelPipeline(null, null, null, null, null, bustCache);
       }
 
       if (!data?.port_agents?.length && (currentPort || nextPort)) {
@@ -457,21 +440,21 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
 
   useEffect(() => { load(); }, [load]);
 
-  const hasCompanyData = contacts?.owner?.company_name || contacts?.manager?.company_name;
-  const agentCount     = agents.length;
+  const agentCount      = agents.length;
   const intelEmailCount = intelligence?.top_contacts?.length || 0;
+  const hasCompanyData  = contacts?.owner?.company_name || contacts?.manager?.company_name;
 
   const tabs = [
-    { id: "company",    label: "Owner / Operator", icon: "🏢" },
-    { id: "intel",      label: `Contact Intel${intelEmailCount ? ` (${intelEmailCount})` : ""}`, icon: "🔎" },
-    { id: "agents",     label: `Port Agents${agentCount ? ` (${agentCount})` : ""}`, icon: "⚓" },
-    { id: "agentorg",   label: "Agent Org",        icon: "🏗" },
-    { id: "master",     label: "Master",           icon: "👨‍✈️" },
+    { id: "intel",    label: `Contacts${intelEmailCount ? ` (${intelEmailCount})` : ""}`, icon: "✉" },
+    { id: "company",  label: "Owner / Operator",                                           icon: "🏢" },
+    { id: "agents",   label: `Port Agents${agentCount ? ` (${agentCount})` : ""}`,         icon: "⚓" },
+    { id: "agentorg", label: "Agent Org",                                                  icon: "🏗" },
+    { id: "master",   label: "Master",                                                     icon: "👨‍✈️" },
   ];
 
   return (
     <div className="cp-panel">
-      {/* Tab bar */}
+      {/* Tab bar — Gemini AI button removed */}
       <div className="cp-tabs">
         {tabs.map(t => (
           <button key={t.id} className={`cp-tab${activeTab === t.id ? " cp-tab-active" : ""}`} onClick={() => setActiveTab(t.id)}>
@@ -479,13 +462,6 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
           </button>
         ))}
         <div className="cp-tab-actions">
-          <button
-            className="cp-gemini-btn"
-            onClick={() => setGeminiOpen(true)}
-            title="Find contacts with Gemini AI"
-          >
-            ✨ Gemini AI
-          </button>
           {imo && (
             <button className="cp-enrich-btn" onClick={triggerEnrich} disabled={enriching || loading} title="Re-run full enrichment pipeline">
               {enriching ? "🔍 Searching…" : "🤖 Re-enrich"}
@@ -509,6 +485,25 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
 
         {!loading && !enriching && error && (
           <div className="cp-error"><span>⚠ {error}</span><button onClick={() => load(true)}>Retry</button></div>
+        )}
+
+        {/* ── Contact Intel tab (DEFAULT) ── */}
+        {!loading && !enriching && !error && activeTab === "intel" && (
+          <IntelligenceTab
+            intelligence={intelligence}
+            intelLoading={intelLoading}
+            intelError={intelError}
+            geminiActive={geminiActive}
+            onRefresh={() => {
+              const ownerName    = contacts?.owner?.company_name        || null;
+              const managerName  = contacts?.manager?.company_name      || null;
+              const operatorName = contacts?.operator?.company_name     || null;
+              const shipMgrName  = contacts?.ship_manager?.company_name || null;
+              const address      = contacts?.owner?.registered_address  || null;
+              runIntelPipeline(ownerName, managerName, operatorName, shipMgrName, address, true);
+            }}
+            imo={imo}
+          />
         )}
 
         {/* ── Owner/Operator tab ── */}
@@ -543,25 +538,6 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
           </div>
         )}
 
-        {/* ── Contact Intelligence tab ── */}
-        {!loading && !enriching && !error && activeTab === "intel" && (
-          <IntelligenceTab
-            intelligence={intelligence}
-            intelLoading={intelLoading}
-            intelError={intelError}
-            geminiConfigured={geminiConfigured}
-            onRefresh={() => {
-              const ownerName = contacts?.owner?.company_name || null;
-              const managerName = contacts?.manager?.company_name || null;
-              const operatorName = contacts?.operator?.company_name || null;
-              const shipMgrName = contacts?.ship_manager?.company_name || null;
-              const address = contacts?.owner?.registered_address || null;
-              runIntelPipeline(ownerName, managerName, operatorName, shipMgrName, address, true);
-            }}
-            imo={imo}
-          />
-        )}
-
         {/* ── Port Agents tab ── */}
         {!loading && !enriching && !error && activeTab === "agents" && (
           <div className="cp-agents">
@@ -574,13 +550,6 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
                 <div className="cp-no-data-icon">⚓</div>
                 <div>No port agents found.</div>
                 <div className="cp-no-data-sub">Click <strong>🤖 Re-enrich</strong> to search for agents at {currentPort || nextPort || "this port"}.</div>
-                {(currentPort || nextPort) && (
-                  <div className="cp-no-data-links">
-                    <a href="https://www.mpa.gov.sg" target="_blank" rel="noopener noreferrer">MPA SG</a>
-                    {" · "}<a href="https://www.gac.com" target="_blank" rel="noopener noreferrer">GAC</a>
-                    {" · "}<a href="https://www.wilhelmsen.com" target="_blank" rel="noopener noreferrer">Wilhelmsen</a>
-                  </div>
-                )}
               </div>
             ) : (
               <>
@@ -653,12 +622,7 @@ const VesselContactPanel = memo(function VesselContactPanel({ vessel, portCode }
           </div>
         )}
       </div>
-      {/* Gemini AI Contact Finder modal */}
-      <GeminiContactFinder
-        isOpen={geminiOpen}
-        onClose={() => setGeminiOpen(false)}
-        vessel={vessel}
-      />
+      {/* GeminiContactFinder modal completely removed — Gemini runs server-side only */}
     </div>
   );
 });
