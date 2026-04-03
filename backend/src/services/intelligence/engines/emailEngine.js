@@ -1,6 +1,6 @@
-// src/services/intelligence/engines/emailEngine.js
+// src/services/intelligence/engines/emailEngine.js — v2 (enhanced accuracy)
 // Email Pattern Generator + Multi-layer Validation Engine
-// Layer 0: Syntax  Layer 1: MX check  Layer 2: SMTP RCPT TO probe  Layer 3: Confidence
+// Enhancements: smarter SMTP, catch-all detection, name-pattern generation
 "use strict";
 
 const net    = require("net");
@@ -34,10 +34,12 @@ function inferPersonEmails(firstName, lastName, domain) {
   const fi = f[0] || "";
   if (!f || !l) return [];
   return [
-    { email: `${f}.${l}@${domain}`,  confidence: 70, source: "name_inferred" },
-    { email: `${fi}${l}@${domain}`,  confidence: 60, source: "name_inferred" },
-    { email: `${f}${l}@${domain}`,   confidence: 55, source: "name_inferred" },
+    { email: `${f}.${l}@${domain}`,  confidence: 72, source: "name_inferred" },  // most common
+    { email: `${fi}${l}@${domain}`,  confidence: 62, source: "name_inferred" },
+    { email: `${f}${l}@${domain}`,   confidence: 57, source: "name_inferred" },
     { email: `${l}.${f}@${domain}`,  confidence: 55, source: "name_inferred" },
+    { email: `${l}${fi}@${domain}`,  confidence: 50, source: "name_inferred" },  // NEW: lastnamefirstinitial
+    { email: `${fi}.${l}@${domain}`, confidence: 52, source: "name_inferred" },  // NEW: f.lastname
   ];
 }
 
@@ -47,6 +49,13 @@ async function getMxHost(domain) {
     if (!mx?.length) return null;
     return mx.sort((a, b) => a.priority - b.priority)[0].exchange;
   } catch { return null; }
+}
+
+// NEW: Catch-all detection — checks if server accepts non-existent addresses
+async function detectCatchAll(domain, mxHost) {
+  const bogusEmail = `definitely_not_real_abc123xyz_${Date.now()}@${domain}`;
+  const result = await smtpProbe(bogusEmail, mxHost);
+  return result === true; // if true, server accepts everything (catch-all)
 }
 
 /** SMTP RCPT TO probe — never sends an email. */
@@ -82,8 +91,8 @@ async function smtpProbe(email, mxHost) {
 
 /**
  * Validate a list of email addresses.
+ * Enhancement: catch-all detection prevents false positives on catch-all servers.
  * Returns enriched list with smtp_valid, mx_exists, updated confidence.
- * SMTP-rejected emails (conf=0) are filtered out.
  */
 async function validateEmails(emails, domain) {
   // Layer 0: syntax + disposable filter
@@ -99,13 +108,28 @@ async function validateEmails(emails, domain) {
     return syntaxOk.map(e => ({ ...e, smtp_valid: null, mx_exists: false }));
   }
 
+  // NEW: Catch-all detection — if server is catch-all, SMTP results are unreliable
+  const isCatchAll = await detectCatchAll(domain, mxHost).catch(() => false);
+  if (isCatchAll) {
+    logger.info(`[email-engine] ${domain} is catch-all server — skipping SMTP validation`);
+    // Still return emails but mark them as unverifiable; set smtp_valid = "catch_all"
+    return syntaxOk.map(e => ({
+      ...e,
+      smtp_valid: null,
+      mx_exists: true,
+      catch_all: true,
+      // Slightly boost pattern-generated emails since server doesn't reject them
+      confidence: Math.min((e.confidence || 50) + 5, 80),
+    }));
+  }
+
   // Layer 2: SMTP probe in batches of 5
   const BATCH   = 5;
   const results = [];
   let   confirmed = 0;
 
   for (let i = 0; i < syntaxOk.length; i += BATCH) {
-    const batch = syntaxOk.slice(i, i + BATCH);
+    const batch  = syntaxOk.slice(i, i + BATCH);
     const probes = await Promise.all(
       batch.map(e => smtpProbe(e.email, mxHost).catch(() => null))
     );
@@ -126,16 +150,19 @@ async function validateEmails(emails, domain) {
 
 /** Deduplicate and sort emails by confidence descending. */
 function rankEmails(emails) {
-  const seen = new Set();
-  return emails
-    .filter(e => {
-      if (!e?.email) return false;
-      const k = e.email.toLowerCase();
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    })
-    .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  const seen = new Map(); // email → highest-confidence item
+  for (const e of emails) {
+    if (!e?.email) continue;
+    const k = e.email.toLowerCase();
+    const existing = seen.get(k);
+    if (!existing || (e.confidence ?? 0) > (existing.confidence ?? 0)) {
+      seen.set(k, e);
+    }
+  }
+  return [...seen.values()].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
 }
 
-module.exports = { generateEmails, inferPersonEmails, validateEmails, rankEmails, getMxHost, isValidSyntax, isDisposable };
+module.exports = {
+  generateEmails, inferPersonEmails, validateEmails, rankEmails,
+  getMxHost, isValidSyntax, isDisposable, detectCatchAll,
+};

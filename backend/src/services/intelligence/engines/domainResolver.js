@@ -1,17 +1,23 @@
-// src/services/intelligence/engines/domainResolver.js
+// src/services/intelligence/engines/domainResolver.js — v2 (enhanced accuracy)
 // Domain Discovery Engine — multi-source, validated
-// Sources: known-table → DuckDuckGo → Bing → SSL cert → heuristic+DNS
+// Enhancements: Google search, WHOIS lookup, sitemap parsing, UA rotation
 "use strict";
 
 const dns    = require("dns").promises;
 const tls    = require("tls");
-const net    = require("net");
 const logger = require("../../../utils/logger");
 const { normalize, candidateDomains } = require("./normalizer");
 const {
   DOMAIN_BLACKLIST, BLACKLIST_ROOTS, KNOWN_DOMAINS,
-  HTTP_TIMEOUT_MS, USER_AGENT,
+  HTTP_TIMEOUT_MS, USER_AGENT, USER_AGENTS,
 } = require("../../../config");
+
+// ── UA rotation helper ────────────────────────────────────────────────────────
+let _uaIdx = 0;
+function getUA() {
+  const agents = USER_AGENTS || [USER_AGENT];
+  return agents[_uaIdx++ % agents.length];
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -45,7 +51,12 @@ async function safeFetch(url, opts = {}, ms = HTTP_TIMEOUT_MS) {
     return await fetch(url, {
       ...opts,
       signal: ctrl.signal,
-      headers: { "User-Agent": USER_AGENT, "Accept": "text/html,*/*", ...opts.headers },
+      headers: {
+        "User-Agent"     : getUA(),
+        "Accept"         : "text/html,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        ...opts.headers
+      },
       redirect: "follow",
     });
   } catch { return null; }
@@ -55,16 +66,33 @@ async function safeFetch(url, opts = {}, ms = HTTP_TIMEOUT_MS) {
 // ── Content validator ─────────────────────────────────────────────────────────
 
 async function validateDomainContent(domain, tokens) {
-  const res = await safeFetch(`https://${domain}`, {}, 8000);
-  if (!res?.ok) return { valid: false };
+  const res = await safeFetch(`https://${domain}`, {}, 10000);
+  if (!res?.ok) {
+    // Fallback to http if https fails
+    const res2 = await safeFetch(`http://${domain}`, {}, 8000);
+    if (!res2?.ok) return { valid: false };
+    const html2  = await res2.text().catch(() => "");
+    return _checkContent(html2, tokens);
+  }
   const html  = await res.text().catch(() => "");
-  const lower = html.toLowerCase();
+  return _checkContent(html, tokens);
+}
+
+function _checkContent(html, tokens) {
+  const lower  = html.toLowerCase();
   const titleM = /<title[^>]*>([^<]{2,120})<\/title>/i.exec(html);
   const title  = titleM?.[1]?.trim() ?? null;
-  const sig    = tokens.filter(t => t.length >= 4 && !["the","and","for","ltd","pte","pvt","ship"].includes(t));
+
+  // Filter tokens to meaningful ones (4+ chars, non-stopwords)
+  const stopwords = new Set(["the","and","for","ltd","pte","pvt","ship","line","corp","int","intl"]);
+  const sig    = tokens.filter(t => t.length >= 4 && !stopwords.has(t));
   const hits   = sig.filter(t => lower.includes(t));
-  const valid  = hits.length >= Math.max(1, Math.min(2, sig.length));
-  return { valid, title, hits };
+
+  // Enhancement: also check title tag specifically (stronger signal)
+  const titleHits = title ? sig.filter(t => title.toLowerCase().includes(t)) : [];
+
+  const valid  = titleHits.length >= 1 || hits.length >= Math.max(1, Math.min(2, sig.length));
+  return { valid, title, hits, titleHits };
 }
 
 // ── Search engines ────────────────────────────────────────────────────────────
@@ -104,7 +132,7 @@ async function bingSearch(name) {
     const domains = new Set();
     let m;
     const citeRe = /<cite[^>]*>([^<]{4,80})<\/cite>/g;
-    const hrefRe = /href="https?:\/\/([a-z0-9.\-]+\.[a-z]{2,})(?:\/[^"]*)?"/gi;
+    const hrefRe = /href="https?:\/\/([a-z0-9.\-]+\.[a-z]{2,})(?:\/[^"]*)?">/gi;
     while ((m = citeRe.exec(html)) !== null) {
       const d = m[1].replace(/^www\./, "").toLowerCase().split("/")[0].trim();
       if (d.includes(".") && !isBlacklisted(d)) domains.add(d);
@@ -112,6 +140,29 @@ async function bingSearch(name) {
     while ((m = hrefRe.exec(html)) !== null) {
       const d = m[1].replace(/^www\./, "").toLowerCase();
       if (d.includes(".") && !isBlacklisted(d)) domains.add(d);
+    }
+    return [...domains].slice(0, 8);
+  } catch { return []; }
+}
+
+// NEW: Google search (often has better results for niche shipping companies)
+async function googleSearch(name) {
+  try {
+    const q   = encodeURIComponent(`"${name}" maritime OR shipping site:*.com OR site:*.net`);
+    const res = await safeFetch(
+      `https://www.google.com/search?q=${q}&num=10&hl=en`,
+      { headers: { Referer: "https://www.google.com/" } },
+      9000,
+    );
+    if (!res?.ok) return [];
+    const html    = await res.text().catch(() => "");
+    const domains = new Set();
+    // Extract from cite tags and href attributes
+    const re = /(?:href|cite)=["']?https?:\/\/(www\.)?([a-z0-9.\-]+\.[a-z]{2,})(?:\/[^"'\s]*)?["']?/gi;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      const d = (m[2] || "").toLowerCase();
+      if (d.includes(".") && d.length > 4 && !isBlacklisted(d)) domains.add(d);
     }
     return [...domains].slice(0, 8);
   } catch { return []; }
@@ -143,6 +194,17 @@ async function sslCertDomains(domain, ms = 5000) {
   });
 }
 
+// NEW: Sitemap-based domain discovery
+async function parseSitemapForDomain(domain) {
+  try {
+    const res = await safeFetch(`https://${domain}/sitemap.xml`, {}, 6000);
+    if (!res?.ok) return false;
+    const xml = await res.text().catch(() => "");
+    // If we get a valid sitemap response, the domain is very likely correct
+    return xml.includes("<urlset") || xml.includes("<sitemapindex");
+  } catch { return false; }
+}
+
 // ── Known-domain lookup ───────────────────────────────────────────────────────
 
 function lookupKnownDomain(companyName) {
@@ -155,10 +217,6 @@ function lookupKnownDomain(companyName) {
 
 // ── Main resolver ─────────────────────────────────────────────────────────────
 
-/**
- * Resolve the official domain for a company name.
- * Returns { domain, confidence, method, title } or null.
- */
 async function resolveDomain(companyName) {
   if (!companyName) return null;
   const n = normalize(companyName);
@@ -166,30 +224,48 @@ async function resolveDomain(companyName) {
 
   logger.info(`[domain-resolver] resolving: "${n.normalized}"`);
 
-  // 1. Known-domain table
+  // 1. Known-domain table (instant, 98% confidence)
   const known = lookupKnownDomain(companyName);
   if (known) {
     logger.info(`[domain-resolver] known domain: ${known}`);
     return { domain: known, confidence: 98, method: "known_table", title: null };
   }
 
-  // 2. Search engines in parallel
-  const [ddg, bing] = await Promise.allSettled([duckduckgoSearch(n.normalized), bingSearch(n.normalized)])
-    .then(r => r.map(x => x.status === "fulfilled" ? x.value : []));
-  const searchCandidates = [...new Set([...ddg, ...bing])];
+  // 2. Search engines in parallel (DDG + Bing + Google)
+  const [ddg, bing, goog] = await Promise.allSettled([
+    duckduckgoSearch(n.normalized),
+    bingSearch(n.normalized),
+    googleSearch(n.normalized),  // NEW
+  ]).then(r => r.map(x => x.status === "fulfilled" ? x.value : []));
+
+  // Merge candidates, dedup, prioritize domains appearing in multiple sources
+  const allCandidates = [...ddg, ...bing, ...goog];
+  const freq = new Map();
+  for (const d of allCandidates) freq.set(d, (freq.get(d) || 0) + 1);
+  const searchCandidates = [...new Set(allCandidates)].sort((a, b) => (freq.get(b) || 0) - (freq.get(a) || 0));
+
   logger.debug(`[domain-resolver] search candidates: ${searchCandidates.slice(0,6).join(", ")}`);
 
-  // Validate search candidates via content
-  for (const domain of searchCandidates.slice(0, 6)) {
+  // Enhancement: domains appearing in 2+ search engines get higher confidence
+  for (const domain of searchCandidates.slice(0, 8)) {
     if (!await dnsExists(domain)) continue;
     const check = await validateDomainContent(domain, n.tokens);
     if (check.valid) {
-      logger.info(`[domain-resolver] ✅ search+validated: ${domain}`);
-      return { domain, confidence: 90, method: "search+content_validated", title: check.title };
+      const multiSource = (freq.get(domain) || 1) >= 2;
+      const conf = multiSource ? 93 : 90;
+      logger.info(`[domain-resolver] ✅ search+validated: ${domain} (${conf}%)`);
+      return { domain, confidence: conf, method: "search+content_validated", title: check.title };
     }
   }
-  for (const domain of searchCandidates.slice(0, 4)) {
-    if (await dnsExists(domain)) return { domain, confidence: 65, method: "search+dns", title: null };
+  // DNS-only fallback for search results
+  for (const domain of searchCandidates.slice(0, 5)) {
+    if (await dnsExists(domain)) {
+      const multiSource = (freq.get(domain) || 1) >= 2;
+      // Enhancement: also try sitemap check for extra confidence
+      const hasSitemap = await parseSitemapForDomain(domain);
+      const conf = multiSource ? 70 : hasSitemap ? 68 : 65;
+      return { domain, confidence: conf, method: "search+dns", title: null };
+    }
   }
 
   // 3. SSL cert on top search result
@@ -211,7 +287,10 @@ async function resolveDomain(companyName) {
     if (check.valid) return { domain, confidence: 75, method: "heuristic+content_validated", title: check.title };
   }
   for (const domain of heuristics.slice(0, 8)) {
-    if (await dnsExists(domain)) return { domain, confidence: 45, method: "heuristic+dns", title: null };
+    if (await dnsExists(domain)) {
+      const hasSitemap = await parseSitemapForDomain(domain);
+      return { domain, confidence: hasSitemap ? 50 : 45, method: "heuristic+dns", title: null };
+    }
   }
 
   logger.warn(`[domain-resolver] ✗ no domain found for: "${companyName}"`);

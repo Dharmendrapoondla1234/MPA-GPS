@@ -1,13 +1,13 @@
-// src/services/intelligence/geminiEnricher.js — v1
+// src/services/intelligence/geminiEnricher.js — v2 (Enhanced accuracy)
 // Gemini AI-Powered Contact Enrichment Engine
-// Uses Google Gemini to extract and validate contact details for maritime companies
-// Integrates as a fallback + booster in the main intelligence pipeline
+// Enhancements: better prompts, structured output validation, confidence calibration,
+//               web grounding with multiple search strategies, retry logic
 "use strict";
 
 const logger = require("../../utils/logger");
 const { HTTP_TIMEOUT_MS } = require("../../config");
 
-const GEMINI_MODEL = "gemini-2.0-flash"; // Fast and cheap
+const GEMINI_MODEL = "gemini-2.0-flash";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -49,7 +49,7 @@ async function callGemini(prompt, systemInstruction = null, maxTokens = 1500) {
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.1,
+      temperature: 0.05,          // lowered from 0.1 for more deterministic output
       maxOutputTokens: maxTokens,
       responseMimeType: "application/json",
     },
@@ -59,52 +59,55 @@ async function callGemini(prompt, systemInstruction = null, maxTokens = 1500) {
     body.systemInstruction = { parts: [{ text: systemInstruction }] };
   }
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(25000),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      logger.warn(`[gemini] API error ${res.status}: ${errText.slice(0, 200)}`);
-      return null;
-    }
-
-    const json = await res.json();
-    const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return null;
-
-    // Parse JSON response
+  // Retry once on transient errors
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      return JSON.parse(text);
-    } catch {
-      // Try to extract JSON from markdown code blocks
-      const match = /```(?:json)?\s*([\s\S]+?)\s*```/.exec(text);
-      if (match) {
-        try {
-          return JSON.parse(match[1]);
-        } catch {}
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(28000),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        logger.warn(`[gemini] API error ${res.status}: ${errText.slice(0, 200)}`);
+        if (res.status === 429 && attempt === 0) {
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        return null;
       }
-      logger.warn("[gemini] Could not parse JSON response:", text.slice(0, 200));
-      return null;
+
+      const json = await res.json();
+      const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) return null;
+
+      try {
+        return JSON.parse(text);
+      } catch {
+        const match = /```(?:json)?\s*([\s\S]+?)\s*```/.exec(text);
+        if (match) {
+          try { return JSON.parse(match[1]); } catch {}
+        }
+        logger.warn("[gemini] Could not parse JSON response:", text.slice(0, 200));
+        return null;
+      }
+    } catch (err) {
+      logger.warn("[gemini] fetch error:", err.message?.slice(0, 100));
+      if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
     }
-  } catch (err) {
-    logger.warn("[gemini] fetch error:", err.message?.slice(0, 100));
-    return null;
   }
+  return null;
 }
 
-// ── Web content fetcher for Gemini grounding ─────────────────────────────────
+// ── Web content fetcher for Gemini grounding ──────────────────────────────────
 
 async function fetchPageText(url, ms = 10000) {
   try {
     const res = await safeFetch(url, {}, ms);
     if (!res?.ok) return null;
     const html = await res.text();
-    // Strip tags, get clean text
     return html
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
@@ -112,168 +115,180 @@ async function fetchPageText(url, ms = 10000) {
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 8000); // Keep first 8000 chars for Gemini
+      .slice(0, 8000);
   } catch {
     return null;
   }
 }
 
-// ── DuckDuckGo search (no key needed) ────────────────────────────────────────
+// ── DuckDuckGo search helper ──────────────────────────────────────────────────
 
-async function duckduckgoSearchText(query) {
+async function duckduckgoSearchText(query, maxChars = 3000) {
   try {
-    const q = encodeURIComponent(query);
+    const q   = encodeURIComponent(query);
     const res = await safeFetch(
-      `https://html.duckduckgo.com/html/?q=${q}`,
+      `https://api.duckduckgo.com/?q=${q}&format=json&no_redirect=1&no_html=1&skip_disambig=1`,
       { headers: { Referer: "https://duckduckgo.com/" } },
-      10000
+      10000,
+    );
+    if (!res?.ok) return null;
+    const json = await res.json().catch(() => null);
+    if (!json) return null;
+    const parts = [
+      json.AbstractText,
+      ...(json.RelatedTopics || []).map(t => t.Text || t.Result || ""),
+      ...(json.Results || []).map(r => r.Text || ""),
+    ].filter(Boolean);
+    return parts.join(" ").slice(0, maxChars) || null;
+  } catch {
+    return null;
+  }
+}
+
+// NEW: Bing search text for more grounding coverage
+async function bingSearchText(query, maxChars = 3000) {
+  try {
+    const q   = encodeURIComponent(query);
+    const res = await safeFetch(
+      `https://www.bing.com/search?q=${q}&count=5`,
+      { headers: { Referer: "https://www.bing.com/" } },
+      10000,
     );
     if (!res?.ok) return null;
     const html = await res.text();
-    return html
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .slice(0, 6000);
+    // Extract snippet text from Bing results
+    const snippets = [];
+    const re = /<p class="b_algoSlug"[^>]*>([\s\S]*?)<\/p>/g;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      snippets.push(m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    }
+    return snippets.join(" ").slice(0, maxChars) || null;
   } catch {
     return null;
   }
 }
 
-// ── Core: Gemini contact extraction from company name ────────────────────────
+// ── Validate Gemini-returned emails ──────────────────────────────────────────
+// NEW: Basic sanity-check on Gemini's email output before adding to pipeline
 
-/**
- * Use Gemini to find contact details for a maritime company.
- * Returns { emails, phones, website, address, confidence, source }
- */
-async function enrichCompanyWithGemini(companyName, existingDomain = null) {
+const EMAIL_RE = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+const JUNK_RE  = /example|yourdomain|noreply|no-reply|test@|demo@|placeholder/i;
+
+function validateGeminiEmails(emails, domain) {
+  if (!Array.isArray(emails)) return [];
+  return emails
+    .filter(e => {
+      if (!e?.email || typeof e.email !== "string") return false;
+      if (!EMAIL_RE.test(e.email)) return false;
+      if (JUNK_RE.test(e.email)) return false;
+      // If we know the domain, reject emails from a completely different domain
+      if (domain && !e.email.toLowerCase().endsWith(`@${domain}`)) {
+        // Allow if confidence is high (Gemini may have found an alternate domain)
+        return (e.confidence || 0) >= 70;
+      }
+      return true;
+    })
+    .map(e => ({
+      email      : e.email.toLowerCase().trim(),
+      confidence : Math.min(Math.max(e.confidence || 55, 0), 85), // cap Gemini confidence at 85
+      source     : "gemini_ai",
+    }));
+}
+
+// ── Main enrichment function ──────────────────────────────────────────────────
+
+async function enrichCompanyWithGemini(companyName, knownDomain = null) {
   if (!companyName || !getApiKey()) return null;
+  logger.info(`[gemini] enriching: "${companyName}" domain=${knownDomain || "?"}`);
 
-  logger.info(`[gemini] enriching: "${companyName}"`);
-
-  // Step 1: Gather web evidence
-  const searchText = await duckduckgoSearchText(
-    `"${companyName}" shipping maritime company contact email website`
-  );
-
-  // Step 2: Try to fetch website content if we already know the domain
-  let websiteText = null;
-  if (existingDomain) {
-    const urls = [
-      `https://${existingDomain}/contact`,
-      `https://${existingDomain}/contact-us`,
-      `https://${existingDomain}/contacts`,
-      `https://${existingDomain}/about`,
-      `https://${existingDomain}`,
-    ];
-    for (const url of urls) {
-      websiteText = await fetchPageText(url, 8000);
-      if (websiteText && websiteText.length > 200) break;
-    }
-  }
-
-  // Step 3: Build Gemini prompt with all evidence
-  const system = `You are a maritime intelligence expert. Extract factual company contact information only.
-Return ONLY valid JSON, no markdown, no explanation.
-Only include data that appears in the provided text evidence — do not hallucinate.
-Confidence: 0-100 based on how clearly the data appears in evidence.`;
+  // Gather web evidence from multiple sources for better grounding
+  const [ddgText, bingText, pageText] = await Promise.all([
+    duckduckgoSearchText(`"${companyName}" shipping maritime contact email phone`),
+    bingSearchText(`"${companyName}" maritime official website contact`),
+    knownDomain ? fetchPageText(`https://${knownDomain}/contact`).catch(() => null) : Promise.resolve(null),
+  ]);
 
   const evidence = [
-    searchText ? `=== SEARCH RESULTS ===\n${searchText}` : "",
-    websiteText ? `=== WEBSITE CONTENT ===\n${websiteText}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+    ddgText  ? `[DuckDuckGo]: ${ddgText}`  : null,
+    bingText ? `[Bing]: ${bingText}`        : null,
+    pageText ? `[Website /contact]: ${pageText}` : null,
+  ].filter(Boolean).join("\n\n").slice(0, 10000);
 
-  const prompt = `Find contact details for this maritime company: "${companyName}"
+  const system = `You are a maritime industry data expert with deep knowledge of shipping companies worldwide.
+Your task is to extract and validate contact information for maritime companies.
+Return ONLY valid JSON. Do not guess or hallucinate email addresses.
+If you are not confident about a piece of information, omit it or set confidence < 60.`;
 
-${evidence ? `Evidence from web:\n${evidence}` : "No web evidence available — use your training knowledge if confident."}
+  const prompt = `Extract contact information for maritime company: "${companyName}"
+${knownDomain ? `Known website domain: ${knownDomain}` : ""}
 
-Return JSON in this exact format:
+Web evidence:
+${evidence || "(no web evidence available — use training knowledge only if highly confident)"}
+
+Return this exact JSON structure:
 {
-  "company_name": "...",
-  "official_website": "example.com or null",
-  "emails": ["email1@domain.com", "email2@domain.com"],
-  "phones": ["+1234567890", "..."],
-  "address": "full address or null",
-  "linkedin": "linkedin URL or null",
-  "key_personnel": [
-    {"name": "...", "role": "Fleet Manager", "email": "... or null"}
+  "company_name": "exact company name",
+  "website": "domain.com (no https/www)",
+  "emails": [
+    {"email": "contact@domain.com", "confidence": 75, "role": "general contact"},
+    {"email": "ops@domain.com", "confidence": 70, "role": "operations"}
   ],
-  "confidence": 85,
-  "notes": "brief note about data quality"
+  "phones": ["+1-234-567-8900"],
+  "address": "full office address",
+  "key_personnel": [
+    {"name": "John Smith", "title": "Managing Director", "email": "j.smith@domain.com"}
+  ],
+  "confidence": 75,
+  "notes": "brief note on data source/reliability"
 }
 
 Rules:
-- Only include emails that actually appear in the evidence text
-- Do NOT generate fake emails
-- If no emails found, return empty array
-- official_website should be just the domain (no https://)
-- confidence = how sure you are the data is correct (0-100)`;
+- emails array: only include addresses you found in the evidence or are very certain about
+- confidence: 80+ = found in evidence, 60-79 = inferred from patterns, <60 = uncertain
+- website: domain only (e.g. "maersk.com" not "https://www.maersk.com")
+- if uncertain about any field, omit it rather than guess
+- max 6 emails`;
 
-  const result = await callGemini(prompt, system, 1000);
-
+  const result = await callGemini(prompt, system, 1200);
   if (!result) return null;
 
-  // Validate and clean results
-  const emails = (result.emails || [])
-    .filter((e) => typeof e === "string" && e.includes("@") && e.includes(".") && e.length < 80)
-    .map((e) => e.toLowerCase().trim());
-
-  const phones = (result.phones || [])
-    .filter((p) => typeof p === "string" && p.replace(/\D/g, "").length >= 7)
-    .slice(0, 3);
-
-  const website = result.official_website
-    ? result.official_website
-        .replace(/^https?:\/\/(www\.)?/, "")
-        .split("/")[0]
-        .toLowerCase()
-    : existingDomain || null;
-
-  logger.info(
-    `[gemini] "${companyName}": emails=${emails.length} website=${website || "—"} conf=${result.confidence || 0}`
-  );
-
+  // Validate and sanitize output
+  const domain = knownDomain || result.website || null;
   return {
-    emails: emails.map((e) => ({
-      email: e,
-      confidence: Math.min(Math.round((result.confidence || 50) * 0.9), 90),
-      source: "gemini_ai",
-      smtp_valid: null,
-    })),
-    phones,
-    website,
-    address: result.address || null,
-    linkedin: result.linkedin || null,
-    key_personnel: result.key_personnel || [],
-    confidence: result.confidence || 50,
-    notes: result.notes || null,
-    source: "gemini_ai",
+    company_name  : result.company_name || companyName,
+    website       : result.website      || null,
+    emails        : validateGeminiEmails(result.emails || [], domain),
+    phones        : Array.isArray(result.phones) ? result.phones.filter(p => typeof p === "string" && p.length > 5).slice(0, 4) : [],
+    address       : typeof result.address === "string" && result.address.length > 5 ? result.address : null,
+    key_personnel : Array.isArray(result.key_personnel) ? result.key_personnel.slice(0, 5) : [],
+    linkedin      : result.linkedin || null,
+    confidence    : Math.min(result.confidence || 50, 85),
+    notes         : result.notes   || null,
+    source        : "gemini_ai",
   };
 }
 
-// ── Gemini: IMO → Company lookup ─────────────────────────────────────────────
+// ── Gemini: IMO → Company lookup ──────────────────────────────────────────────
 
-/**
- * Ask Gemini to identify the company managing a vessel by IMO number.
- * Uses web search grounding.
- */
 async function lookupVesselByIMO(imo, vesselName = null) {
   if (!imo || !getApiKey()) return null;
-
   logger.info(`[gemini] IMO lookup: ${imo}`);
 
-  // Gather web evidence
-  const searchText = await duckduckgoSearchText(
-    `IMO ${imo} vessel ship owner company ${vesselName || ""}`
-  );
+  const [ddgText, bingText] = await Promise.all([
+    duckduckgoSearchText(`IMO ${imo} vessel ship owner company ${vesselName || ""}`),
+    bingSearchText(`IMO number ${imo} registered owner ship manager`),
+  ]);
 
-  const system = `You are a maritime data expert. Extract vessel ownership data from evidence. Return only valid JSON.`;
+  const evidence = [ddgText, bingText].filter(Boolean).join("\n\n").slice(0, 6000);
+
+  const system = `You are a maritime data expert. Extract vessel ownership data from evidence. Return only valid JSON.
+Only include company names you can confirm from the evidence. Do not guess.`;
 
   const prompt = `Find the registered owner and ISM manager for vessel with IMO number: ${imo}${vesselName ? ` (vessel name: ${vesselName})` : ""}
 
 Web search evidence:
-${searchText || "(no web evidence — use training knowledge if confident)"}
+${evidence || "(no web evidence — use training knowledge only if IMO is well-known)"}
 
 Return JSON:
 {
@@ -285,42 +300,47 @@ Return JSON:
   "ism_manager": "company name or null",
   "ship_manager": "company name or null",
   "operator": "company name or null",
-  "confidence": 70
-}`;
+  "confidence": 70,
+  "source": "evidence|training"
+}
+
+If confidence < 50, set all company fields to null.`;
 
   return await callGemini(prompt, system, 500);
 }
 
 // ── Gemini: Domain verification ───────────────────────────────────────────────
 
-/**
- * Ask Gemini to confirm or find the official domain for a company.
- */
 async function verifyOrFindDomain(companyName, candidates = []) {
   if (!companyName || !getApiKey()) return null;
 
-  const searchText = await duckduckgoSearchText(`"${companyName}" official website domain`);
+  const [ddgText, bingText] = await Promise.all([
+    duckduckgoSearchText(`"${companyName}" official website domain`),
+    bingSearchText(`"${companyName}" official maritime website`),
+  ]);
+  const evidence = [ddgText, bingText].filter(Boolean).join("\n\n").slice(0, 4000);
 
-  const system = `You are a web research expert. Find the official website domain for companies. Return only JSON.`;
+  const system = `You are a web research expert. Find the official website domain for companies. Return only JSON.
+Only return domains you found in the evidence. Do not guess or hallucinate domains.`;
 
   const prompt = `What is the official website domain for: "${companyName}"
-
 ${candidates.length ? `Candidate domains to verify: ${candidates.join(", ")}` : ""}
 
 Search evidence:
-${searchText || "(none)"}
+${evidence || "(none)"}
 
 Return JSON:
 {
   "domain": "example.com",
   "confidence": 85,
-  "reason": "brief explanation"
+  "reason": "brief explanation of how you found it"
 }
 
 Rules:
 - Return only the domain (no https://, no www.)
 - If uncertain, set confidence < 50
-- If no domain found, return {"domain": null, "confidence": 0, "reason": "not found"}`;
+- If not found in evidence, return {"domain": null, "confidence": 0, "reason": "not found in evidence"}
+- Do not return aggregator sites (linkedin, marinetraffic, etc.)`;
 
   const result = await callGemini(prompt, system, 300);
   return result;
@@ -328,22 +348,22 @@ Rules:
 
 // ── Gemini: Port agent lookup ─────────────────────────────────────────────────
 
-/**
- * Ask Gemini to find port agents for a specific port.
- */
 async function findPortAgentsWithGemini(portName, portCode = null, vesselType = null) {
   if (!portName || !getApiKey()) return null;
 
-  const searchText = await duckduckgoSearchText(
-    `port agent ${portName} shipping maritime contact email`
-  );
+  const [ddgText, bingText] = await Promise.all([
+    duckduckgoSearchText(`port agent ${portName} shipping maritime contact email`),
+    bingSearchText(`ship agent ${portName} ${portCode || ""} maritime services`),
+  ]);
+  const evidence = [ddgText, bingText].filter(Boolean).join("\n\n").slice(0, 5000);
 
-  const system = `You are a maritime port operations expert. Find port agent contacts. Return only valid JSON.`;
+  const system = `You are a maritime port operations expert. Find port agent contacts. Return only valid JSON.
+Only include agents found in the evidence.`;
 
   const prompt = `Find port agents operating at: ${portName}${portCode ? ` (${portCode})` : ""}${vesselType ? ` for ${vesselType} vessels` : ""}
 
 Web evidence:
-${searchText || "(none)"}
+${evidence || "(none)"}
 
 Return JSON array:
 [
@@ -361,35 +381,30 @@ Only include agents that appear in the evidence. Return empty array [] if none f
 
   const result = await callGemini(prompt, system, 800);
   if (!Array.isArray(result)) return [];
-  return result.filter((a) => a.agency_name).slice(0, 5);
+  return result.filter((a) => a.agency_name && (a.confidence || 0) >= 50).slice(0, 6); // min confidence filter
 }
 
-// ── Main enrichment pipeline with Gemini boost ───────────────────────────────
+// ── Main enrichment pipeline with Gemini boost ────────────────────────────────
 
-/**
- * Full Gemini-boosted intelligence run for a set of companies.
- * Called when the standard pipeline finds no contacts or domain.
- */
 async function geminiBoostPipeline({ imo, owner, manager, operator, ship_manager }) {
   if (!getApiKey()) {
     return { boosted: false, reason: "No GEMINI_API_KEY configured" };
   }
 
   const companies = [
-    { name: owner, role: "owner" },
-    { name: manager, role: "manager" },
-    { name: operator, role: "operator" },
+    { name: owner,        role: "owner" },
+    { name: manager,      role: "manager" },
+    { name: operator,     role: "operator" },
     { name: ship_manager, role: "ship_manager" },
   ].filter((c) => c.name && c.name.trim().length > 2);
 
   if (!companies.length) {
-    // Try to identify from IMO first
     if (imo) {
       const vesselData = await lookupVesselByIMO(imo);
-      if (vesselData?.registered_owner) {
+      if (vesselData?.registered_owner && (vesselData.confidence || 0) >= 55) {
         companies.push({ name: vesselData.registered_owner, role: "owner" });
       }
-      if (vesselData?.ism_manager) {
+      if (vesselData?.ism_manager && (vesselData.confidence || 0) >= 55) {
         companies.push({ name: vesselData.ism_manager, role: "manager" });
       }
     }
@@ -403,21 +418,22 @@ async function geminiBoostPipeline({ imo, owner, manager, operator, ship_manager
   for (const co of companies) {
     try {
       const data = await enrichCompanyWithGemini(co.name, null);
-      if (data) {
+      if (data && (data.emails?.length || data.website)) {
         results.push({
-          company: co.name,
-          role: co.role,
-          domain: data.website,
+          company        : co.name,
+          role           : co.role,
+          domain         : data.website,
           domain_confidence: data.website ? data.confidence : 0,
-          domain_method: "gemini_ai",
-          domain_title: null,
-          emails: data.emails || [],
-          phones: data.phones || [],
-          addresses: data.address ? [data.address] : [],
-          scraped: false,
-          mx_exists: false,
-          boosted_by: "gemini",
-          gemini_notes: data.notes,
+          domain_method  : "gemini_ai",
+          domain_title   : null,
+          emails         : data.emails || [],
+          phones         : data.phones || [],
+          addresses      : data.address ? [data.address] : [],
+          key_personnel  : data.key_personnel || [],
+          scraped        : false,
+          mx_exists      : false,
+          boosted_by     : "gemini",
+          gemini_notes   : data.notes,
         });
       }
     } catch (err) {
@@ -429,10 +445,10 @@ async function geminiBoostPipeline({ imo, owner, manager, operator, ship_manager
   const allPhones = [...new Set(results.flatMap((r) => r.phones))];
 
   return {
-    boosted: results.length > 0,
-    companies: results,
-    top_contacts: allEmails.sort((a, b) => b.confidence - a.confidence).slice(0, 8),
-    top_phones: allPhones.slice(0, 5),
+    boosted     : results.length > 0,
+    companies   : results,
+    top_contacts: allEmails.sort((a, b) => b.confidence - a.confidence).slice(0, 10),
+    top_phones  : allPhones.slice(0, 6),
   };
 }
 

@@ -1,0 +1,92 @@
+/* VesselDetailPanel_dbt_additions.css — v9 redesign */
+
+/* ── dbt STATUS STRIP ────────────────────────────────────────────── */
+.dp-dbt-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(0,229,255,0.08);
+  border-left: 3px solid transparent;
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+  gap: 10px;
+}
+.dp-dbt-left {
+  display: flex; align-items: center;
+  gap: 8px; flex: 1; min-width: 0;
+}
+.dp-dbt-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%; flex-shrink: 0;
+  animation: dp-pulse 2.2s ease-in-out infinite;
+}
+.dp-dbt-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.dp-dbt-port-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  color: #ffaa00;
+  background: rgba(255,170,0,0.07);
+  border: 1px solid rgba(255,170,0,0.18);
+  border-radius: 4px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+/* Inline DQ bar */
+.dp-dq-wrap { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.dp-dq-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7px; color: rgba(90,140,180,0.5); letter-spacing: 0.1em;
+}
+.dp-dq-bar { width: 44px; height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+.dp-dq-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
+.dp-dq-val  { font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 700; min-width: 18px; text-align: right; }
+
+/* ── Full DQ section ────────────────────────────────────────────── */
+.dp-dq-full {
+  margin: 4px 14px 12px;
+  background: rgba(0,229,255,0.022);
+  border: 1px solid rgba(0,229,255,0.08);
+  border-radius: 10px;
+  padding: 12px 13px;
+}
+.dp-dq-full-top {
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: 'Rajdhani', sans-serif; font-size: 11px;
+  color: #7ab4d4; margin-bottom: 8px;
+}
+.dp-dq-full-bar {
+  height: 4px; background: rgba(255,255,255,0.06);
+  border-radius: 2px; overflow: hidden; margin-bottom: 12px;
+}
+.dp-dq-full-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
+
+.dp-dq-checklist { display: flex; flex-direction: column; gap: 4px; }
+.dp-dq-check {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 7px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 10.5px; color: #7ab4d4;
+  transition: background 0.12s;
+}
+.dp-dq-check:hover { background: rgba(255,255,255,0.03); }
+.dp-dq-check.ok {
+  border-color: rgba(0,255,157,0.1);
+  background: rgba(0,255,157,0.03);
+}
+.dp-dq-pts {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px; color: rgba(90,140,180,0.45);
+  width: 26px; flex-shrink: 0;
+}
+.dp-dq-icon { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+.dp-dq-icon.ok { color: #00ff9d; }
+.dp-dq-icon.na { color: rgba(90,140,180,0.35); }

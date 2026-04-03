@@ -45,6 +45,17 @@ html, body, #root {
   position: relative;
   min-width: 0;
   overflow: hidden;
+  transition: flex 0.35s cubic-bezier(0.4,0,0.2,1),
+              opacity 0.28s ease,
+              min-width 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+
+/* When vessel panel is open, map collapses away */
+.app-map-area.vessel-selected {
+  flex: 0 0 0px;
+  min-width: 0 !important;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ── RIGHT PANEL (port activity + vessel detail) ──────── */
@@ -53,16 +64,19 @@ html, body, #root {
   min-width: 0;
   height: 100%;
   overflow: hidden;
-  transition: width 0.28s cubic-bezier(0.4,0,0.2,1),
-              min-width 0.28s cubic-bezier(0.4,0,0.2,1);
+  transition: width 0.35s cubic-bezier(0.4,0,0.2,1),
+              min-width 0.35s cubic-bezier(0.4,0,0.2,1),
+              flex 0.35s cubic-bezier(0.4,0,0.2,1);
   background: #07111e;
   border-left: 1px solid rgba(0,229,255,0.10);
   flex-shrink: 0;
   z-index: 20;
 }
 .app-right-panel.open {
-  width: 300px;
-  min-width: 300px;
+  /* When open, take all remaining space */
+  flex: 1;
+  width: auto;
+  min-width: 340px;
 }
 
 /* Detail panel sits on top of port panel when both try to open */
@@ -128,7 +142,7 @@ html, body, #root {
 ══════════════════════════════════════════════════════ */
 @media (max-width: 1100px) {
   .app-detail-panel.open { width: 300px; }
-  .app-right-panel.open  { width: 270px; min-width: 270px; }
+  .app-right-panel.open  { min-width: 300px; }
 }
 
 /* ══════════════════════════════════════════════════════

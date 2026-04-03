@@ -1,12 +1,17 @@
-// src/services/intelligence/pipeline.js — v4 (Gemini AI boosted)
+// src/services/intelligence/pipeline.js — v5 (Enhanced accuracy)
 // Full Maritime Intelligence Pipeline: standard engines + Gemini AI fallback
+// Enhancements: parallel company processing, name-inferred emails from key_personnel,
+//               retry logic, cross-company email deduplication, richer output
 "use strict";
 
 const logger  = require("../../utils/logger");
 const { normalize, deduplicateCompanies } = require("./engines/normalizer");
 const { resolveDomain, hasMxRecord }      = require("./engines/domainResolver");
 const { scrapeWebsite }                   = require("./engines/websiteScraper");
-const { generateEmails, validateEmails, rankEmails } = require("./engines/emailEngine");
+const {
+  generateEmails, validateEmails, rankEmails,
+  inferPersonEmails,                         // NEW: name-pattern generation
+} = require("./engines/emailEngine");
 const { applyConfidenceScoring }          = require("./engines/confidenceScorer");
 const { fetchEquasis }                    = require("../maritime/equasisScraper");
 const { fetchAllMaritimeDBs }             = require("../maritime/maritimeDBs");
@@ -19,7 +24,7 @@ const {
 const db = require("./db");
 const { PIPELINE_CACHE_TTL_MS, MAX_EMAILS_PER_CO, CRAWL_DELAY_MS } = require("../../config");
 
-const _cache = new Map();
+const _cache   = new Map();
 const _cacheTs = new Map();
 
 function cacheGet(k) {
@@ -28,14 +33,25 @@ function cacheGet(k) {
 }
 function cacheSet(k, d) { _cache.set(k, d); _cacheTs.set(k, Date.now()); return d; }
 
+// NEW: Retry a promise up to `attempts` times with exponential back-off
+async function withRetry(fn, attempts = 2, delayMs = 500) {
+  for (let i = 0; i < attempts; i++) {
+    try { return await fn(); }
+    catch (err) {
+      if (i === attempts - 1) throw err;
+      await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+}
+
 async function processCompany({ name, role, imoNumber, address }) {
   if (!name || name.trim().length < 3) return null;
   const norm = normalize(name);
   if (!norm) return null;
   logger.info(`[pipeline] "${name}" (${role}) → "${norm.normalized}"`);
 
-  // Step 1: Domain resolution (search engines + DNS + heuristics)
-  const domainResult = await resolveDomain(name).catch(() => null);
+  // Step 1: Domain resolution with retry
+  const domainResult = await withRetry(() => resolveDomain(name), 2).catch(() => null);
   let domain    = domainResult?.domain    ?? null;
   let domConf   = domainResult?.confidence ?? 0;
   let domMethod = domainResult?.method     ?? "unresolved";
@@ -60,6 +76,7 @@ async function processCompany({ name, role, imoNumber, address }) {
     company: name, company_normalized: norm.normalized, role,
     domain, domain_confidence: domConf, domain_method: domMethod, domain_title: domTitle,
     emails: [], phones: [], addresses: [], scraped: false, mx_exists: false,
+    key_personnel: [],
   };
 
   // Step 2: MX check + website scrape
@@ -95,9 +112,10 @@ async function processCompany({ name, role, imoNumber, address }) {
     result.emails = scored.slice(0, MAX_EMAILS_PER_CO);
   }
 
-  // Step 5: Gemini AI boost if no emails found
-  if (!result.emails.length) {
-    logger.info(`[pipeline] no emails for "${name}" — boosting with Gemini`);
+  // Step 5: Gemini AI boost if no or few emails found
+  const emailThreshold = 2; // NEW: boost even if we have some emails but very few
+  if (result.emails.length < emailThreshold) {
+    logger.info(`[pipeline] only ${result.emails.length} email(s) for "${name}" — boosting with Gemini`);
     const gemini = await enrichCompanyWithGemini(name, domain).catch(() => null);
     if (gemini) {
       if (!domain && gemini.website) {
@@ -108,17 +126,61 @@ async function processCompany({ name, role, imoNumber, address }) {
       }
       if (gemini.emails?.length) {
         const gemEmails = applyConfidenceScoring(gemini.emails, domain, [], domConf);
-        result.emails   = [...result.emails, ...gemEmails].slice(0, MAX_EMAILS_PER_CO);
+        // Merge: keep existing + add new Gemini emails not already found
+        const existingSet = new Set(result.emails.map(e => e.email.toLowerCase()));
+        const newGemEmails = gemEmails.filter(e => !existingSet.has(e.email.toLowerCase()));
+        result.emails = rankEmails([...result.emails, ...newGemEmails]).slice(0, MAX_EMAILS_PER_CO);
       }
       if (gemini.phones?.length   && !result.phones.length)    result.phones        = gemini.phones;
       if (gemini.address          && !result.addresses.length) result.addresses     = [gemini.address];
-      if (gemini.key_personnel?.length)                        result.key_personnel = gemini.key_personnel;
+      if (gemini.key_personnel?.length) {
+        result.key_personnel = gemini.key_personnel;
+
+        // NEW: Generate name-inferred emails from key personnel
+        if (domain) {
+          const personEmails = [];
+          for (const person of gemini.key_personnel.slice(0, 5)) {
+            const nameParts = (person.name || "").trim().split(/\s+/);
+            if (nameParts.length >= 2) {
+              const first = nameParts[0];
+              const last  = nameParts[nameParts.length - 1];
+              personEmails.push(...inferPersonEmails(first, last, domain));
+            }
+          }
+          if (personEmails.length) {
+            const validated = await validateEmails(personEmails, domain).catch(() => []);
+            const scored    = applyConfidenceScoring(validated, domain, [], domConf);
+            const existingSet = new Set(result.emails.map(e => e.email.toLowerCase()));
+            const newPersonEmails = scored.filter(e => !existingSet.has(e.email.toLowerCase()));
+            result.emails = rankEmails([...result.emails, ...newPersonEmails]).slice(0, MAX_EMAILS_PER_CO);
+            logger.info(`[pipeline] ${newPersonEmails.length} name-inferred emails added for "${name}"`);
+          }
+        }
+      }
       result.gemini_boosted = true;
     }
   }
 
   logger.info(`[pipeline] "${name}": domain=${result.domain || "—"} emails=${result.emails.length} mx=${result.mx_exists}`);
   return result;
+}
+
+// NEW: Parallel company processing with a concurrency limit
+async function processCompaniesParallel(companies, address, concurrency = 2) {
+  const results = [];
+  for (let i = 0; i < companies.length; i += concurrency) {
+    const batch = companies.slice(i, i + concurrency);
+    const batchResults = await Promise.all(
+      batch.map(co => processCompany({ name: co.name, role: co.role, imoNumber: null, address })
+        .catch(err => { logger.warn(`[pipeline] company error "${co.name}": ${err.message}`); return null; })
+      )
+    );
+    results.push(...batchResults.filter(Boolean));
+    if (i + concurrency < companies.length) {
+      await new Promise(res => setTimeout(res, CRAWL_DELAY_MS));
+    }
+  }
+  return results;
 }
 
 async function runPipeline({ imo, owner, manager, operator, ship_manager, address, forceRefresh = false }) {
@@ -177,13 +239,8 @@ async function runPipeline({ imo, owner, manager, operator, ship_manager, addres
     };
   }
 
-  // Phase 2: Process each company
-  const results = [];
-  for (const co of companies) {
-    const r = await processCompany({ name: co.name, role: co.role, imoNumber: imoStr, address });
-    if (r) results.push(r);
-    await new Promise(res => setTimeout(res, CRAWL_DELAY_MS));
-  }
+  // Phase 2: Process companies (parallel with concurrency=2 for speed)
+  const results = await processCompaniesParallel(companies, address, 2);
 
   // Phase 3: Full Gemini boost if still zero emails across all companies
   const totalEmails = results.reduce((sum, r) => sum + (r.emails?.length || 0), 0);
@@ -209,17 +266,50 @@ async function runPipeline({ imo, owner, manager, operator, ship_manager, addres
     }
   }
 
+  // Phase 4: Cross-company email deduplication (NEW)
+  // Remove emails that appear in multiple companies — keep only the highest-confidence one
+  const globalEmailMap = new Map(); // email → { result, email_item }
+  for (const r of results) {
+    for (const e of (r.emails || [])) {
+      const key = e.email.toLowerCase();
+      const existing = globalEmailMap.get(key);
+      if (!existing || e.confidence > existing.email_item.confidence) {
+        globalEmailMap.set(key, { result: r, email_item: e });
+      }
+    }
+  }
+  // Rebuild email lists with cross-company duplicates removed
+  for (const r of results) {
+    r.emails = (r.emails || []).filter(e => {
+      const best = globalEmailMap.get(e.email.toLowerCase());
+      return best?.result === r; // keep only if this company "owns" the best version
+    });
+  }
+
   const allEmails = rankEmails(results.flatMap(r => r.emails || []));
   const allPhones = [...new Set(results.flatMap(r => r.phones || []))];
+
+  // NEW: Summary stats for monitoring
+  const stats = {
+    companies_processed: results.length,
+    emails_total: allEmails.length,
+    emails_smtp_validated: allEmails.filter(e => e.smtp_valid === true).length,
+    emails_scraped: allEmails.filter(e => e.source?.startsWith("website")).length,
+    emails_gemini: allEmails.filter(e => e.source === "gemini_ai").length,
+    emails_name_inferred: allEmails.filter(e => e.source === "name_inferred").length,
+    domains_resolved: results.filter(r => r.domain).length,
+    gemini_used: results.some(r => r.gemini_boosted || r.domain_method === "gemini_ai"),
+  };
 
   const output = {
     imo_number:      imoStr,
     companies:       results,
-    top_contacts:    allEmails.slice(0, 8),
-    top_phones:      allPhones.slice(0, 5),
+    top_contacts:    allEmails.slice(0, 10), // increased from 8
+    top_phones:      allPhones.slice(0, 6),  // increased from 5
     pipeline_ran_at: new Date().toISOString(),
     cached:          false,
-    gemini_used:     results.some(r => r.gemini_boosted || r.domain_method === "gemini_ai"),
+    gemini_used:     stats.gemini_used,
+    stats,             // NEW: rich stats in response
   };
 
   cacheSet(imoStr, output);
