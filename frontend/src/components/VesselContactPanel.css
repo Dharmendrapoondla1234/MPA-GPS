@@ -3,17 +3,6 @@
    --amber, --red, --text-1/2/3, --border, --font-display, --font-ui, --font-mono */
 
 /* ── Panel wrapper ────────────────────────────────────────────── */
-/* .vc-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--abyss, #020810);
-  border-left: 1px solid var(--border, rgba(0, 229, 255, 0.08));
-  overflow: hidden;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-} */
-
-/* ── Updated Panel wrapper with Hover Logic ─────────────────── */
 .vc-panel {
   display: flex;
   flex-direction: column;
@@ -22,45 +11,10 @@
   border-left: 1px solid var(--border, rgba(0, 229, 255, 0.08));
   overflow: hidden;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-
-  /* --- ADDED FOR AUTO-RESIZE --- */
-  width: 60px; /* Collapsed state: just enough for the sonar/icons */
-  min-width: 60px;
-  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1), 
-              box-shadow 0.3s ease;
-  z-index: 100;
 }
 
-/* ── Expansion State ────────────────────────────────────────── */
-.vc-panel:hover {
-  width: 400px; /* Adjust this to your desired expanded width */
-  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
-  border-left: 1px solid rgba(0, 229, 255, 0.3);
-}
-
-/* ── Content Visibility Management ──────────────────────────── */
-/* Hide text-heavy elements when collapsed to prevent layout jitter */
-.vc-panel:not(:hover) .vc-title,
-.vc-panel:not(:hover) .vc-count,
-.vc-panel:not(:hover) .vc-header-actions,
-.vc-panel:not(:hover) .vc-cards,
-.vc-panel:not(:hover) .vc-legend {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
-}
-
-/* Smooth fade-in for text when expanded */
-.vc-panel:hover .vc-title,
-.vc-panel:hover .vc-count,
-.vc-panel:hover .vc-header-actions,
-.vc-panel:hover .vc-cards,
-.vc-panel:hover .vc-legend {
-  opacity: 1;
-  transition: opacity 0.4s ease 0.1s; /* Delayed fade-in */
-}
 /* ── Header ───────────────────────────────────────────────────── */
-/* .vc-header {
+.vc-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -75,24 +29,6 @@
   display: flex;
   align-items: center;
   gap: 12px;
-} */
- .vc-header {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start; /* Changed from space-between */
-  padding: 13px 14px; /* Adjusted padding */
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.vc-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0; /* Ensures sonar doesn't shrink */
-}
-.vc-panel:hover {
-  transition-delay: 0.1s; /* Only opens if mouse lingers for 100ms */
 }
 .vc-header-actions {
   display: flex;
