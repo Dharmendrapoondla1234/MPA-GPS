@@ -9,6 +9,7 @@ import VesselContactPanel from "./VesselContactPanel";
 import { StarButton } from "./PreferredShipsGrid";
 import { WatchlistStar } from "./WatchlistPanel";
 import FuelEfficiencyPanel from "./FuelEfficiencyPanel";
+import CRMEmailComposer from "./CRMEmailComposer";
 import "./VesselDetailPanel.css";
 
 function bq(val) {
@@ -27,6 +28,7 @@ const TABS = [
   { id:"PREDICT",  icon:"🤖", label:"AI"       },
   { id:"FUEL",     icon:"⛽", label:"Fuel"     },
   { id:"CONTACTS", icon:"📞", label:"Contacts" },
+  { id:"CRM",      icon:"✉️",  label:"CRM"      },
 ];
 const HOUR_OPTIONS = [12,24,48,72];
 
@@ -583,6 +585,10 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
             vessel={vessel}
             portCode={vessel?.next_port_destination || vessel?.location_to}
           />
+        )}
+
+        {tab==="CRM" && (
+          <CRMEmailComposer vessel={vessel} />
         )}
       </div>
     </div>

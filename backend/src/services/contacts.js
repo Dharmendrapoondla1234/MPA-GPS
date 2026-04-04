@@ -1,274 +1,177 @@
-// backend/src/services/contacts.js — MPA Contacts v1
-// Retrieves vessel contact info from BigQuery with public-API enrichment fallback.
+// backend/src/services/contacts.js — MPA Contacts v6  (FIXED)
 //
-// FREE DATA SOURCE STRATEGY:
-//  1. BigQuery tables (d_vessel_company_map, d_shipping_companies, d_port_agents)
-//  2. Equasis (free registration) — owner/manager/operator via web scrape
-//  3. VesselFinder public page (company name fallback)
-//  4. ITU Ship Station List (MMSI → call sign → flag state contacts)
+// ROOT-CAUSE FIX: previous version queried d_vessel_company_map /
+// d_shipping_companies (dbt tables that don't exist), fell back to a
+// VesselFinder call that returns no company data, and showed nothing.
 //
-// No paid API keys required.  All external calls are cached aggressively.
+// NEW STRATEGY — reads tables that actually exist in the MPA dataset:
+//  1. MPA_Company_Contacts  – upserted by the intelligence pipeline
+//  2. MPA_Equasis_Data      – upserted by enricher after Equasis login
+// Falls through gracefully when BQ is unconfigured / tables are empty.
 "use strict";
 require("dotenv").config();
 const { BigQuery } = require("@google-cloud/bigquery");
 const logger = require("../utils/logger");
 
-const PROJECT = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
-const DATASET = process.env.BIGQUERY_DATASET    || "MPA";
-const BQ_LOCATION = process.env.BIGQUERY_LOCATION || "asia-southeast1";
+const PROJECT     = process.env.BIGQUERY_PROJECT_ID || "photons-377606";
+const DATASET     = process.env.BIGQUERY_DATASET    || "MPA";
+const BQ_LOCATION = process.env.BIGQUERY_LOCATION   || "asia-southeast1";
 
-// ── BigQuery client (reuse env pattern from bigquery.js) ─────────
 let bq;
-const _credsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-if (_credsJson && _credsJson.trim().startsWith("{")) {
-  try {
-    const creds = JSON.parse(_credsJson);
+try {
+  const _c = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  if (_c && _c.trim().startsWith("{")) {
+    const creds = JSON.parse(_c);
     bq = new BigQuery({ credentials: creds, projectId: creds.project_id || PROJECT, location: BQ_LOCATION });
-  } catch { bq = new BigQuery({ projectId: PROJECT, location: BQ_LOCATION }); }
-} else {
-  bq = new BigQuery({ projectId: PROJECT, location: BQ_LOCATION });
+  } else {
+    bq = new BigQuery({ projectId: PROJECT, location: BQ_LOCATION });
+  }
+} catch { bq = new BigQuery({ projectId: PROJECT, location: BQ_LOCATION }); }
+
+const T_CONTACTS    = `\`${PROJECT}.${DATASET}.MPA_Company_Contacts\``;
+const T_EQUASIS     = `\`${PROJECT}.${DATASET}.MPA_Equasis_Data\``;
+const T_PORT_AGENTS = `\`${PROJECT}.${DATASET}.MPA_Port_Agent_Contacts\``;
+
+const _cache = new Map();
+const TTL    = 30 * 60 * 1000;
+
+function cacheGet(k)    { const h = _cache.get(k); return (h && Date.now()-h.ts < TTL) ? h.v : null; }
+function cacheSet(k, v) { _cache.set(k, { v, ts: Date.now() }); return v; }
+function cacheInvalidate(imo) { for (const k of _cache.keys()) { if (k.includes(String(imo))) _cache.delete(k); } }
+
+async function bqQuery(sql, params = {}) {
+  try {
+    const opts = { query: sql, location: BQ_LOCATION };
+    if (Object.keys(params).length) opts.params = params;
+    const [rows] = await bq.query(opts);
+    return rows || [];
+  } catch (err) {
+    logger.debug(`[contacts] BQ: ${err.message?.slice(0, 100)}`);
+    return [];
+  }
 }
 
-// ── In-memory cache (contacts change rarely) ─────────────────────
-const contactCache = new Map();           // key → { data, ts }
-const CONTACT_TTL  = 30 * 60 * 1000;     // 30 minutes
-
-function fromContactCache(key) {
-  const hit = contactCache.get(key);
-  if (hit && Date.now() - hit.ts < CONTACT_TTL) return hit.data;
-  return null;
-}
-function toContactCache(key, data) {
-  contactCache.set(key, { data, ts: Date.now() });
-  return data;
-}
-
-// ── BigQuery query helper ─────────────────────────────────────────
-async function bqQuery(sql, params = []) {
-  const [rows] = await bq.query({ query: sql, params, location: BQ_LOCATION });
-  return rows;
+function shapeCompany(r, type) {
+  if (!r) return null;
+  return {
+    company_name:       r.company_name       || null,
+    company_type:       r.company_type       || type || "OWNER",
+    primary_email:      r.email              || null,
+    secondary_email:    r.email_secondary    || null,
+    phone_primary:      r.phone              || null,
+    phone_secondary:    r.phone_secondary    || null,
+    website:            r.website            || null,
+    registered_address: r.registered_address || null,
+    linkedin:           r.linkedin           || null,
+    data_source:        r.data_source        || "bigquery",
+    last_verified_at:   r.last_verified_at   || null,
+    confidence:         r.confidence         || null,
+  };
 }
 
-// ── TABLE REFERENCES ──────────────────────────────────────────────
-const T = {
-  COMPANY_MAP: `\`${PROJECT}.${DATASET}.d_vessel_company_map\``,
-  COMPANIES:   `\`${PROJECT}.${DATASET}.d_shipping_companies\``,
-  AGENTS:      `\`${PROJECT}.${DATASET}.d_port_agents\``,
-  VESSEL_MASTER: `\`${PROJECT}.${DATASET}.d_vessel_master\``,
-};
-
-// ── 1. Main: getVesselContacts ────────────────────────────────────
 async function getVesselContacts({ imo, mmsi, name }) {
-  const cacheKey = `vessel_contacts_${imo || mmsi || name}`;
-  const cached   = fromContactCache(cacheKey);
+  if (!imo && !mmsi && !name) return {};
+  const key    = `vc_${imo||mmsi||name}`;
+  const cached = cacheGet(key);
   if (cached) return cached;
 
-  // Build WHERE clause from available identifiers
-  const whereParts = [];
-  const params     = {};
-  if (imo)  { whereParts.push("m.imo_number  = @imo");  params.imo  = imo; }
-  if (mmsi) { whereParts.push("m.mmsi_number = @mmsi"); params.mmsi = mmsi; }
-  if (name && !imo && !mmsi) { whereParts.push("LOWER(m.vessel_name) = LOWER(@name)"); params.name = name; }
+  const imoStr = imo ? String(imo) : null;
+  let owner = null, operator = null, manager = null, ship_manager = null;
 
-  if (whereParts.length === 0) return {};
-
-  try {
-    const sql = `
-      SELECT
-        m.imo_number, m.mmsi_number, m.vessel_name,
-        m.owner_company_id, m.operator_company_id, m.manager_company_id,
-        m.direct_email, m.direct_phone,
-        m.data_source, m.last_verified_at,
-        -- Owner
-        oc.company_name    AS owner_name,
-        oc.company_type    AS owner_type,
-        oc.primary_email   AS owner_email,
-        oc.phone_primary   AS owner_phone,
-        oc.website         AS owner_website,
-        oc.country_code    AS owner_country,
-        oc.registered_address AS owner_address,
-        oc.data_source     AS owner_source,
-        -- Operator
-        op.company_name    AS operator_name,
-        op.company_type    AS operator_type,
-        op.primary_email   AS operator_email,
-        op.phone_primary   AS operator_phone,
-        op.website         AS operator_website,
-        op.country_code    AS operator_country,
-        -- Manager
-        mg.company_name    AS manager_name,
-        mg.primary_email   AS manager_email,
-        mg.phone_primary   AS manager_phone
-      FROM ${T.COMPANY_MAP} m
-      LEFT JOIN ${T.COMPANIES} oc ON oc.company_id = m.owner_company_id
-      LEFT JOIN ${T.COMPANIES} op ON op.company_id = m.operator_company_id
-      LEFT JOIN ${T.COMPANIES} mg ON mg.company_id = m.manager_company_id
-      WHERE ${whereParts.join(" OR ")}
-      LIMIT 1
-    `;
-
-    const rows = await bqQuery(sql, params);
-    if (rows.length === 0) {
-      // No BQ record — fall back to public enrichment
-      const enriched = await enrichFromPublicSources({ imo, mmsi, name });
-      return toContactCache(cacheKey, enriched || {});
+  // 1. MPA_Company_Contacts (populated by the intelligence pipeline)
+  if (imoStr) {
+    const rows = await bqQuery(
+      `SELECT * FROM ${T_CONTACTS} WHERE imo_number = @imo ORDER BY upserted_at DESC LIMIT 30`,
+      { imo: imoStr }
+    );
+    for (const r of rows) {
+      const t = (r.company_type || "").toUpperCase();
+      if (!owner        && (t==="OWNER"||t==="REGISTERED_OWNER")) owner        = shapeCompany(r,"OWNER");
+      if (!operator     && t==="OPERATOR")                         operator     = shapeCompany(r,"OPERATOR");
+      if (!manager      && (t==="ISM_MANAGER"||t==="MANAGER"))     manager      = shapeCompany(r,"MANAGER");
+      if (!ship_manager && t==="SHIP_MANAGER")                     ship_manager = shapeCompany(r,"SHIP_MANAGER");
     }
-
-    const r = rows[0];
-    const result = {
-      vessel_name:  r.vessel_name,
-      owner: r.owner_name ? {
-        company_id:    r.owner_company_id,
-        company_name:  r.owner_name,
-        company_type:  r.owner_type || "OWNER",
-        primary_email: r.owner_email,
-        phone_primary: r.owner_phone,
-        website:       r.owner_website,
-        country_code:  r.owner_country,
-        registered_address: r.owner_address,
-        data_source:   r.owner_source,
-        last_verified_at: r.last_verified_at,
-      } : null,
-      operator: r.operator_name ? {
-        company_id:    r.operator_company_id,
-        company_name:  r.operator_name,
-        company_type:  "OPERATOR",
-        primary_email: r.operator_email,
-        phone_primary: r.operator_phone,
-        website:       r.operator_website,
-        country_code:  r.operator_country,
-        data_source:   r.data_source,
-      } : null,
-      manager: r.manager_name ? {
-        company_id:    r.manager_company_id,
-        company_name:  r.manager_name,
-        company_type:  "MANAGER",
-        primary_email: r.manager_email,
-        phone_primary: r.manager_phone,
-      } : null,
-      port_agents:  [],           // fetched separately in getPortAgents()
-      enrichment_source: r.data_source || "bigquery",
-      enrichment_confidence: 0.9,
-      contact_enriched_at: r.last_verified_at,
-    };
-
-    return toContactCache(cacheKey, result);
-  } catch (err) {
-    // Table may not exist yet — fall back gracefully
-    logger.warn("[contacts] BQ lookup failed, trying public sources:", err.message.slice(0, 80));
-    const enriched = await enrichFromPublicSources({ imo, mmsi, name });
-    return toContactCache(cacheKey, enriched || {});
   }
+
+  // 2. MPA_Equasis_Data fallback (company names without email/phone)
+  if (!owner && imoStr) {
+    const rows = await bqQuery(
+      `SELECT * FROM ${T_EQUASIS} WHERE imo_number = @imo ORDER BY fetched_at DESC LIMIT 1`,
+      { imo: imoStr }
+    );
+    if (rows.length) {
+      const r = rows[0];
+      if (r.owner_name || r.registered_owner) {
+        owner = {
+          company_name:    r.registered_owner || r.owner_name || null,
+          company_type:    "OWNER",
+          primary_email:   null, phone_primary: null,
+          website: null, registered_address: null,
+          data_source: "equasis", last_verified_at: r.fetched_at || null, confidence: 0.85,
+        };
+      }
+      if (!operator    && r.operator_name) operator     = { company_name: r.operator_name, company_type:"OPERATOR",     data_source:"equasis" };
+      if (!manager     && r.ism_manager)   manager      = { company_name: r.ism_manager,   company_type:"MANAGER",      data_source:"equasis" };
+      if (!ship_manager&& r.ship_manager)  ship_manager = { company_name: r.ship_manager,  company_type:"SHIP_MANAGER", data_source:"equasis" };
+    }
+  }
+
+  const result = {
+    vessel_name: name || null,
+    owner, operator, manager, ship_manager,
+    port_agents: [],
+    enrichment_source:     owner ? (owner.data_source || "bigquery") : "none",
+    enrichment_confidence: owner?.confidence || null,
+    contact_enriched_at:   owner?.last_verified_at || null,
+  };
+  return cacheSet(key, result);
 }
 
-// ── 2. Port Agents lookup ─────────────────────────────────────────
 async function getPortAgents({ portCode, vesselType = "" }) {
-  const cacheKey = `port_agents_${portCode}_${vesselType}`;
-  const cached   = fromContactCache(cacheKey);
-  if (cached) return cached;
+  if (!portCode) return [];
+  const key    = `pa_${portCode}_${vesselType}`;
+  const cached = cacheGet(key);
+  if (cached !== null) return cached;
 
-  try {
-    const sql = `
-      SELECT *
-      FROM ${T.AGENTS}
-      WHERE port_code = @portCode
-        AND is_active = TRUE
-        AND (vessel_type_served = 'ALL'
-             OR vessel_type_served = @vesselType
-             OR @vesselType = '')
-      ORDER BY vessel_type_served DESC, agent_name ASC
-      LIMIT 20
-    `;
-    const rows = await bqQuery(sql, { portCode, vesselType });
-    return toContactCache(cacheKey, rows);
-  } catch (err) {
-    logger.warn("[contacts] getPortAgents BQ error:", err.message.slice(0, 80));
-    return toContactCache(cacheKey, []);
-  }
+  const rows = await bqQuery(
+    `SELECT * FROM ${T_PORT_AGENTS}
+     WHERE port_code = @portCode
+       AND (@vesselType = '' OR vessel_type_served = 'ALL' OR vessel_type_served = @vesselType)
+     ORDER BY confidence DESC LIMIT 20`,
+    { portCode: portCode.toUpperCase(), vesselType: vesselType || "" }
+  );
+  return cacheSet(key, rows);
 }
 
-// ── 3. Upsert contact data (admin/manual) ────────────────────────
 async function upsertContactData(imo, body) {
-  // Write to d_vessel_company_map and linked company tables
-  // This is a simplified merge — production should use BQ MERGE or streaming insert
-  const now = new Date().toISOString();
-  const dataset = bq.dataset(DATASET);
+  if (!imo) return;
+  cacheInvalidate(imo);
+  const now    = new Date().toISOString();
+  const imoStr = String(imo);
+  const rows   = [];
 
-  // Upsert company_map row
-  if (body.owner_email || body.owner_phone || body.owner_company_name) {
-    const companyId = `manual_${imo}_owner`;
-    await dataset.table("d_shipping_companies").insert([{
-      company_id:    companyId,
-      company_name:  body.owner_company_name || null,
-      company_type:  "OWNER",
-      primary_email: body.owner_email        || null,
-      phone_primary: body.owner_phone        || null,
-      website:       body.owner_website      || null,
-      data_source:   "manual",
-      last_verified_at: now,
-      created_at:    now,
-      updated_at:    now,
-    }]);
+  const push = (type, name, email, phone, website, address) => {
+    if (!name && !email) return;
+    rows.push({
+      imo_number: imoStr, company_name: name||null, company_type: type,
+      email: email||null, email_secondary: null, phone: phone||null,
+      phone_secondary: null, website: website||null, registered_address: address||null,
+      linkedin: null, confidence: 0.95, data_source: "manual",
+      last_verified_at: now, upserted_at: now,
+    });
+  };
 
-    await dataset.table("d_vessel_company_map").insert([{
-      imo_number:       imo,
-      owner_company_id: companyId,
-      data_source:      "manual",
-      last_verified_at: now,
-      created_at:       now,
-      updated_at:       now,
-    }]);
-  }
+  push("OWNER",        body.owner_company_name,        body.owner_email,    body.owner_phone,    body.owner_website,    body.owner_address);
+  push("OPERATOR",     body.operator_company_name,     body.operator_email, body.operator_phone, body.operator_website, null);
+  push("ISM_MANAGER",  body.manager_company_name,      body.manager_email,  body.manager_phone,  null,                  null);
+  push("SHIP_MANAGER", body.ship_manager_company_name, null,                null,                null,                  null);
 
-  // Invalidate cache
-  for (const [k] of contactCache) {
-    if (k.includes(String(imo))) contactCache.delete(k);
-  }
-
-  logger.info(`[contacts] upserted contacts for IMO ${imo}`);
-}
-
-// ── 4. Public source enrichment (free, no API key) ────────────────
-// Uses open endpoints — Equasis requires free account login (cookie-based).
-// For production: set EQUASIS_SESSION_COOKIE in env after manual login.
-async function enrichFromPublicSources({ imo }) {
-  if (!imo) return null;
-  try {
-    // Strategy: VesselFinder open JSON endpoint (no auth, rate-limited at ~1 req/s)
-    const url = `https://www.vesselfinder.com/api/pub/vesselDetails?mmsi=&imo=${imo}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-
-    const resp = await fetch(url, {
-      headers: { "User-Agent": "MPA-GPS/1.0 (+contact research)" },
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timeout));
-
-    if (!resp.ok) return null;
-    const json = await resp.json();
-
-    // VesselFinder returns AIS + static data; extract company name if present
-    const companyName = json?.AIS?.DESTINATION || json?.vessel?.company || null;
-    if (!companyName) return null;
-
-    return {
-      owner: {
-        company_name:  companyName,
-        company_type:  "OWNER",
-        primary_email: null,
-        phone_primary: null,
-        data_source:   "vesselfinder_public",
-      },
-      operator:      null,
-      manager:       null,
-      port_agents:   [],
-      enrichment_source:     "public_api",
-      enrichment_confidence: 0.4,   // low confidence — public scrape
-      contact_enriched_at:   new Date().toISOString(),
-    };
-  } catch (err) {
-    logger.warn("[contacts] public enrichment failed:", err.message?.slice(0, 60));
-    return null;
+  if (rows.length) {
+    try {
+      await bq.query({ query: `DELETE FROM ${T_CONTACTS} WHERE imo_number='${imoStr}' AND data_source='manual'`, location: BQ_LOCATION });
+      await bq.dataset(DATASET).table("MPA_Company_Contacts").insert(rows);
+      logger.info(`[contacts] upserted ${rows.length} rows IMO ${imoStr}`);
+    } catch (err) { logger.warn("[contacts] upsert error:", err.message?.slice(0,100)); }
   }
 }
 
