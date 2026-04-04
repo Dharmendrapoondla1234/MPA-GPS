@@ -9,7 +9,6 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [fuelAnalysis, setFuelAnalysis] = useState(null);
   const [loadingFuel, setLoadingFuel] = useState(false);
-  const [selectedMetric, setSelectedMetric] = useState("speed");
   const [activeSection, setActiveSection] = useState("insights");
 
   const loadFleetInsights = useCallback(async () => {
@@ -54,7 +53,7 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
       loadFleetInsights();
       loadFuelAnalysis();
     }
-  }, [isOpen, vessels?.length]);
+  }, [isOpen, vessels?.length, loadFleetInsights, loadFuelAnalysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Compute local analytics
   const analytics = computeAnalytics(vessels || []);
