@@ -12,6 +12,8 @@ import { getCurrentUser, logoutUser } from "./services/api";
 import PreferredShipsGrid, { loadPreferredFromAPI, usePreferred } from "./components/PreferredShipsGrid";
 import WatchlistPanel, { loadWatchlistFromAPI, useWatchlist } from "./components/WatchlistPanel";
 import ProfilePanel from "./components/ProfilePanel";
+import AIChatPanel from "./components/AIChatPanel";
+import AIFleetIntelligence from "./components/AIFleetIntelligence";
 import "./styles/App.css";
 
 const VesselComparison           = lazy(() => import("./components/Vesselcomparison"));
@@ -111,6 +113,8 @@ export default function App() {
   const [watchlistOpen,   setWatchlistOpen]    = useState(false);
   const [watchlistMapFilter, setWatchlistMapFilter] = useState(false);
   const [profileOpen,     setProfileOpen]      = useState(false);
+  const [aiChatOpen,      setAiChatOpen]       = useState(false);
+  const [aiFleetOpen,     setAiFleetOpen]      = useState(false);
   const mapRef = useRef(null);
 
   // ── Right-panel drag-to-resize ────────────────────────────────
@@ -318,6 +322,8 @@ export default function App() {
         prefsOpen={prefsOpen}          onTogglePrefs={openPrefs}
         agentIntelOpen={agentIntelOpen} onToggleAgentIntel={openAgentIntel}
         contactIntelOpen={contactIntelOpen} onToggleContactIntel={openContactIntel}
+        aiChatOpen={aiChatOpen} onToggleAiChat={() => setAiChatOpen(p => !p)}
+        aiFleetOpen={aiFleetOpen} onToggleAiFleet={() => setAiFleetOpen(p => !p)}
         onOpenProfile={() => setProfileOpen(true)}
       />
 
@@ -487,6 +493,35 @@ export default function App() {
           />
         )}
       </Suspense>
+
+      {/* AI Chat Panel — slide-in drawer */}
+      <div className={"app-ai-chat-drawer " + (aiChatOpen ? "open" : "")}>
+        <AIChatPanel
+          selectedVessel={selectedVessel}
+          vessels={vessels}
+          stats={stats}
+          isOpen={aiChatOpen}
+        />
+      </div>
+      {aiChatOpen && (
+        <div className="app-mobile-backdrop" style={{ zIndex: 55 }} onClick={() => setAiChatOpen(false)} />
+      )}
+
+      {/* AI Fleet Intelligence — modal */}
+      <AIFleetIntelligence
+        vessels={vessels}
+        stats={stats}
+        isOpen={aiFleetOpen}
+        onClose={() => setAiFleetOpen(false)}
+      />
+
+      {/* Floating AI buttons */}
+      {!aiChatOpen && (
+        <div className="ai-fab-group">
+          <button className="ai-fab ai-fab-fleet" onClick={() => setAiFleetOpen(true)} title="AI Fleet Intelligence">⚡</button>
+          <button className="ai-fab ai-fab-chat" onClick={() => setAiChatOpen(true)} title="AI Maritime Assistant">✦</button>
+        </div>
+      )}
 
     </div>
   );

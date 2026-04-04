@@ -1,6 +1,6 @@
 // src/services/api.js — MPA Advanced v7
 // Single source of truth for the API base URL.
-export const BASE_URL = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
+export const BASE_URL = process.env.REACT_APP_API_URL || "https://vessel-backend.onrender.com/api";
 const BASE = BASE_URL;
 
 // ── REQUEST DEDUPLICATION + BROWSER CACHE ────────────────────────
@@ -403,5 +403,69 @@ export async function fetchVesselFuelEfficiency(imo) {
 }
 
 export async function fetchFleetFuelEfficiency(limit = 200) {
+  return call(`/fuel/fleet?limit=${limit}`);
+}
+// ── AI / LLM ENDPOINTS ───────────────────────────────────────────────────────
+
+export async function aiChat(message, history = [], vesselData = null, fleetStats = null) {
+  return call("/ai/chat", {
+    method: "POST",
+    body: { message, history, vesselData, fleetStats },
+  });
+}
+
+export async function aiSummarizeDocument(text, type = "cargo_report") {
+  return call("/ai/summarize", { method: "POST", body: { text, type } });
+}
+
+export async function aiDraftEmail(params) {
+  return call("/ai/draft-email", { method: "POST", body: params });
+}
+
+export async function aiAnalyzeFuel(vesselData, routeData = null) {
+  return call("/ai/analyze-fuel", { method: "POST", body: { vesselData, routeData } });
+}
+
+export async function aiPredictArrival(vesselData, destination, weatherData = null) {
+  return call("/ai/predict-arrival", { method: "POST", body: { vesselData, destination, weatherData } });
+}
+
+export async function aiFleetInsights(vessels, stats) {
+  return call("/ai/fleet-insights", { method: "POST", body: { vessels, stats } });
+}
+
+export async function aiStatus() {
+  return call("/ai/status");
+}
+
+// ── GEMINI ENRICHMENT ENDPOINTS ───────────────────────────────────────────────
+
+export async function geminiEnrich(imo, owner = null, manager = null, forceRefresh = false) {
+  return call("/gemini/enrich", { method: "POST", body: { imo, owner, manager, forceRefresh } });
+}
+
+export async function geminiCompany(companyName, domain = null) {
+  return call("/gemini/company", { method: "POST", body: { company_name: companyName, domain } });
+}
+
+export async function geminiPortAgents(portName, vesselType = "", portCode = "") {
+  return call(`/gemini/port-agents?port=${encodeURIComponent(portName)}&vesselType=${encodeURIComponent(vesselType)}&portCode=${encodeURIComponent(portCode)}`);
+}
+
+export async function geminiVessel(imo) {
+  return call(`/gemini/vessel/${imo}`);
+}
+
+export async function geminiStatus() {
+  return call("/gemini/status");
+}
+
+// ── FUEL ENDPOINTS ────────────────────────────────────────────────────────────
+
+export async function getFuelVessel(imo) {
+  return call(`/fuel/vessel/${imo}`);
+}
+
+export async function getFuelFleet(limit = 200) {
   return call(`/fuel/fleet?limit=${limit}`);
 }

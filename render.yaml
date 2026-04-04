@@ -1,4 +1,5 @@
 services:
+  # ── Backend API (Node.js) ─────────────────────────────────────────────────
   - type: web
     name: vessel-backend
     runtime: node
@@ -9,3 +10,50 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: 10000
+
+      # ── Google / BigQuery ───────────────────────────────────────────────────
+      - key: BIGQUERY_PROJECT_ID
+        sync: false          # Set in Render dashboard: your GCP project ID
+      - key: BIGQUERY_DATASET
+        value: MPA
+      - key: BIGQUERY_LOCATION
+        value: asia-southeast1
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false          # Paste your full service-account JSON here
+
+      # ── AI / LLM Keys ──────────────────────────────────────────────────────
+      - key: GEMINI_API_KEY
+        sync: false          # https://aistudio.google.com/apikey (free tier)
+      - key: ANTHROPIC_API_KEY
+        sync: false          # https://console.anthropic.com (Claude fallback)
+
+      # ── Maps ───────────────────────────────────────────────────────────────
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false          # For frontend map tiles
+
+      # ── Optional: Equasis credentials (vessel contact enrichment) ──────────
+      - key: EQUASIS_USER
+        sync: false
+      - key: EQUASIS_PASS
+        sync: false
+
+      # ── Optional: Google CSE for enhanced web search ───────────────────────
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
+
+  # ── Frontend (Static React build) ────────────────────────────────────────
+  - type: web
+    name: vessel-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://vessel-backend.onrender.com/api
+      - key: REACT_APP_GOOGLE_MAPS_KEY
+        sync: false          # Same Maps API key as backend

@@ -16,6 +16,8 @@ export default function TopBar({
   prefsOpen,   onTogglePrefs,
   agentIntelOpen, onToggleAgentIntel,
   contactIntelOpen, onToggleContactIntel,
+  aiChatOpen, onToggleAiChat,
+  aiFleetOpen, onToggleAiFleet,
   onOpenProfile,
 }) {
   const countdown = useCountdown(nextRefresh);
@@ -239,6 +241,28 @@ export default function TopBar({
                 <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.29a16 16 0 0 0 6.29 6.29l1.17-1.17a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
               </svg>
               <span className="tb-btn-label">CONTACTS</span>
+            </button>
+          </div>
+
+          {/* AI Buttons — Maritime AI Chat + Fleet Intelligence */}
+          <div className="tb-intel-group">
+            <button
+              className={"tb-btn tb-btn-ai" + (aiFleetOpen ? " active" : "")}
+              onClick={onToggleAiFleet}
+              title="AI Fleet Intelligence — ML predictions, fuel analysis"
+              style={{ color: aiFleetOpen ? "var(--green,#00ff9d)" : undefined, borderColor: aiFleetOpen ? "rgba(0,255,157,0.4)" : undefined }}
+            >
+              <span style={{ fontSize: 14 }}>⚡</span>
+              <span className="tb-btn-label">AI FLEET</span>
+            </button>
+            <button
+              className={"tb-btn tb-btn-ai" + (aiChatOpen ? " active" : "")}
+              onClick={onToggleAiChat}
+              title="AI Maritime Assistant — Gemini + Claude"
+              style={{ color: aiChatOpen ? "var(--cyan,#00e5ff)" : undefined, borderColor: aiChatOpen ? "rgba(0,229,255,0.4)" : undefined }}
+            >
+              <span style={{ fontSize: 14 }}>✦</span>
+              <span className="tb-btn-label">AI CHAT</span>
             </button>
           </div>
 

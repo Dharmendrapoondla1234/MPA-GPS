@@ -45,17 +45,6 @@ html, body, #root {
   position: relative;
   min-width: 0;
   overflow: hidden;
-  transition: flex 0.35s cubic-bezier(0.4,0,0.2,1),
-              opacity 0.28s ease,
-              min-width 0.35s cubic-bezier(0.4,0,0.2,1);
-}
-
-/* When vessel panel is open, map collapses away */
-.app-map-area.vessel-selected {
-  flex: 0 0 0px;
-  min-width: 0 !important;
-  opacity: 0;
-  pointer-events: none;
 }
 
 /* ── RIGHT PANEL (port activity + vessel detail) ──────── */
@@ -64,19 +53,16 @@ html, body, #root {
   min-width: 0;
   height: 100%;
   overflow: hidden;
-  transition: width 0.35s cubic-bezier(0.4,0,0.2,1),
-              min-width 0.35s cubic-bezier(0.4,0,0.2,1),
-              flex 0.35s cubic-bezier(0.4,0,0.2,1);
+  transition: width 0.28s cubic-bezier(0.4,0,0.2,1),
+              min-width 0.28s cubic-bezier(0.4,0,0.2,1);
   background: #07111e;
   border-left: 1px solid rgba(0,229,255,0.10);
   flex-shrink: 0;
   z-index: 20;
 }
 .app-right-panel.open {
-  /* When open, take all remaining space */
-  flex: 1;
-  width: auto;
-  min-width: 340px;
+  width: 300px;
+  min-width: 300px;
 }
 
 /* Detail panel sits on top of port panel when both try to open */
@@ -142,7 +128,7 @@ html, body, #root {
 ══════════════════════════════════════════════════════ */
 @media (max-width: 1100px) {
   .app-detail-panel.open { width: 300px; }
-  .app-right-panel.open  { min-width: 300px; }
+  .app-right-panel.open  { width: 270px; min-width: 270px; }
 }
 
 /* ══════════════════════════════════════════════════════
@@ -319,4 +305,75 @@ html, body, #root {
 /* On mobile the dock scrolls horizontally for the comparison cards */
 @media (max-width: 768px) {
   .app-bottom-dock.open { max-height: 400px; }
+}
+/* ── AI Chat Drawer ──────────────────────────────────────────────── */
+.app-ai-chat-drawer {
+  position: fixed;
+  top: var(--topbar-h, 62px);
+  right: 0;
+  bottom: 0;
+  width: 360px;
+  max-width: 92vw;
+  background: var(--deep, #060e1c);
+  border-left: 1px solid rgba(0, 229, 255, 0.2);
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 40px rgba(0, 229, 255, 0.05);
+}
+.app-ai-chat-drawer.open {
+  transform: translateX(0);
+}
+
+/* ── Floating AI FABs ─────────────────────────────────────────────── */
+.ai-fab-group {
+  position: fixed;
+  bottom: 24px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 50;
+}
+.ai-fab {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  font-size: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+.ai-fab-chat {
+  background: rgba(0, 229, 255, 0.15);
+  color: var(--cyan, #00e5ff);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+}
+.ai-fab-chat:hover {
+  background: rgba(0, 229, 255, 0.28);
+  box-shadow: 0 0 30px rgba(0, 229, 255, 0.4);
+  transform: scale(1.08);
+}
+.ai-fab-fleet {
+  background: rgba(0, 255, 157, 0.1);
+  color: var(--green, #00ff9d);
+  border-color: rgba(0, 255, 157, 0.3);
+  box-shadow: 0 0 20px rgba(0, 255, 157, 0.15);
+}
+.ai-fab-fleet:hover {
+  background: rgba(0, 255, 157, 0.22);
+  box-shadow: 0 0 30px rgba(0, 255, 157, 0.35);
+  transform: scale(1.08);
+}
+
+@media (max-width: 768px) {
+  .app-ai-chat-drawer { width: 100vw; max-width: 100vw; }
+  .ai-fab-group { bottom: 16px; right: 14px; }
+  .ai-fab { width: 44px; height: 44px; font-size: 18px; }
 }
