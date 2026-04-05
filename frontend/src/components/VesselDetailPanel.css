@@ -70,6 +70,20 @@
 }
 .dp-close:hover { background:rgba(255,60,80,.12); color:#ff5577; border-color:rgba(255,60,80,.25); }
 
+/* CRM launch button — in vessel header */
+.dp-crm-btn {
+  height:28px; padding:0 9px;
+  background:rgba(0,229,255,0.09); border:1px solid rgba(0,229,255,0.26);
+  border-radius:6px; color:#00e5ff;
+  font-family:'Rajdhani',sans-serif; font-size:11px; font-weight:700; letter-spacing:.5px;
+  cursor:pointer; display:flex; align-items:center; gap:4px;
+  flex-shrink:0; white-space:nowrap; transition:all .16s;
+}
+.dp-crm-btn:hover {
+  background:rgba(0,229,255,0.17); border-color:#00e5ff;
+  box-shadow:0 0 12px rgba(0,229,255,0.22);
+}
+
 /* ── Status strip ── */
 .dp-status-strip {
   display:flex; align-items:center; justify-content:space-between;

@@ -47,6 +47,38 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* ── LEFT PANEL (vessel list) ─────────────────────────── */
+.app-left-panel {
+  width: 320px;
+  min-width: 280px;
+  height: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.28s cubic-bezier(0.4,0,0.2,1),
+              min-width 0.28s cubic-bezier(0.4,0,0.2,1);
+  background: #07111e;
+  border-right: 1px solid rgba(0,229,255,0.08);
+  z-index: 10;
+}
+.app-left-panel.closed {
+  width: 0;
+  min-width: 0;
+}
+
+/* ── Drag-to-resize handle ────────────────────────────── */
+.app-panel-resize-handle {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 5px;
+  cursor: ew-resize;
+  z-index: 25;
+  background: transparent;
+  transition: background 0.18s;
+}
+.app-panel-resize-handle:hover {
+  background: rgba(0,229,255,0.15);
+}
+
 /* ── RIGHT PANEL (port activity + vessel detail) ──────── */
 .app-right-panel {
   width: 0;
@@ -369,6 +401,18 @@ html, body, #root {
 .ai-fab-fleet:hover {
   background: rgba(0, 255, 157, 0.22);
   box-shadow: 0 0 30px rgba(0, 255, 157, 0.35);
+  transform: scale(1.08);
+}
+.ai-fab-agent {
+  background: rgba(255, 170, 0, 0.1);
+  color: #ffaa00;
+  border-color: rgba(255, 170, 0, 0.3);
+  box-shadow: 0 0 20px rgba(255, 170, 0, 0.15);
+  font-size: 22px;
+}
+.ai-fab-agent:hover {
+  background: rgba(255, 170, 0, 0.22);
+  box-shadow: 0 0 30px rgba(255, 170, 0, 0.35);
   transform: scale(1.08);
 }
 

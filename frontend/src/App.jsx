@@ -14,6 +14,8 @@ import WatchlistPanel, { loadWatchlistFromAPI, useWatchlist } from "./components
 import ProfilePanel from "./components/ProfilePanel";
 import AIChatPanel from "./components/AIChatPanel";
 import AIFleetIntelligence from "./components/AIFleetIntelligence";
+import AgentPanel from "./components/AgentPanel";
+import CRMPanel from "./components/CRMPanel";
 import "./styles/App.css";
 
 const VesselComparison           = lazy(() => import("./components/Vesselcomparison"));
@@ -115,6 +117,8 @@ export default function App() {
   const [profileOpen,     setProfileOpen]      = useState(false);
   const [aiChatOpen,      setAiChatOpen]       = useState(false);
   const [aiFleetOpen,     setAiFleetOpen]      = useState(false);
+  const [agentPanelOpen,  setAgentPanelOpen]   = useState(false);
+  const [crmOpen,         setCrmOpen]          = useState(false);
   const mapRef = useRef(null);
 
   // ── Right-panel drag-to-resize ────────────────────────────────
@@ -223,7 +227,9 @@ export default function App() {
   // ── All handlers stable (useCallback with no changing deps) ──
   const handleSelectVessel = useCallback((vessel) => {
     setSelectedVessel(vessel); setTrailData(null); setPredictRoute(null);
-    if (IS_MOBILE()) setPanelOpen(false);
+    // Always close the left (vessel list) panel so the detail panel gets clear focus.
+    // Previously this only ran on IS_MOBILE(), leaving the list open on desktop.
+    setPanelOpen(false);
     setTimeout(() => {
       const live   = vesselsRef.current.find(v => v.imo_number === vessel?.imo_number);
       const target = (live?.latitude_degrees && live?.longitude_degrees) ? live : vessel;
@@ -234,6 +240,7 @@ export default function App() {
 
   const handleCloseDetail    = useCallback(() => {
     setSelectedVessel(null); setTrailData(null); setPredictRoute(null);
+    setCrmOpen(false);
     setTimeout(() => { mapRef.current?.triggerResize?.(); }, 350);
   }, []);
 
@@ -413,6 +420,7 @@ export default function App() {
           <MemoVesselDetailPanel
             vessel={selectedVessel}    onClose={handleCloseDetail}
             onShowTrail={setTrailData} onShowPredictRoute={setPredictRoute}
+            onOpenCRM={() => setCrmOpen(true)}
           />
         </div>
 
@@ -518,9 +526,27 @@ export default function App() {
       {/* Floating AI buttons */}
       {!aiChatOpen && (
         <div className="ai-fab-group">
+          <button className="ai-fab ai-fab-agent" onClick={() => setAgentPanelOpen(true)} title="Agentic AI Workspace">⬡</button>
           <button className="ai-fab ai-fab-fleet" onClick={() => setAiFleetOpen(true)} title="AI Fleet Intelligence">⚡</button>
           <button className="ai-fab ai-fab-chat" onClick={() => setAiChatOpen(true)} title="AI Maritime Assistant">✦</button>
         </div>
+      )}
+
+      {/* Agentic AI Workspace — multi-step AI agents */}
+      <AgentPanel
+        vessel={selectedVessel}
+        vessels={vessels}
+        stats={stats}
+        isOpen={agentPanelOpen}
+        onClose={() => setAgentPanelOpen(false)}
+      />
+
+      {/* CRM Intelligence Panel — full-screen overlay, launched from vessel detail header */}
+      {crmOpen && (
+        <CRMPanel
+          vessel={selectedVessel}
+          onClose={() => setCrmOpen(false)}
+        />
       )}
 
     </div>

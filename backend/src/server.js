@@ -21,6 +21,7 @@ const fuelRoutes        = require("./routes/fuel");
 const aiContactRoutes   = require("./routes/ai_contact");
 const geminiRoutes      = require("./routes/gemini_contact");
 const aiChatRoutes      = require("./routes/ai_chat");
+const aiAgentRoutes     = require("./routes/ai_agents");
 const logger            = require("./utils/logger");
 const { warmCache, bigquery, BQ_LOCATION, T } = require("./services/bigquery");
 const maritimeRouter    = require("./services/maritimeRouter");
@@ -54,7 +55,8 @@ app.use("/api/watchlist",    watchlistRoutes);
 app.use("/api/fuel",         fuelRoutes);
 app.use("/api/ai-contact",   aiContactRoutes);
 app.use("/api/gemini",       geminiRoutes);     // Gemini AI-powered enrichment
-app.use("/api/ai",          aiChatRoutes);     // Unified AI chat + LLM features (chat, summarize, email, fuel)
+app.use("/api/ai",          aiChatRoutes);     // Unified AI chat + LLM features
+app.use("/api/agents",     aiAgentRoutes);    // Agentic AI — multi-step agents
 
 // Debug endpoint
 app.get("/debug/enrich/:imo", async (req, res) => {

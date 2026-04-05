@@ -30,7 +30,7 @@ const TABS = [
 ];
 const HOUR_OPTIONS = [12,24,48,72];
 
-export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShowPredictRoute }) {
+export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShowPredictRoute, onOpenCRM }) {
   const [tab,         setTab]          = useState("VESSEL");
   const [hours,       setHours]        = useState(24);
   const [trailOn,     setTrailOn]      = useState(false);
@@ -181,6 +181,15 @@ export default function VesselDetailPanel({ vessel, onClose, onShowTrail, onShow
         <div className="dp-head-actions">
           <StarButton vessel={vessel} className="dp-star-btn" />
           <WatchlistStar vessel={vessel} className="dp-star-btn" />
+          {onOpenCRM && (
+            <button
+              className="dp-crm-btn"
+              onClick={onOpenCRM}
+              title="Open CRM — draft personalised emails to vessel contacts"
+            >
+              ✉ CRM
+            </button>
+          )}
           <button className="dp-close" onClick={onClose}>✕</button>
         </div>
       </div>
