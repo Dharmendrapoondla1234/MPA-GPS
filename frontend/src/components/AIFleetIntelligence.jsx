@@ -1,19 +1,24 @@
-// src/components/AIFleetIntelligence.jsx — ML Prediction + Fleet Analytics v1
-// Powered by Gemini AI + scikit-learn-style predictions
+// src/components/AIFleetIntelligence.jsx — ML Prediction + Fleet Analytics v2
+// Powered by Gemini AI + local analytics fallback
 import React, { useState, useEffect, useCallback } from "react";
 import { BASE_URL } from "../services/api";
 import "./AIFleetIntelligence.css";
 
 export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose }) {
-  const [insights, setInsights] = useState(null);
+  const [insights, setInsights]           = useState(null);
+  const [insightsSource, setInsightsSource] = useState(null); // "ai" | "local"
   const [loadingInsights, setLoadingInsights] = useState(false);
-  const [fuelAnalysis, setFuelAnalysis] = useState(null);
-  const [loadingFuel, setLoadingFuel] = useState(false);
+  const [fuelAnalysis, setFuelAnalysis]   = useState(null);
+  const [fuelSource, setFuelSource]       = useState(null);
+  const [loadingFuel, setLoadingFuel]     = useState(false);
   const [activeSection, setActiveSection] = useState("insights");
 
   const loadFleetInsights = useCallback(async () => {
     if (!vessels?.length) return;
     setLoadingInsights(true);
+    // Always show local insights immediately so UI is never blank
+    setInsights(generateLocalInsights(vessels, stats));
+    setInsightsSource("local");
     try {
       const res = await fetch(`${BASE_URL}/ai/fleet-insights`, {
         method: "POST",
@@ -22,9 +27,13 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
         signal: AbortSignal.timeout(30000),
       });
       const data = await res.json();
-      setInsights(data.insights || generateLocalInsights(vessels, stats));
+      if (data.insights) {
+        setInsights(data.insights);
+        setInsightsSource("ai");
+      }
+      // If data.insights is null (AI failed server-side), keep local fallback
     } catch {
-      setInsights(generateLocalInsights(vessels, stats));
+      // Keep local fallback already set above
     }
     setLoadingInsights(false);
   }, [vessels, stats]);
@@ -32,6 +41,9 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
   const loadFuelAnalysis = useCallback(async () => {
     if (!vessels?.length) return;
     setLoadingFuel(true);
+    // Show local analysis immediately
+    setFuelAnalysis(generateLocalFuelAnalysis(vessels));
+    setFuelSource("local");
     try {
       const topVessel = vessels.find(v => v.speed > 3 && !v.is_stale) || vessels[0];
       const res = await fetch(`${BASE_URL}/ai/analyze-fuel`, {
@@ -41,9 +53,12 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
         signal: AbortSignal.timeout(25000),
       });
       const data = await res.json();
-      setFuelAnalysis(data.analysis || generateLocalFuelAnalysis(vessels));
+      if (data.analysis) {
+        setFuelAnalysis(data.analysis);
+        setFuelSource("ai");
+      }
     } catch {
-      setFuelAnalysis(generateLocalFuelAnalysis(vessels));
+      // Keep local fallback
     }
     setLoadingFuel(false);
   }, [vessels]);
@@ -94,6 +109,20 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
                 </div>
               ) : insights ? (
                 <>
+                  {/* Source badge */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                    <span style={{ fontSize:10, padding:"2px 8px", borderRadius:10, fontFamily:"monospace", fontWeight:700,
+                      background: insightsSource === "ai" ? "rgba(0,255,157,0.12)" : "rgba(255,170,0,0.10)",
+                      border: `1px solid ${insightsSource === "ai" ? "rgba(0,255,157,0.3)" : "rgba(255,170,0,0.3)"}`,
+                      color: insightsSource === "ai" ? "#00ff9d" : "#ffaa00" }}>
+                      {insightsSource === "ai" ? "✦ GEMINI AI" : "📊 LOCAL ANALYTICS"}
+                    </span>
+                    {insightsSource === "local" && (
+                      <span style={{ fontSize:10, color:"rgba(90,140,180,0.5)" }}>
+                        Add GEMINI_API_KEY to Render for AI-powered insights
+                      </span>
+                    )}
+                  </div>
                   <div className="fi-insight-card headline">
                     <div className="fi-card-label">AI HEADLINE INSIGHT</div>
                     <div className="fi-card-text">{insights.headline_insight || "Fleet operating within normal parameters."}</div>
@@ -128,7 +157,7 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
                   </div>
                 </>
               ) : (
-                <div className="fi-empty">No AI insights available. Ensure GEMINI_API_KEY is configured.</div>
+                <div className="fi-empty">Loading fleet analytics…</div>
               )}
               <button className="fi-refresh-btn" onClick={loadFleetInsights} disabled={loadingInsights}>
                 ⟳ Refresh AI Insights
@@ -270,7 +299,7 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
                   )}
                 </>
               ) : (
-                <div className="fi-empty">Configure GEMINI_API_KEY for AI fuel analysis.</div>
+                <div className="fi-empty">Configure GEMINI_API_KEY for enhanced AI fuel analysis. Showing local estimates.</div>
               )}
               <button className="fi-refresh-btn" onClick={loadFuelAnalysis} disabled={loadingFuel}>
                 ⟳ Run Fuel Analysis

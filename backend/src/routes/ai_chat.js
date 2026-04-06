@@ -1,60 +1,86 @@
-// src/routes/ai_chat.js — Maritime AI Chat + LLM Engine v1
-// Unified AI chat endpoint powering Gemini + Claude Sonnet fallback
-// Supports: vessel Q&A, cargo summarization, email drafting, RAG over fleet data
+// src/routes/ai_chat.js — Maritime AI Chat + LLM Engine v2
+// Gemini-primary, Claude fallback, graceful offline degradation
 "use strict";
 
 const express = require("express");
 const router  = express.Router();
 const logger  = require("../utils/logger");
 
-const GEMINI_MODEL = "gemini-2.0-flash";
-const ANTHROPIC_MODEL = "claude-sonnet-4-5";
+// ── Model config ─────────────────────────────────────────────────
+const GEMINI_MODEL    = "gemini-2.0-flash";
+const CLAUDE_MODEL    = "claude-sonnet-4-5-20251022"; // correct versioned model ID
 
-function getGeminiKey() {
-  return process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || null;
-}
-function getAnthropicKey() {
-  return process.env.ANTHROPIC_API_KEY || null;
-}
+function getGeminiKey()    { return process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || ""; }
+function getAnthropicKey() { return process.env.ANTHROPIC_API_KEY || ""; }
 
-async function callGemini(systemPrompt, userMessage, history = [], maxTokens = 800) {
+// ── Shared Gemini caller ─────────────────────────────────────────
+async function callGemini(systemPrompt, userMessage, history = [], maxTokens = 1000) {
   const apiKey = getGeminiKey();
-  if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
+  if (!apiKey) throw new Error("GEMINI_API_KEY not configured in environment");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
+  // Build contents array (history + current message)
   const contents = [];
-  // Add history
-  for (const msg of history) {
-    contents.push({ role: msg.role === "assistant" ? "model" : "user", parts: [{ text: msg.content }] });
+  for (const msg of history.slice(-10)) {
+    contents.push({
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: String(msg.content || "") }],
+    });
   }
-  contents.push({ role: "user", parts: [{ text: userMessage }] });
+  contents.push({ role: "user", parts: [{ text: String(userMessage || "") }] });
 
   const body = {
     contents,
-    systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
-    generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens, responseMimeType: "text/plain" },
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: maxTokens,
+      responseMimeType: "text/plain",
+    },
   };
+
+  // System instruction (optional — some versions don't support it)
+  if (systemPrompt) {
+    body.systemInstruction = { parts: [{ text: systemPrompt }] };
+  }
 
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(25000),
+    signal: AbortSignal.timeout(30000),
   });
-  if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text().catch(() => "")}`);
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Gemini API error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
   const json = await res.json();
-  return json?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    const reason = json?.candidates?.[0]?.finishReason || "UNKNOWN";
+    throw new Error(`Gemini returned empty response (finishReason: ${reason})`);
+  }
+  return text;
 }
 
-async function callClaude(systemPrompt, userMessage, history = [], maxTokens = 800) {
+// ── Shared Claude caller ─────────────────────────────────────────
+async function callClaude(systemPrompt, userMessage, history = [], maxTokens = 1000) {
   const apiKey = getAnthropicKey();
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured in environment");
 
   const messages = [
-    ...history.map(m => ({ role: m.role, content: m.content })),
-    { role: "user", content: userMessage },
+    ...history.slice(-10).map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content || "") })),
+    { role: "user", content: String(userMessage || "") },
   ];
+
+  const body = {
+    model: CLAUDE_MODEL,
+    max_tokens: maxTokens,
+    messages,
+  };
+  if (systemPrompt) body.system = systemPrompt;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -63,200 +89,220 @@ async function callClaude(systemPrompt, userMessage, history = [], maxTokens = 8
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({ model: ANTHROPIC_MODEL, max_tokens: maxTokens, system: systemPrompt, messages }),
-    signal: AbortSignal.timeout(25000),
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
   });
-  if (!res.ok) throw new Error(`Claude error ${res.status}`);
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Claude API error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
   const json = await res.json();
-  return json?.content?.[0]?.text || "";
+  const text = json?.content?.[0]?.text;
+  if (!text) throw new Error("Claude returned empty response");
+  return text;
 }
 
+// ── Unified LLM call: Gemini → Claude → Error ────────────────────
+async function callLLM(systemPrompt, userMessage, history = [], maxTokens = 1000) {
+  // Try Gemini first
+  if (getGeminiKey()) {
+    try {
+      const text = await callGemini(systemPrompt, userMessage, history, maxTokens);
+      return { text, provider: "gemini" };
+    } catch (err) {
+      logger.warn(`[ai] Gemini failed: ${err.message}`);
+    }
+  }
+  // Fall back to Claude
+  if (getAnthropicKey()) {
+    try {
+      const text = await callClaude(systemPrompt, userMessage, history, maxTokens);
+      return { text, provider: "claude" };
+    } catch (err) {
+      logger.warn(`[ai] Claude failed: ${err.message}`);
+    }
+  }
+  throw new Error("No AI provider available. Please configure GEMINI_API_KEY in your Render environment variables.");
+}
+
+// ── JSON parser helper ───────────────────────────────────────────
+function parseJSON(raw) {
+  try {
+    const m = /```json\s*([\s\S]+?)\s*```/i.exec(raw) || /([\{\[][\s\S]*[\}\]])/s.exec(raw);
+    return m ? JSON.parse(m[1]) : null;
+  } catch { return null; }
+}
+
+// ── System prompt ────────────────────────────────────────────────
 function buildSystemPrompt(vesselContext, fleetStats) {
-  return `You are an expert AI assistant for a Maritime Port Authority vessel tracking platform (MPA - Singapore). 
-You specialize in:
-- Vessel tracking and AIS data interpretation
-- Maritime law and port regulations  
-- Cargo management and logistics optimization
-- Fuel efficiency and route optimization
-- Port agent coordination and CRM
-- Contract and invoice analysis
-- Shipping company intelligence and contact enrichment
+  return `You are MARITIME AI — an expert assistant for the MPA (Maritime Port Authority) Singapore vessel tracking platform.
 
-You have access to real-time fleet data. Be concise, professional, and use maritime terminology.
-${fleetStats ? `\nFleet Summary: ${fleetStats}` : ""}
-${vesselContext ? `\nCurrently selected vessel context:\n${vesselContext}` : ""}
+You specialise in:
+• Vessel tracking and AIS data interpretation
+• Maritime regulations and port operations
+• Cargo management and logistics optimisation
+• Fuel efficiency and route optimisation
+• Port agent coordination and CRM
+• Contract, invoice, and document analysis
+• Shipping company intelligence and contact enrichment
 
-Always provide actionable, specific maritime advice. Format responses clearly.`;
+Be concise, professional, and use correct maritime terminology. Always provide actionable advice.
+${fleetStats ? `\nFleet: ${fleetStats}` : ""}
+${vesselContext ? `\nSelected vessel:\n${vesselContext}` : ""}`;
 }
 
-// ── POST /api/ai/chat ─────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+// POST /api/ai/chat
+// ══════════════════════════════════════════════════════════════════
 router.post("/chat", async (req, res, next) => {
   try {
-    const { message, context, history = [], vesselData, fleetStats, mode = "chat" } = req.body || {};
-    if (!message || message.trim().length < 2) {
-      return res.status(400).json({ success: false, error: "Message required" });
+    const { message, context, history = [], vesselData, fleetStats } = req.body || {};
+    if (!message || String(message).trim().length < 2) {
+      return res.status(400).json({ success: false, error: "Message required (min 2 chars)" });
     }
 
     const systemPrompt = buildSystemPrompt(
-      vesselData ? JSON.stringify(vesselData, null, 2) : context || null,
+      vesselData ? JSON.stringify(vesselData, null, 2) : (context || null),
       fleetStats || null
     );
 
-    let reply = "";
-    let provider = "gemini";
-
-    // Try Gemini first, fallback to Claude
-    try {
-      reply = await callGemini(systemPrompt, message.trim(), history);
-      provider = "gemini";
-    } catch (geminiErr) {
-      logger.warn("[ai-chat] Gemini failed:", geminiErr.message?.slice(0, 80));
-      try {
-        reply = await callClaude(systemPrompt, message.trim(), history);
-        provider = "claude";
-      } catch (claudeErr) {
-        logger.warn("[ai-chat] Claude failed:", claudeErr.message?.slice(0, 80));
-        throw new Error("All AI providers unavailable");
-      }
-    }
-
-    return res.json({ success: true, reply, provider, mode });
+    const { text, provider } = await callLLM(systemPrompt, message.trim(), history, 800);
+    return res.json({ success: true, reply: text, provider });
   } catch (err) {
     logger.error("[ai-chat]", err.message);
-    next(err);
+    // Return a graceful error the frontend can display
+    return res.status(200).json({
+      success: false,
+      reply: `⚠ AI unavailable: ${err.message}`,
+      provider: "offline",
+      error: err.message,
+    });
   }
 });
 
-// ── POST /api/ai/summarize ────────────────────────────────────────────────────
-// Cargo report / voyage document summarization
+// ══════════════════════════════════════════════════════════════════
+// POST /api/ai/draft-email
+// ══════════════════════════════════════════════════════════════════
+router.post("/draft-email", async (req, res, next) => {
+  try {
+    const {
+      purpose, vesselName, imoNumber, companyName, portName, details, tone = "professional",
+    } = req.body || {};
+
+    if (!purpose || !String(purpose).trim()) {
+      return res.status(400).json({ success: false, error: "Email purpose required" });
+    }
+
+    const toneMap = {
+      professional:  "formal and professional",
+      consultative:  "consultative and advisory",
+      direct:        "direct and concise",
+      friendly:      "friendly but professional",
+      technical:     "technical and precise",
+      executive:     "executive-level, high-impact",
+      urgent:        "urgent and action-oriented",
+    };
+
+    const systemPrompt = `You are a maritime business email specialist. Write ${toneMap[tone] || toneMap.professional} emails with proper maritime terminology. Always respond ONLY with valid JSON.`;
+
+    const userPrompt = `Write a maritime business email with these parameters:
+Purpose: ${purpose}
+${vesselName   ? `Vessel: ${vesselName}` : ""}
+${imoNumber    ? `IMO: ${imoNumber}` : ""}
+${companyName  ? `Recipient company: ${companyName}` : ""}
+${portName     ? `Port: ${portName}` : ""}
+${details      ? `Additional context:\n${details}` : ""}
+
+Requirements:
+- Compelling subject line specific to the situation
+- Professional email body (150-250 words)
+- Clear call-to-action
+- Proper maritime terminology
+
+Respond with ONLY this JSON (no markdown, no extra text):
+{"subject":"...","body":"..."}`;
+
+    const { text, provider } = await callLLM(systemPrompt, userPrompt, [], 700);
+
+    // Parse the JSON response
+    let email = parseJSON(text);
+    if (!email || !email.subject) {
+      // Try to extract subject/body from plain text fallback
+      const subMatch = /subject[:\s]+(.+?)(?:\n|body)/i.exec(text);
+      const bodyMatch = /body[:\s]+([\s\S]+)/i.exec(text);
+      email = {
+        subject: subMatch?.[1]?.trim() || `Maritime Business — ${companyName || vesselName || "Follow Up"}`,
+        body: bodyMatch?.[1]?.trim() || text,
+      };
+    }
+
+    return res.json({ success: true, purpose, email, provider, raw: text });
+  } catch (err) {
+    logger.error("[ai-email]", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════
+// POST /api/ai/summarize
+// ══════════════════════════════════════════════════════════════════
 router.post("/summarize", async (req, res, next) => {
   try {
     const { text, type = "cargo_report" } = req.body || {};
-    if (!text || text.trim().length < 20) {
+    if (!text || String(text).trim().length < 20) {
       return res.status(400).json({ success: false, error: "Document text required (min 20 chars)" });
     }
 
     const typePrompts = {
-      cargo_report: "Summarize this cargo report. Extract: cargo type, quantity, loading/discharge ports, shipper, consignee, special handling requirements, risk flags.",
-      voyage_log:   "Analyze this voyage log. Extract: route taken, ports called, fuel consumption, delays, incidents, ETA accuracy, crew notes.",
-      contract:     "Review this maritime contract. Extract: parties, vessel details, charter type, rates, key clauses, payment terms, dispute resolution, red flags.",
-      invoice:      "Analyze this maritime invoice. Extract: services rendered, amounts, vessel, port charges, discrepancies, payment status.",
-      bol:          "Analyze this Bill of Lading. Extract: shipper, consignee, cargo description, container numbers, routing, special instructions, compliance flags.",
+      cargo_report: "Summarize this cargo report. Extract: cargo type, quantity, ports, shipper, consignee, special handling, risk flags.",
+      voyage_log:   "Analyze this voyage log. Extract: route, ports, fuel consumption, delays, incidents, ETA accuracy.",
+      contract:     "Review this maritime contract. Extract: parties, vessel, charter type, rates, key clauses, payment terms, red flags.",
+      invoice:      "Analyze this maritime invoice. Extract: services, amounts, vessel, port charges, discrepancies, payment status.",
+      bol:          "Analyze this Bill of Lading. Extract: shipper, consignee, cargo, container numbers, routing, compliance flags.",
     };
 
-    const prompt = typePrompts[type] || typePrompts.cargo_report;
-    const systemPrompt = `You are a maritime document analyst. ${prompt}\n\nProvide a structured JSON response with: summary, key_details (object), action_items (array), risk_flags (array), confidence_score (0-100).`;
+    const systemPrompt = `You are a maritime document analyst. ${typePrompts[type] || typePrompts.cargo_report} Return structured JSON.`;
+    const { text: result, provider } = await callLLM(systemPrompt, text.slice(0, 4000), [], 1000);
 
-    let result = "";
-    try {
-      result = await callGemini(systemPrompt, text.slice(0, 4000), [], 1000);
-    } catch {
-      result = await callClaude(systemPrompt, text.slice(0, 4000), [], 1000);
-    }
-
-    // Try to parse JSON from response
-    let parsed = null;
-    try {
-      const jsonMatch = /```json\s*([\s\S]+?)\s*```/.exec(result) || /(\{[\s\S]+\})/.exec(result);
-      if (jsonMatch) parsed = JSON.parse(jsonMatch[1]);
-    } catch {}
-
-    return res.json({ success: true, type, raw: result, parsed, document_length: text.length });
+    const parsed = parseJSON(result);
+    return res.json({ success: true, type, raw: result, parsed, provider, document_length: text.length });
   } catch (err) {
     logger.error("[ai-summarize]", err.message);
-    next(err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ── POST /api/ai/draft-email ──────────────────────────────────────────────────
-// AI email drafting for maritime CRM
-router.post("/draft-email", async (req, res, next) => {
-  try {
-    const { purpose, vesselName, imoNumber, companyName, portName, details, tone = "professional" } = req.body || {};
-    if (!purpose) return res.status(400).json({ success: false, error: "Email purpose required" });
-
-    const toneMap = { professional: "formal and professional", friendly: "friendly but professional", urgent: "urgent and direct" };
-    const systemPrompt = `You are a maritime operations specialist drafting business emails. Write ${toneMap[tone] || toneMap.professional} maritime emails. Use proper maritime terminology.`;
-
-    const userPrompt = `Draft a maritime email for the following:
-Purpose: ${purpose}
-${vesselName ? `Vessel: ${vesselName}` : ""}
-${imoNumber ? `IMO: ${imoNumber}` : ""}
-${companyName ? `Company/Recipient: ${companyName}` : ""}
-${portName ? `Port: ${portName}` : ""}
-${details ? `Additional details: ${details}` : ""}
-
-Provide: Subject line and full email body. Format as JSON: { "subject": "...", "body": "..." }`;
-
-    let result = "";
-    try {
-      result = await callGemini(systemPrompt, userPrompt, [], 600);
-    } catch {
-      result = await callClaude(systemPrompt, userPrompt, [], 600);
-    }
-
-    let parsed = null;
-    try {
-      const m = /```json\s*([\s\S]+?)\s*```/.exec(result) || /(\{[\s\S]+\})/s.exec(result);
-      if (m) parsed = JSON.parse(m[1]);
-    } catch {}
-
-    return res.json({ success: true, purpose, raw: result, email: parsed });
-  } catch (err) {
-    logger.error("[ai-email]", err.message);
-    next(err);
-  }
-});
-
-// ── POST /api/ai/analyze-fuel ─────────────────────────────────────────────────
-// AI-powered fuel & route optimization
+// ══════════════════════════════════════════════════════════════════
+// POST /api/ai/analyze-fuel
+// ══════════════════════════════════════════════════════════════════
 router.post("/analyze-fuel", async (req, res, next) => {
   try {
-    const { vesselData, routeData, fuelHistory } = req.body || {};
+    const { vesselData, routeData } = req.body || {};
     if (!vesselData) return res.status(400).json({ success: false, error: "Vessel data required" });
 
-    const systemPrompt = `You are a maritime fuel efficiency and route optimization expert. Analyze vessel performance and provide specific, quantified recommendations.`;
+    const systemPrompt = `You are a maritime fuel efficiency expert. Analyse vessel performance and provide quantified recommendations. Return ONLY valid JSON.`;
 
-    const userPrompt = `Analyze fuel efficiency and route optimization for this vessel:
+    const userPrompt = `Analyse fuel efficiency for:
 ${JSON.stringify(vesselData, null, 2)}
-${routeData ? `Route data: ${JSON.stringify(routeData)}` : ""}
-${fuelHistory ? `Fuel history: ${JSON.stringify(fuelHistory)}` : ""}
+${routeData ? `Route: ${JSON.stringify(routeData)}` : ""}
 
-Provide JSON response with:
-{
-  "efficiency_score": 0-100,
-  "current_vs_optimal_speed": { "current": x, "optimal": y, "savings_percent": z },
-  "fuel_savings_daily_tons": number,
-  "co2_reduction_daily_tons": number,
-  "route_recommendations": ["..."],
-  "speed_recommendation": "...",
-  "estimated_annual_savings_usd": number,
-  "ml_prediction": "...",
-  "confidence": "high|medium|low"
-}`;
+Return ONLY this JSON:
+{"efficiency_score":0-100,"fuel_savings_daily_tons":0,"co2_reduction_daily_tons":0,"estimated_annual_savings_usd":0,"route_recommendations":["..."],"speed_recommendation":"...","ml_prediction":"...","confidence":"high|medium|low","current_vs_optimal_speed":{"current":0,"optimal":0,"savings_percent":0}}`;
 
-    let result = "";
-    try {
-      result = await callGemini(systemPrompt, userPrompt, [], 800);
-    } catch {
-      result = await callClaude(systemPrompt, userPrompt, [], 800);
-    }
-
-    let parsed = null;
-    try {
-      const m = /```json\s*([\s\S]+?)\s*```/.exec(result) || /(\{[\s\S]+\})/s.exec(result);
-      if (m) parsed = JSON.parse(m[1]);
-    } catch {}
-
-    return res.json({ success: true, vessel: vesselData.vessel_name, raw: result, analysis: parsed });
+    const { text, provider } = await callLLM(systemPrompt, userPrompt, [], 800);
+    const analysis = parseJSON(text);
+    return res.json({ success: true, vessel: vesselData.vessel_name, raw: text, analysis, provider });
   } catch (err) {
     logger.error("[ai-fuel]", err.message);
-    next(err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ── POST /api/ai/predict-arrival ──────────────────────────────────────────────
-// ML-enhanced ETA prediction
+// ══════════════════════════════════════════════════════════════════
+// POST /api/ai/predict-arrival
+// ══════════════════════════════════════════════════════════════════
 router.post("/predict-arrival", async (req, res, next) => {
   try {
     const { vesselData, destination, weatherData } = req.body || {};
@@ -264,87 +310,63 @@ router.post("/predict-arrival", async (req, res, next) => {
       return res.status(400).json({ success: false, error: "vesselData and destination required" });
     }
 
-    const systemPrompt = `You are a maritime ETA prediction specialist. Use vessel speed, heading, distance, and weather to predict arrival times with confidence intervals.`;
-    const userPrompt = `Predict ETA for this vessel to ${destination}:
+    const systemPrompt = `You are a maritime ETA prediction specialist. Return ONLY valid JSON.`;
+    const userPrompt = `Predict ETA for vessel ${vesselData.vessel_name || ""} to ${destination}.
 Vessel: ${JSON.stringify(vesselData)}
 ${weatherData ? `Weather: ${JSON.stringify(weatherData)}` : ""}
 
-Respond with JSON: { "eta_hours": number, "eta_range": { "min": h, "max": h }, "confidence": "high|medium|low", "factors": [...], "risk_flags": [...] }`;
+Return ONLY: {"eta_hours":0,"eta_range":{"min":0,"max":0},"confidence":"high|medium|low","factors":["..."],"risk_flags":["..."]}`;
 
-    let result = "";
-    try {
-      result = await callGemini(systemPrompt, userPrompt, [], 400);
-    } catch {
-      result = await callClaude(systemPrompt, userPrompt, [], 400);
-    }
-
-    let parsed = null;
-    try {
-      const m = /```json\s*([\s\S]+?)\s*```/.exec(result) || /(\{[\s\S]+\})/s.exec(result);
-      if (m) parsed = JSON.parse(m[1]);
-    } catch {}
-
-    return res.json({ success: true, destination, raw: result, prediction: parsed });
+    const { text, provider } = await callLLM(systemPrompt, userPrompt, [], 500);
+    const prediction = parseJSON(text);
+    return res.json({ success: true, destination, raw: text, prediction, provider });
   } catch (err) {
     logger.error("[ai-predict]", err.message);
-    next(err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ── GET /api/ai/fleet-insights ────────────────────────────────────────────────
-// AI-generated fleet insights from BigQuery data
+// ══════════════════════════════════════════════════════════════════
+// POST /api/ai/fleet-insights
+// ══════════════════════════════════════════════════════════════════
 router.post("/fleet-insights", async (req, res, next) => {
   try {
     const { stats, vessels = [] } = req.body || {};
-    const systemPrompt = `You are a maritime fleet analytics expert. Analyze fleet performance data and provide actionable insights.`;
 
-    const vesselSample = vessels.slice(0, 20).map(v => ({
+    const systemPrompt = `You are a maritime fleet analytics expert. Analyse fleet performance and return actionable insights. Return ONLY valid JSON.`;
+
+    const sample = vessels.slice(0, 25).map(v => ({
       name: v.vessel_name, type: v.vessel_type, speed: v.speed,
       status: v.vessel_status, flag: v.flag, stale: v.is_stale,
     }));
 
-    const userPrompt = `Analyze this fleet data and provide strategic insights:
+    const userPrompt = `Analyse fleet data (${vessels.length} vessels total):
 Stats: ${JSON.stringify(stats || {})}
-Sample vessels (${vessels.length} total): ${JSON.stringify(vesselSample)}
+Sample: ${JSON.stringify(sample)}
 
-Provide JSON: {
-  "headline_insight": "...",
-  "performance_summary": "...",
-  "top_concerns": ["..."],
-  "opportunities": ["..."],
-  "recommended_actions": ["..."],
-  "efficiency_trends": "...",
-  "port_congestion_risk": "low|medium|high"
-}`;
+Return ONLY this JSON:
+{"headline_insight":"...","performance_summary":"...","top_concerns":["..."],"opportunities":["..."],"recommended_actions":["..."],"efficiency_trends":"...","port_congestion_risk":"low|medium|high"}`;
 
-    let result = "";
-    try {
-      result = await callGemini(systemPrompt, userPrompt, [], 800);
-    } catch {
-      result = await callClaude(systemPrompt, userPrompt, [], 800);
-    }
-
-    let parsed = null;
-    try {
-      const m = /```json\s*([\s\S]+?)\s*```/.exec(result) || /(\{[\s\S]+\})/s.exec(result);
-      if (m) parsed = JSON.parse(m[1]);
-    } catch {}
-
-    return res.json({ success: true, raw: result, insights: parsed });
+    const { text, provider } = await callLLM(systemPrompt, userPrompt, [], 800);
+    const insights = parseJSON(text);
+    return res.json({ success: true, raw: text, insights, provider });
   } catch (err) {
     logger.error("[ai-fleet]", err.message);
-    next(err);
+    // Return success:false so frontend can use local fallback
+    return res.status(200).json({ success: false, error: err.message, insights: null });
   }
 });
 
-// ── GET /api/ai/status ────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+// GET /api/ai/status
+// ══════════════════════════════════════════════════════════════════
 router.get("/status", (_req, res) => {
-  const geminiKey = getGeminiKey();
-  const claudeKey = getAnthropicKey();
+  const geminiKey  = getGeminiKey();
+  const claudeKey  = getAnthropicKey();
   res.json({
-    gemini:  { configured: !!geminiKey, model: GEMINI_MODEL, key_preview: geminiKey ? `${geminiKey.slice(0,8)}...` : null },
-    claude:  { configured: !!claudeKey, model: ANTHROPIC_MODEL, key_preview: claudeKey ? `${claudeKey.slice(0,8)}...` : null },
-    features: ["chat", "summarize", "draft-email", "analyze-fuel", "predict-arrival", "fleet-insights"],
+    gemini:  { configured: !!geminiKey, model: GEMINI_MODEL,  key_preview: geminiKey  ? `${geminiKey.slice(0,8)}...`  : null },
+    claude:  { configured: !!claudeKey, model: CLAUDE_MODEL,  key_preview: claudeKey  ? `${claudeKey.slice(0,8)}...`  : null },
+    features: ["chat", "draft-email", "summarize", "analyze-fuel", "predict-arrival", "fleet-insights"],
   });
 });
 

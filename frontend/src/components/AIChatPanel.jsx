@@ -62,18 +62,21 @@ export default function AIChatPanel({ selectedVessel, vessels, stats, isOpen }) 
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setProvider(data.provider || "gemini");
+      // Backend now returns success:false with reply for graceful degradation
+      const reply   = data.reply || "I couldn't generate a response. Please try again.";
+      const prov    = data.provider || "gemini";
+      setProvider(prov);
       setMessages(prev => [...prev, {
         role: "assistant",
-        content: data.reply || "I couldn't generate a response. Please try again.",
+        content: reply,
         timestamp: new Date(),
-        provider: data.provider,
+        provider: prov,
       }]);
     } catch (err) {
-      const fallback = generateFallback(msg, selectedVessel);
+      // Network error — show a helpful message
       setMessages(prev => [...prev, {
         role: "assistant",
-        content: fallback,
+        content: `⚠ Could not reach the AI backend: ${err.message}\n\nPlease check that your Render backend is running and GEMINI_API_KEY is configured.`,
         timestamp: new Date(),
         provider: "offline",
       }]);

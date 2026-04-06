@@ -3,10 +3,10 @@
 // Triggered via ✉ CRM button in VesselDetailPanel header
 // Uses existing backend endpoints: /api/ai/draft-email + /api/gemini/enrich
 import React, {
-  useState, useEffect, useCallback,  useMemo,
+  useState, useEffect, useCallback, useRef, useMemo,
 } from "react";
 import {
-  fetchVesselContacts, fetchVesselIntelligence, aiDraftEmail,
+  fetchVesselContacts, fetchVesselIntelligence, aiDraftEmail, BASE_URL,
 } from "../services/api";
 import "./CRMPanel.css";
 
@@ -109,8 +109,7 @@ function ProfileModal({ title, profile, onSave, onClose }) {
     if (!form.website) return;
     setExtracting(true);
     try {
-      const API = process.env.REACT_APP_API_URL || "https://vessel-backend.onrender.com/api";
-      const res = await fetch(`${API}/gemini/crm-draft`, {
+      const res = await fetch(`${BASE_URL}/gemini/crm-draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "persona_extract", url: form.website, label: form.name }),

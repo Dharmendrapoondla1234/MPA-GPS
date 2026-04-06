@@ -186,3 +186,64 @@ router.get("/status", (_req, res) => {
 });
 
 module.exports = router;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/gemini/crm-draft
+// CRM persona extraction and email draft helper
+// Body: { type: "persona_extract"|"email_draft", url?, label?, prompt?, ... }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/crm-draft", async (req, res, next) => {
+  try {
+    const { type, url, label, prompt: userPrompt } = req.body || {};
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return res.status(503).json({ success: false, error: "GEMINI_API_KEY not configured" });
+    }
+
+    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+    let systemText = "You are a maritime CRM assistant.";
+    let userText   = "";
+
+    if (type === "persona_extract") {
+      systemText = "You are a business intelligence analyst. Extract persona details from company context.";
+      userText   = `Analyse the company at: ${url || "unknown"}\nLabel/persona name: ${label || "client"}\n\nProvide a concise persona description (3-4 sentences) covering: industry focus, likely pain points, decision-making style, communication preferences, and what they value in maritime service providers.\n\nRespond with ONLY the persona description text — no JSON, no headers.`;
+    } else if (type === "email_draft") {
+      systemText = "You are a maritime email specialist.";
+      userText   = userPrompt || "Draft a professional maritime business email.";
+    } else {
+      userText = userPrompt || "Help with maritime CRM.";
+    }
+
+    const gemRes = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: userText }] }],
+        systemInstruction: { parts: [{ text: systemText }] },
+        generationConfig: { temperature: 0.7, maxOutputTokens: 600 },
+      }),
+      signal: AbortSignal.timeout(25000),
+    });
+
+    if (!gemRes.ok) {
+      const errText = await gemRes.text().catch(() => "");
+      throw new Error(`Gemini ${gemRes.status}: ${errText.slice(0, 200)}`);
+    }
+
+    const gemJson = await gemRes.json();
+    const text    = gemJson?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+    return res.json({
+      success:     true,
+      type:        type || "generic",
+      text,
+      persona:     type === "persona_extract" ? text : undefined,
+      description: type === "persona_extract" ? text : undefined,
+    });
+  } catch (err) {
+    logger.error("[gemini-crm-draft]", err.message);
+    next(err);
+  }
+});
