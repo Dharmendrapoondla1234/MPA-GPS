@@ -190,74 +190,46 @@ module.exports = router;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/gemini/crm-draft
-// CRM persona extraction helper — free-tier Gemini compatible
-// Body: { type: "persona_extract"|"email_draft", url?, label?, prompt? }
+// Persona extraction and CRM email helper using shared gemini util (with retry)
 // ─────────────────────────────────────────────────────────────────────────────
+const { callGeminiWithRetry } = require("../utils/gemini");
+
 router.post("/crm-draft", async (req, res, next) => {
   try {
     const { type, url, label, prompt: userPrompt } = req.body || {};
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
 
     if (!apiKey) {
-      return res.status(503).json({ success: false, error: "GEMINI_API_KEY not configured in Render environment" });
+      return res.status(503).json({
+        success: false,
+        error: "GEMINI_API_KEY not configured in Render environment variables",
+      });
     }
 
-    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-    // Build user message with embedded system context (free-tier compatible)
-    let fullMessage = "";
+    let systemPrompt = "";
+    let fullPrompt   = "";
 
     if (type === "persona_extract") {
-      fullMessage = [
-        "[SYSTEM] You are a business intelligence analyst specialising in maritime industry personas.",
-        "[SYSTEM] Write a concise, useful persona description — plain text, no JSON, no headers.",
-        "",
-        `Analyse the company: ${url || "unknown company"}`,
+      systemPrompt = "You are a business intelligence analyst specialising in maritime industry personas. Write plain text descriptions only — no JSON, no headers, no bullet points.";
+      fullPrompt   = [
+        `Analyse company: ${url || "unknown"}`,
         `Persona name: ${label || "client"}`,
         "",
         "Write 3-4 sentences covering:",
-        "- Industry focus and company size",
-        "- Likely pain points and priorities",
-        "- Decision-making style and communication preferences",
-        "- What they value most in maritime service providers",
+        "• Industry focus and company size",
+        "• Likely pain points and priorities in maritime operations",
+        "• Decision-making style and communication preferences",
+        "• What they value most in maritime service providers",
         "",
-        "Respond with ONLY the persona description text.",
+        "Respond with ONLY the persona description — plain text, no formatting.",
       ].join("\n");
-    } else if (type === "email_draft") {
-      fullMessage = `[SYSTEM] You are a maritime email specialist. Write professional, concise emails.\n\n${userPrompt || "Draft a professional maritime business email."}`;
     } else {
-      fullMessage = `[SYSTEM] You are a maritime CRM assistant.\n\n${userPrompt || "Help with maritime CRM."}`;
+      systemPrompt = "You are a maritime CRM assistant.";
+      fullPrompt   = userPrompt || "Help with maritime CRM.";
     }
 
-    const gemRes = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: fullMessage }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 600 },
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT",        threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_HATE_SPEECH",       threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
-        ],
-      }),
-      signal: AbortSignal.timeout(25000),
-    });
-
-    if (!gemRes.ok) {
-      const errText = await gemRes.text().catch(() => "");
-      throw new Error(`Gemini ${gemRes.status}: ${errText.slice(0, 200)}`);
-    }
-
-    const gemJson = await gemRes.json();
-    const candidate = gemJson?.candidates?.[0];
-    const text = candidate?.content?.parts?.[0]?.text || "";
-
-    if (!text) {
-      const blockReason = gemJson?.promptFeedback?.blockReason;
-      throw new Error(`Gemini returned empty response${blockReason ? ` (blocked: ${blockReason})` : ""}`);
-    }
+    // Use shared utility: retry, backoff, model cascade
+    const text = await callGeminiWithRetry(systemPrompt, fullPrompt, 600);
 
     return res.json({
       success:     true,
@@ -268,6 +240,6 @@ router.post("/crm-draft", async (req, res, next) => {
     });
   } catch (err) {
     logger.error("[gemini-crm-draft]", err.message);
-    next(err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
