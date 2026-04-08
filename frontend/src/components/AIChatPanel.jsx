@@ -343,16 +343,4 @@ function formatTime(ts) {
   catch { return ""; }
 }
 
-function generateFallback(msg, vessel) {
-  const m = msg.toLowerCase();
-  if (m.includes("fuel") || m.includes("efficiency")) {
-    return `**Fuel Analysis** — AI backend offline\n\nFor vessel ${vessel?.vessel_name || "selected"}: Current speed ${vessel ? (vessel.speed||0).toFixed(1) : "—"}kn. Typical fuel savings from speed reduction of 1kn: 8-12% for bulk carriers, 10-15% for tankers. Recommend configuring GEMINI_API_KEY in Render environment for live AI analysis.`;
-  }
-  if (m.includes("email") || m.includes("draft")) {
-    return `**Email Drafting** — Use the Email tab for AI-powered drafting once GEMINI_API_KEY is configured in your Render deployment.`;
-  }
-  if (m.includes("port") || m.includes("singapore")) {
-    return `**Port of Singapore** — One of the world's busiest ports. Current AIS data shows ${vessel ? "your selected vessel is " + (vessel.speed > 0 ? "underway at " + vessel.speed.toFixed(1) + "kn" : "at berth") : "multiple vessels in the strait"}. For live port intelligence, connect your Render backend with Gemini API.`;
-  }
-  return `**Maritime AI** (offline mode)\n\nQuery received: "${msg}"\n\nTo enable full AI capabilities:\n1. Add GEMINI_API_KEY to Render environment variables\n2. Optionally add ANTHROPIC_API_KEY for Claude fallback\n3. Restart your Render service\n\nGet a free Gemini key: https://aistudio.google.com/apikey`;
-}
+

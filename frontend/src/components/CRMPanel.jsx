@@ -3,7 +3,7 @@
 // Triggered via ✉ CRM button in VesselDetailPanel header
 // Uses existing backend endpoints: /api/ai/draft-email + /api/gemini/enrich
 import React, {
-  useState, useEffect, useCallback, useRef, useMemo,
+  useState, useEffect, useCallback, useMemo,
 } from "react";
 import {
   fetchVesselContacts, fetchVesselIntelligence, aiDraftEmail, BASE_URL,

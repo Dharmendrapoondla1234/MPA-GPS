@@ -14,4 +14,4 @@ logs/
 Thumbs.db
 
 # Optional: editor files
-.vscode/
+.vscode/creds.json

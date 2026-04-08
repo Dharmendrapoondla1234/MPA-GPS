@@ -9,7 +9,7 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
   const [insightsSource, setInsightsSource] = useState(null); // "ai" | "local"
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [fuelAnalysis, setFuelAnalysis]   = useState(null);
-  const [fuelSource, setFuelSource]       = useState(null);
+  const [, setFuelSource]       = useState(null);
   const [loadingFuel, setLoadingFuel]     = useState(false);
   const [activeSection, setActiveSection] = useState("insights");
 
