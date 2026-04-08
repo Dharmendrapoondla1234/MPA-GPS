@@ -192,19 +192,15 @@ router.post("/fleet-insights", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════
 router.get("/status", (_req, res) => {
   const gKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "";
-  const cKey = process.env.ANTHROPIC_API_KEY || "";
   res.json({
     gemini: {
       configured: !!gKey,
-      models: ["gemini-1.5-flash", "gemini-1.5-flash-8b"],
+      models: ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"],
       key_preview: gKey ? `${gKey.slice(0, 8)}...` : null,
       free_tier: { rpm: 15, rpd: 1500 },
+      setup_url: "https://aistudio.google.com/apikey",
     },
-    claude: {
-      configured: !!cKey,
-      model: "claude-sonnet-4-5-20251022",
-      key_preview: cKey ? `${cKey.slice(0, 8)}...` : null,
-    },
+    provider: "gemini-only",
     features: ["chat", "draft-email", "summarize", "analyze-fuel", "predict-arrival", "fleet-insights"],
   });
 });

@@ -136,6 +136,10 @@ export default function AgentPanel({ vessel, vessels, stats, isOpen, onClose }) 
       setError("Please select a vessel on the map first.");
       return;
     }
+    if (agentId === "fleet-optimize" && (!vessels || vessels.length === 0)) {
+      setError("No vessels loaded yet. Please wait for vessel data to load, or check your connection.");
+      return;
+    }
 
     setActiveAgent(agentId);
     setRunning(true);
@@ -200,7 +204,7 @@ export default function AgentPanel({ vessel, vessels, stats, isOpen, onClose }) 
             <span className="ap-head-gem">⬡</span>
             <div>
               <div className="ap-head-title">AGENTIC AI WORKSPACE</div>
-              <div className="ap-head-sub">Multi-step AI agents powered by Gemini 2.0 + Claude</div>
+              <div className="ap-head-sub">Multi-step AI agents powered by Gemini 2.0</div>
             </div>
           </div>
           <button className="ap-head-close" onClick={onClose}>✕</button>

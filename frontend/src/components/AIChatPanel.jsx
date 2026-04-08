@@ -133,7 +133,7 @@ export default function AIChatPanel({ selectedVessel, vessels, stats, isOpen }) 
         <div className="ai-panel-title">
           <span className="ai-pulse-dot" />
           <span>MARITIME AI</span>
-          <span className="ai-provider-badge">{provider === "claude" ? "CLAUDE" : "GEMINI"}</span>
+          <span className="ai-provider-badge">{provider === "offline" ? "OFFLINE" : "GEMINI"}</span>
         </div>
         <div className="ai-tab-row">
           {["chat", "email", "docs"].map(t => (
