@@ -187,11 +187,10 @@ async function getLatestVessels({
   const lim = Math.min(parseInt(limit) || 5000, 10000);
 
   if (dbt) {
-    // last_position_at is already corrected UTC (fixed in f_vessel_positions_latest)
-    // latitude_degrees/longitude_degrees are already in degrees (converted in f_vessel_positions_latest)
-    // f_vessel_live_tracking passes them through unchanged — just SELECT *
+    // Use 30-day window so vessels show even when AIS pipeline hasn't refreshed recently.
+    // Staleness is shown to users via is_stale / minutes_since_last_ping fields.
     cond.push(
-      `last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)`,
+      `last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)`,
     );
     const where = `WHERE ${cond.join(" AND ")}`;
     query = `
@@ -206,9 +205,9 @@ async function getLatestVessels({
       ORDER BY last_position_at DESC
       LIMIT ${lim}`;
   } else {
-    // Legacy MPA_Master_Vessels — stores actual degrees, correct timestamps
+    // Legacy MPA_Master_Vessels — 30-day window for same reason
     cond.push(
-      `last_position_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)`,
+      `last_position_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)`,
     );
     const where = `WHERE ${cond.join(" AND ")}`;
     query = `
@@ -240,6 +239,26 @@ async function getLatestVessels({
   logger.info(
     `[BQ] getLatestVessels (${dbt ? "dbt" : "legacy"}) → ${rows.length} rows in ${Date.now() - t0}ms`,
   );
+
+  // Diagnostic: if 0 rows, log the most recent timestamp to help debug data pipeline
+  if (rows.length === 0) {
+    try {
+      const diagTable = dbt ? T.VESSELS : T.LEGACY_VESSELS;
+      const tsCol = dbt ? "last_position_at" : "last_position_time";
+      const [[diag]] = await bigquery.query({
+        query: `SELECT MAX(${tsCol}) AS max_ts, COUNT(*) AS total_rows FROM ${diagTable}`,
+        location: BQ_LOCATION,
+      });
+      logger.warn(
+        `[BQ] 0 vessels — table has ${diag?.total_rows ?? "?"} total rows, ` +
+        `most recent ${tsCol}: ${diag?.max_ts ?? "null"} ` +
+        `(current UTC: ${new Date().toISOString()})`
+      );
+    } catch (e) {
+      logger.warn(`[BQ] diagnostic query failed: ${e.message}`);
+    }
+  }
+
   if (!isFiltered) toCache("vessels", rows);
   return rows;
 }

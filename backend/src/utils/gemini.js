@@ -190,7 +190,7 @@ function parseJSON(raw) {
   try {
     const m = /```json\s*([\s\S]+?)\s*```/i.exec(raw)
            || /```\s*([\s\S]+?)\s*```/i.exec(raw)
-           || /([{\[][\\s\S]*[}\]])/s.exec(raw);
+           || /([{\[][\s\S]*[}\]])/s.exec(raw);
     return m ? JSON.parse(m[1]) : null;
   } catch { return null; }
 }

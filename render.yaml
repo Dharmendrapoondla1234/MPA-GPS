@@ -26,9 +26,6 @@ services:
       # ── AI / LLM Keys ──────────────────────────────────────────────────────
       - key: GEMINI_API_KEY
         sync: false          # https://aistudio.google.com/apikey (free tier)
-      - key: ANTHROPIC_API_KEY
-        sync: false          # https://console.anthropic.com (Claude fallback)
-
       # ── Maps ───────────────────────────────────────────────────────────────
       - key: GOOGLE_MAPS_API_KEY
         sync: false          # For frontend map tiles
