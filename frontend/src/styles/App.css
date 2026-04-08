@@ -362,62 +362,122 @@ html, body, #root {
 /* ── Floating AI FABs ─────────────────────────────────────────────── */
 .ai-fab-group {
   position: fixed;
-  bottom: 24px;
-  right: 20px;
+  bottom: 28px;
+  right: 22px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   z-index: 50;
+  align-items: center;
 }
+
+/* FAB label tooltip — appears on hover to left of button */
+.ai-fab-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.ai-fab-label {
+  position: absolute;
+  right: calc(100% + 10px);
+  background: #0b1c2e;
+  border: 1px solid rgba(0,229,255,0.2);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(6px);
+  transition: all 0.18s;
+  pointer-events: none;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.ai-fab-wrap:hover .ai-fab-label {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+}
+
 .ai-fab {
-  width: 48px;
-  height: 48px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
-  border: 1px solid rgba(0, 229, 255, 0.35);
+  border: 1.5px solid rgba(0, 229, 255, 0.3);
   font-size: 20px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 0 rgba(0,229,255,0);
+  backdrop-filter: blur(8px);
+  position: relative;
+  overflow: hidden;
 }
+/* Shimmer ring on hover */
+.ai-fab::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0%, rgba(0,229,255,0.4) 50%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  animation: fabRing 2s linear infinite;
+}
+.ai-fab:hover::before { opacity: 1; }
+@keyframes fabRing { to { transform: rotate(360deg); } }
+
 .ai-fab-chat {
-  background: rgba(0, 229, 255, 0.15);
-  color: var(--cyan, #00e5ff);
-  box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+  background: linear-gradient(135deg, rgba(0,229,255,0.18), rgba(0,229,255,0.06));
+  color: #00e5ff;
+  border-color: rgba(0,229,255,0.4);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 20px rgba(0,229,255,0.15), inset 0 1px 0 rgba(0,229,255,0.2);
 }
 .ai-fab-chat:hover {
-  background: rgba(0, 229, 255, 0.28);
-  box-shadow: 0 0 30px rgba(0, 229, 255, 0.4);
-  transform: scale(1.08);
+  background: linear-gradient(135deg, rgba(0,229,255,0.30), rgba(0,229,255,0.12));
+  box-shadow: 0 6px 30px rgba(0,0,0,0.4), 0 0 35px rgba(0,229,255,0.35);
+  transform: scale(1.1) translateY(-2px);
+  border-color: rgba(0,229,255,0.7);
 }
 .ai-fab-fleet {
-  background: rgba(0, 255, 157, 0.1);
-  color: var(--green, #00ff9d);
-  border-color: rgba(0, 255, 157, 0.3);
-  box-shadow: 0 0 20px rgba(0, 255, 157, 0.15);
+  background: linear-gradient(135deg, rgba(0,255,157,0.15), rgba(0,255,157,0.04));
+  color: #00ff9d;
+  border-color: rgba(0,255,157,0.35);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 20px rgba(0,255,157,0.12), inset 0 1px 0 rgba(0,255,157,0.2);
 }
 .ai-fab-fleet:hover {
-  background: rgba(0, 255, 157, 0.22);
-  box-shadow: 0 0 30px rgba(0, 255, 157, 0.35);
-  transform: scale(1.08);
+  background: linear-gradient(135deg, rgba(0,255,157,0.28), rgba(0,255,157,0.10));
+  box-shadow: 0 6px 30px rgba(0,0,0,0.4), 0 0 35px rgba(0,255,157,0.3);
+  transform: scale(1.1) translateY(-2px);
+  border-color: rgba(0,255,157,0.7);
 }
 .ai-fab-agent {
-  background: rgba(255, 170, 0, 0.1);
+  background: linear-gradient(135deg, rgba(255,170,0,0.15), rgba(255,170,0,0.04));
   color: #ffaa00;
-  border-color: rgba(255, 170, 0, 0.3);
-  box-shadow: 0 0 20px rgba(255, 170, 0, 0.15);
+  border-color: rgba(255,170,0,0.35);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 20px rgba(255,170,0,0.12), inset 0 1px 0 rgba(255,170,0,0.2);
   font-size: 22px;
 }
 .ai-fab-agent:hover {
-  background: rgba(255, 170, 0, 0.22);
-  box-shadow: 0 0 30px rgba(255, 170, 0, 0.35);
-  transform: scale(1.08);
+  background: linear-gradient(135deg, rgba(255,170,0,0.28), rgba(255,170,0,0.10));
+  box-shadow: 0 6px 30px rgba(0,0,0,0.4), 0 0 35px rgba(255,170,0,0.3);
+  transform: scale(1.1) translateY(-2px);
+  border-color: rgba(255,170,0,0.7);
 }
+
+/* Label colors match each fab */
+.ai-fab-wrap:nth-child(1) .ai-fab-label { color: #ffaa00; border-color: rgba(255,170,0,0.25); }
+.ai-fab-wrap:nth-child(2) .ai-fab-label { color: #00ff9d; border-color: rgba(0,255,157,0.25); }
+.ai-fab-wrap:nth-child(3) .ai-fab-label { color: #00e5ff; border-color: rgba(0,229,255,0.25); }
 
 @media (max-width: 768px) {
   .app-ai-chat-drawer { width: 100vw; max-width: 100vw; }
-  .ai-fab-group { bottom: 16px; right: 14px; }
-  .ai-fab { width: 44px; height: 44px; font-size: 18px; }
+  .ai-fab-group { bottom: 18px; right: 16px; gap: 10px; }
+  .ai-fab { width: 46px; height: 46px; font-size: 18px; }
+  .ai-fab-label { display: none; }
 }

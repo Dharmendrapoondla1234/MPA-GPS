@@ -526,9 +526,18 @@ export default function App() {
       {/* Floating AI buttons */}
       {!aiChatOpen && (
         <div className="ai-fab-group">
-          <button className="ai-fab ai-fab-agent" onClick={() => setAgentPanelOpen(true)} title="Agentic AI Workspace">⬡</button>
-          <button className="ai-fab ai-fab-fleet" onClick={() => setAiFleetOpen(true)} title="AI Fleet Intelligence">⚡</button>
-          <button className="ai-fab ai-fab-chat" onClick={() => setAiChatOpen(true)} title="AI Maritime Assistant">✦</button>
+          <div className="ai-fab-wrap">
+            <span className="ai-fab-label">AGENTS</span>
+            <button className="ai-fab ai-fab-agent" onClick={() => setAgentPanelOpen(true)} title="Agentic AI Workspace">⬡</button>
+          </div>
+          <div className="ai-fab-wrap">
+            <span className="ai-fab-label">FLEET AI</span>
+            <button className="ai-fab ai-fab-fleet" onClick={() => setAiFleetOpen(true)} title="AI Fleet Intelligence">⚡</button>
+          </div>
+          <div className="ai-fab-wrap">
+            <span className="ai-fab-label">AI CHAT</span>
+            <button className="ai-fab ai-fab-chat" onClick={() => setAiChatOpen(true)} title="AI Maritime Assistant">✦</button>
+          </div>
         </div>
       )}
 
