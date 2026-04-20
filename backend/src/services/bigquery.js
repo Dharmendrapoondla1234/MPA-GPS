@@ -15,8 +15,8 @@ const DATASET = DATASET_ENV;
 const T = {
   VESSELS: `\`${PROJECT}.${DATASET}.f_vessel_live_tracking\``,
   MASTER: `\`${PROJECT}.${DATASET}.d_vessel_master\``,
-  ARRIVALS: `\`${PROJECT}.${DATASET}.f_vessel_arrivals\``,
-  DEPARTURES: `\`${PROJECT}.${DATASET}.f_vessel_departures\``,
+  ARRIVALS: `\`${PROJECT}.MPA_Vercel.Arrivals\``,
+  DEPARTURES: `\`${PROJECT}.MPA_Vercel.Departures\``,
   POSITIONS_HIST: `\`${PROJECT}.${DATASET}.stg_vessel_positions\``,
   USERS: `\`${PROJECT}.${DATASET}.MPA_Users\``,
   LEGACY_VESSELS: `\`${PROJECT}.MPA.MPA_Master_Vessels\``,
