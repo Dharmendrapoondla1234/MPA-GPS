@@ -127,15 +127,12 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
         fetchArrivals(2000, d, true),
         fetchDepartures(2000, d, true),
       ]);
-      // Keep only future timestamps (upcoming)
-      const now = Date.now();
-      const isUpcoming = (ts) => ts && new Date(ts).getTime() > now;
-
+      // Show all records (past and future) — labels applied via timeRelative()
       if (Array.isArray(arr)) {
-        setArrivals(arr.filter(v => isUpcoming(bq(v.arrival_time))));
+        setArrivals(arr);
       }
       if (Array.isArray(dep)) {
-        setDepartures(dep.filter(v => isUpcoming(bq(v.departure_time))));
+        setDepartures(dep);
       }
       setLastRefresh(new Date());
     } catch(e) { console.warn("[PortActivity]", e.message); }
