@@ -385,10 +385,15 @@ async function getRecentArrivals(limit = 2000, days = 30) {
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
-        query: `SELECT *,
+        query: `SELECT
+                  imo_number, vessel_name, call_sign, flag,
+                  arrival_time, arrival_date,
+                  location_from, location_to,
+                  arrival_source, berth_grid, voyage_purpose,
+                  shipping_agent, crew_count, passenger_count, ingested_at,
                   CASE WHEN arrival_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
                 FROM ${T.ARRIVALS}
-                WHERE arrival_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+                WHERE arrival_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
                   AND arrival_time <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL ${d} DAY)
                 ORDER BY arrival_time ASC LIMIT ${lim}`,
         location: BQ_LOCATION,
@@ -426,10 +431,14 @@ async function getRecentDepartures(limit = 2000, days = 30) {
   if (dbt) {
     try {
       const [rows] = await bigquery.query({
-        query: `SELECT *,
+        query: `SELECT
+                  imo_number, vessel_name, call_sign, flag,
+                  departure_time, departure_date,
+                  departure_source, next_port,
+                  shipping_agent, crew_count, passenger_count, ingested_at,
                   CASE WHEN departure_time > CURRENT_TIMESTAMP() THEN true ELSE false END AS is_upcoming
                 FROM ${T.DEPARTURES}
-                WHERE departure_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+                WHERE departure_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
                   AND departure_time <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL ${d} DAY)
                 ORDER BY departure_time ASC LIMIT ${lim}`,
         location: BQ_LOCATION,
