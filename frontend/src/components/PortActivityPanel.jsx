@@ -48,13 +48,14 @@ function timeRelative(ts) {
   } catch { return null; }
 }
 
-// Day range options for the filter
+// Day range options for the filter (null = All / no filter)
 const DAY_OPTIONS = [
-  { value:1,  label:"Today" },
-  { value:3,  label:"3 Days" },
-  { value:7,  label:"7 Days" },
-  { value:14, label:"14 Days" },
-  { value:30, label:"30 Days" },
+  { value:null, label:"All" },
+  { value:1,    label:"Today" },
+  { value:3,    label:"3 Days" },
+  { value:7,    label:"7 Days" },
+  { value:14,   label:"14 Days" },
+  { value:30,   label:"30 Days" },
 ];
 
 export function PortActivityTrigger({ onClick, arrivals, departures, isOpen }) {
@@ -86,7 +87,7 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
   const [search,     setSearch]     = useState("");
   const [flagFilter, setFlagFilter] = useState("");
   const [sortBy,     setSortBy]     = useState("time");
-  const [days,       setDays]       = useState(7);   // day-range filter
+  const [days,       setDays]       = useState(null); // null = no filter (show all)
   const [expanded,   setExpanded]   = useState(null);
   const [loadingVessel, setLoadingVessel] = useState(null);
   const panelRef  = useRef(null);
@@ -120,27 +121,48 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
   }, [vessels, onSelectVessel, mergeRecordOntoVessel]);
 
   const load = useCallback(async (dayOverride) => {
-    const d = dayOverride ?? days;
+    const d = dayOverride !== undefined ? dayOverride : days;
+    // When no day filter, fetch 90 days back + 90 days forward for full history
+    const fetchDays = d ?? 90;
     setLoading(true);
     try {
       const [arr, dep] = await Promise.all([
-        fetchArrivals(2000, d, true),
-        fetchDepartures(2000, d, true),
+        fetchArrivals(2000, fetchDays, true),
+        fetchDepartures(2000, fetchDays, true),
       ]);
-      // Show only upcoming records within the selected day range
-      const now = Date.now();
-      const cutoff = now + d * 24 * 60 * 60 * 1000;
-      const isUpcoming = (ts) => {
-        if (!ts) return false;
-        const t = new Date(typeof ts === 'object' && 'value' in ts ? ts.value : ts).getTime();
-        return t >= now && t <= cutoff;
+
+      const parseTs = (ts) => {
+        if (!ts) return null;
+        return new Date(typeof ts === 'object' && 'value' in ts ? ts.value : ts).getTime();
       };
 
       if (Array.isArray(arr)) {
-        setArrivals(arr.filter(v => isUpcoming(v.arrival_time)));
+        if (d === null) {
+          // No filter — show all historical + future
+          setArrivals(arr);
+        } else {
+          // Filter active — show only upcoming within the day range
+          const now = Date.now();
+          const cutoff = now + d * 24 * 60 * 60 * 1000;
+          setArrivals(arr.filter(v => {
+            const t = parseTs(v.arrival_time);
+            return t !== null && t >= now && t <= cutoff;
+          }));
+        }
       }
       if (Array.isArray(dep)) {
-        setDepartures(dep.filter(v => isUpcoming(v.departure_time)));
+        if (d === null) {
+          // No filter — show all historical + future
+          setDepartures(dep);
+        } else {
+          // Filter active — show only upcoming within the day range
+          const now = Date.now();
+          const cutoff = now + d * 24 * 60 * 60 * 1000;
+          setDepartures(dep.filter(v => {
+            const t = parseTs(v.departure_time);
+            return t !== null && t >= now && t <= cutoff;
+          }));
+        }
       }
       setLastRefresh(new Date());
     } catch(e) { console.warn("[PortActivity]", e.message); }
