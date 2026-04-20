@@ -127,12 +127,20 @@ export default function PortActivityPanel({ onSelectVessel, selectedImo, isOpen,
         fetchArrivals(2000, d, true),
         fetchDepartures(2000, d, true),
       ]);
-      // Show all records (past and future) — labels applied via timeRelative()
+      // Show only upcoming records within the selected day range
+      const now = Date.now();
+      const cutoff = now + d * 24 * 60 * 60 * 1000;
+      const isUpcoming = (ts) => {
+        if (!ts) return false;
+        const t = new Date(typeof ts === 'object' && 'value' in ts ? ts.value : ts).getTime();
+        return t >= now && t <= cutoff;
+      };
+
       if (Array.isArray(arr)) {
-        setArrivals(arr);
+        setArrivals(arr.filter(v => isUpcoming(v.arrival_time)));
       }
       if (Array.isArray(dep)) {
-        setDepartures(dep);
+        setDepartures(dep.filter(v => isUpcoming(v.departure_time)));
       }
       setLastRefresh(new Date());
     } catch(e) { console.warn("[PortActivity]", e.message); }
