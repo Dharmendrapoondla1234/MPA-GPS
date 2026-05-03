@@ -1,43 +1,56 @@
-// src/utils/gemini.js — Gemini caller v4
-// KEY FIXES vs v3:
-//   1. Global serial queue — all Gemini calls across the whole process are
-//      serialised. No more concurrent requests blowing through 15 RPM.
-//   2. On 429: stop retrying the same model, drain the queue wait, then try
-//      the next model — avoids exponential backoff cascade that causes timeout.
-//   3. Minimum 5s gap between requests (60s / 12 slots = 5s).
-//   4. On 429 with no Retry-After, wait a full 15s before next attempt.
+// src/utils/gemini.js — Gemini caller v5
+// ROOT CAUSE FIX: gemini-1.5-flash-latest returns 404 on free-tier API keys.
+// All 1.5-family models removed. Using ONLY confirmed 2.x free-tier models.
+//
+// Model priority:
+//   1. gemini-2.0-flash              — primary, fastest
+//   2. gemini-2.0-flash-lite         — lighter, same quota pool
+//   3. gemini-2.5-flash-preview-04-17 — newest, slightly slower
+//
+// Rate limit strategy:
+//   - Global serial queue: ALL calls across ALL routes share one queue.
+//     No concurrent requests → never bust 15 RPM.
+//   - 5s minimum gap between calls (12/min max, under 15 RPM limit).
+//   - On 429: skip model immediately, wait 15s, try next model.
+//   - On ALL models 429: wait full 60s window, retry primary once.
 "use strict";
 
 const logger = require("./logger");
 
-// ── Models — only confirmed-working free-tier models ─────────────────────────
+// ── ONLY confirmed-working free-tier models (May 2026) ────────────────────────
+// gemini-1.5-flash-latest  → 404 on free-tier keys — REMOVED
+// gemini-1.5-flash-8b      → removed from API      — REMOVED
+// gemini-2.5-flash-preview uses same quota pool as 2.0-flash
 const GEMINI_MODELS = [
-  "gemini-2.0-flash",         // Primary ✅
-  "gemini-2.0-flash-lite",    // Lighter variant ✅
-  "gemini-1.5-flash-latest",  // Stable alias (never 404) ✅
+  "gemini-2.0-flash",                // Primary ✅
+  "gemini-2.0-flash-lite",           // Fallback ✅
+  "gemini-2.5-flash-preview-04-17",  // Latest preview ✅
 ];
 
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
 // ── Global serial queue ───────────────────────────────────────────────────────
-// All calls share ONE queue so concurrent requests from different routes
-// (draft-email + fleet-insights + contact enrichment) don't all fire at once.
-let _queuePromise = Promise.resolve();
-let _lastCallAt   = 0;
-const MIN_GAP_MS  = 5_000;   // 5s gap → max 12 req/min, safely under 15 RPM
+// One queue shared by ALL routes (draft-email, fleet-insights, contact-enrich).
+// Prevents simultaneous requests from burning the 15 RPM quota all at once.
+const MIN_GAP_MS = 5_000;  // 5s gap = max 12 req/min, safely under 15 RPM
+let _queue   = Promise.resolve();
+let _lastAt  = 0;
 
 function enqueue(fn) {
-  _queuePromise = _queuePromise.then(async () => {
-    const gap = MIN_GAP_MS - (Date.now() - _lastCallAt);
+  _queue = _queue.then(async () => {
+    const gap = MIN_GAP_MS - (Date.now() - _lastAt);
     if (gap > 0) await sleep(gap);
-    _lastCallAt = Date.now();
+    _lastAt = Date.now();
     return fn();
   });
-  return _queuePromise;
+  return _queue;
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// ── Core HTTP call (single attempt, no retry logic — queue handles pacing) ───
-async function _callOnce(url, body) {
+// ── Single HTTP attempt ───────────────────────────────────────────────────────
+async function _attempt(model, apiKey, body) {
+  const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,13 +62,13 @@ async function _callOnce(url, body) {
 
 // ── Main caller ───────────────────────────────────────────────────────────────
 async function callGeminiWithRetry(systemPrompt, userMessage, maxTokens = 1000, opts = {}) {
-  const { maxRetries = 2, baseDelayMs = 2000 } = opts;
+  const { maxRetries = 1, baseDelayMs = 2000 } = opts;
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "";
 
   if (!apiKey) {
     throw new Error(
-      "GEMINI_API_KEY not configured. Add it in Render → Environment. " +
-      "Free key: https://aistudio.google.com/apikey"
+      "GEMINI_API_KEY not configured. Add it in Render → Environment → GEMINI_API_KEY. " +
+      "Free key at: https://aistudio.google.com/apikey"
     );
   }
 
@@ -74,20 +87,18 @@ async function callGeminiWithRetry(systemPrompt, userMessage, maxTokens = 1000, 
     ],
   };
 
-  let lastError = null;
+  let lastError  = null;
+  let allHit429  = true;   // track if every model got 429 (full quota hit)
 
   for (const model of GEMINI_MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       let res;
       try {
-        // All calls go through the serial queue — no concurrent requests
-        res = await enqueue(() => _callOnce(url, body));
+        res = await enqueue(() => _attempt(model, apiKey, body));
       } catch (err) {
         if (err.name === "AbortError" || err.name === "TimeoutError") {
-          lastError = new Error(`Timeout on ${model} (attempt ${attempt + 1})`);
-          logger.warn(`[gemini] ${model}: request timeout`);
+          lastError = new Error(`Timeout on ${model}`);
+          logger.warn(`[gemini] ${model}: timeout`);
           if (attempt < maxRetries) continue;
         } else {
           lastError = err;
@@ -95,55 +106,59 @@ async function callGeminiWithRetry(systemPrompt, userMessage, maxTokens = 1000, 
         break;
       }
 
-      // ── 429: rate limited ─────────────────────────────────────────────────
+      // ── 429: quota hit — skip this model, wait, try next ─────────────────
       if (res.status === 429) {
-        // Read Retry-After if provided, else use 15s flat wait
         const retryAfter = parseInt(res.headers.get("Retry-After") || "0");
-        const waitMs = retryAfter > 0 ? retryAfter * 1000 : 15_000;
-        logger.warn(`[gemini] ${model}: 429 — waiting ${Math.round(waitMs / 1000)}s then trying next model`);
-        // On 429: don't retry same model — burn the wait then move on
+        const waitMs     = retryAfter > 0 ? retryAfter * 1000 : 15_000;
+        logger.warn(`[gemini] ${model}: 429 — waiting ${Math.round(waitMs / 1000)}s, trying next model`);
         await sleep(waitMs);
-        lastError = new Error(`429 quota exceeded on ${model}`);
-        break; // jump to next model
+        lastError = new Error(`429 on ${model}`);
+        break;  // move to next model, don't retry same one
       }
 
-      // ── 404: model not found ──────────────────────────────────────────────
+      // ── 404: model not on this key — skip immediately ─────────────────────
       if (res.status === 404) {
-        logger.warn(`[gemini] ${model}: 404 — skipping`);
+        logger.warn(`[gemini] ${model}: 404 not found — skipping`);
         lastError = new Error(`Model ${model} not found (404)`);
-        break; // jump to next model immediately
+        allHit429 = false;
+        break;  // next model
       }
 
-      // ── 503: temporary unavailable ────────────────────────────────────────
+      // ── 503: temporary — brief retry ─────────────────────────────────────
       if (res.status === 503) {
-        const delay = baseDelayMs * (attempt + 1);
-        logger.warn(`[gemini] ${model}: 503 — retrying in ${delay}ms`);
-        if (attempt < maxRetries) { await sleep(delay); continue; }
+        logger.warn(`[gemini] ${model}: 503 — retrying`);
+        if (attempt < maxRetries) { await sleep(baseDelayMs); continue; }
         lastError = new Error(`503 on ${model}`);
+        allHit429 = false;
         break;
       }
 
-      // ── 403: bad API key ──────────────────────────────────────────────────
+      // ── 403: bad key — fail immediately ──────────────────────────────────
       if (res.status === 403) {
         const txt = await res.text().catch(() => "");
-        throw new Error(`Gemini 403 — check your API key. Details: ${txt.slice(0, 150)}`);
+        throw new Error(
+          `Gemini API key rejected (403). Check GEMINI_API_KEY in Render dashboard. ` +
+          `Get a free key at https://aistudio.google.com/apikey. Details: ${txt.slice(0, 100)}`
+        );
       }
 
       // ── Other HTTP error ──────────────────────────────────────────────────
       if (!res.ok) {
         const errTxt = await res.text().catch(() => "");
         lastError = new Error(`Gemini HTTP ${res.status}: ${errTxt.slice(0, 150)}`);
+        allHit429 = false;
         if (attempt < maxRetries) { await sleep(baseDelayMs); continue; }
         break;
       }
 
       // ── Success ───────────────────────────────────────────────────────────
+      allHit429 = false;
       const json = await res.json();
       const cand = json?.candidates?.[0];
 
       if (!cand) {
         const reason = json?.promptFeedback?.blockReason;
-        lastError = new Error(reason ? `Content blocked: ${reason}` : "No candidates");
+        lastError = new Error(reason ? `Content blocked: ${reason}` : "No candidates returned");
         if (attempt < maxRetries) { await sleep(baseDelayMs); continue; }
         break;
       }
@@ -158,11 +173,31 @@ async function callGeminiWithRetry(systemPrompt, userMessage, maxTokens = 1000, 
       logger.info(`[gemini] ✓ ${model} (${text.length} chars, attempt ${attempt + 1})`);
       return text;
     }
-
-    if (lastError?.message.includes("403")) break; // don't try other models on auth error
   }
 
-  throw lastError || new Error("Gemini: all models exhausted");
+  // All models exhausted. If all hit 429, the quota window needs to reset.
+  // Wait 60s and retry once with the primary model as a last-chance attempt.
+  if (allHit429) {
+    logger.warn("[gemini] All models hit 429 — quota window full. Waiting 60s for reset…");
+    await sleep(62_000);
+    try {
+      const res = await enqueue(() => _attempt(GEMINI_MODELS[0], apiKey, body));
+      if (res.ok) {
+        const json = await res.json();
+        const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          logger.info(`[gemini] ✓ ${GEMINI_MODELS[0]} after quota reset`);
+          return text;
+        }
+      }
+    } catch (_) { /* fall through */ }
+    throw new Error(
+      "Gemini free-tier quota exhausted (15 req/min). " +
+      "Waited 60s but still rate-limited. Try again in a moment, or upgrade to a paid key."
+    );
+  }
+
+  throw lastError || new Error("Gemini: all models failed");
 }
 
 // ── callLLM: public interface ─────────────────────────────────────────────────
