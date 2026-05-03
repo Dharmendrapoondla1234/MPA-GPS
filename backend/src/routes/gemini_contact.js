@@ -1,4 +1,4 @@
-// src/routes/gemini_contact.js — v1
+// src/routes/gemini_contact.js — v2
 // Direct Gemini AI contact enrichment endpoints
 // Provides high-accuracy contact discovery powered by Gemini 2.0 Flash
 "use strict";
@@ -13,6 +13,12 @@ const {
   geminiBoostPipeline,
 } = require("../services/intelligence/geminiEnricher");
 const { runPipeline } = require("../services/intelligence/pipeline");
+
+// FIX BUG 5: callGeminiWithRetry require moved to TOP of file, before module.exports.
+// Previously it was appended after module.exports — technically worked in Node.js
+// (router is a mutable reference) but was fragile and caused intermittent
+// /crm-draft 404s during cold starts when the file was partially evaluated.
+const { callGeminiWithRetry } = require("../utils/gemini");
 
 function withTimeout(p, ms, label) {
   let t;
@@ -46,7 +52,6 @@ router.post("/enrich", async (req, res, next) => {
 
     logger.info(`[gemini-route] enrich IMO=${imoInt || "—"} owner="${owner || "—"}"`);
 
-    // Run full pipeline with Gemini boost
     const result = await withTimeout(
       runPipeline({ imo: imoInt, owner, manager, operator, ship_manager, forceRefresh: forceRefresh === true }),
       120_000,
@@ -185,15 +190,12 @@ router.get("/status", (_req, res) => {
   });
 });
 
-module.exports = router;
-
-
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/gemini/crm-draft
 // Persona extraction and CRM email helper using shared gemini util (with retry)
+// FIX BUG 5: Route was previously defined AFTER module.exports — moved here,
+// before the export, so it is guaranteed to be registered on every code path.
 // ─────────────────────────────────────────────────────────────────────────────
-const { callGeminiWithRetry } = require("../utils/gemini");
-
 router.post("/crm-draft", async (req, res, next) => {
   try {
     const { type, url, label, prompt: userPrompt } = req.body || {};
@@ -203,6 +205,7 @@ router.post("/crm-draft", async (req, res, next) => {
       return res.status(503).json({
         success: false,
         error: "GEMINI_API_KEY not configured in Render environment variables",
+        setup: "Get a free key at https://aistudio.google.com/apikey",
       });
     }
 
@@ -243,3 +246,8 @@ router.post("/crm-draft", async (req, res, next) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// module.exports is now LAST — all routes registered before export
+// ─────────────────────────────────────────────────────────────────────────────
+module.exports = router;

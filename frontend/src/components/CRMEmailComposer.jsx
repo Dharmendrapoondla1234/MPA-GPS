@@ -115,7 +115,10 @@ function useDB() {
 // ─────────────────────────────────────────
 // ── AI proxy (calls backend — no key exposure) ─
 // ─────────────────────────────────────────
-const API = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
+// FIX BUG 2: Was "maritime-connect.onrender.com" — that service doesn't exist.
+// Backend is deployed as "vessel-backend" per render.yaml. Using the env var
+// (set at build time by Render) with the correct fallback.
+const API = process.env.REACT_APP_API_URL || "https://vessel-backend.onrender.com/api";
 
 async function aiGenerate(prompt) {
   const res = await fetch(`${API}/gemini/crm-draft`, {

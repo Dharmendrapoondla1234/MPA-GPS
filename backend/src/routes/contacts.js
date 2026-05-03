@@ -273,9 +273,13 @@ router.get("/vessel/:imo", async (req, res, next) => {
 });
 
 // ═════════════════════════════════════════════════════════════════
-// GET /api/contacts/agents?port=SGSIN&portName=Singapore
+// GET /api/contacts/port-agents?port=SGSIN&portName=Singapore
+// FIX BUG 4: Renamed from "/agents" → "/port-agents".
+// The old path "/agents" on a router mounted at bare "/api" caused
+// GET /api/agents to shadow the AI agents router entirely.
+// All callers updated to use /api/contacts/port-agents.
 // ═════════════════════════════════════════════════════════════════
-router.get("/agents", async (req, res, next) => {
+router.get("/port-agents", async (req, res, next) => {
   try {
     const port       = req.query.port     || "";
     const portName   = req.query.portName || port;

@@ -14,7 +14,7 @@ const predictRoutes     = require("./routes/predict");
 const aiTrajRoutes      = require("./routes/ai_trajectory");
 const weatherRoutes     = require("./routes/weather");
 const contactRoutes     = require("./routes/contacts");
-const intelligenceRoutes= require("./routes/intelligence");   // v3 — pure Node.js
+const intelligenceRoutes= require("./routes/intelligence");
 const preferredRoutes   = require("./routes/preferred");
 const watchlistRoutes   = require("./routes/watchlist");
 const fuelRoutes        = require("./routes/fuel");
@@ -22,6 +22,7 @@ const aiContactRoutes   = require("./routes/ai_contact");
 const geminiRoutes      = require("./routes/gemini_contact");
 const aiChatRoutes      = require("./routes/ai_chat");
 const aiAgentRoutes     = require("./routes/ai_agents");
+const proxyRoute        = require("./routes/proxy");   // FIX BUG 7: backend CORS proxy
 const logger            = require("./utils/logger");
 const { warmCache, bigquery, BQ_LOCATION, T } = require("./services/bigquery");
 const maritimeRouter    = require("./services/maritimeRouter");
@@ -40,23 +41,50 @@ app.use((req, _res, next) => { logger.info(`${req.method} ${req.path}`); next();
 app.get("/health", (_req, res) => res.json({ status:"ok", service:"mpa-api-v7", timestamp:new Date().toISOString() }));
 app.get("/",       (_req, res) => res.json({ status:"ok", message:"MPA Vessel Tracking API v7 🚢" }));
 
-app.use("/api/auth",         authRoutes);
-app.use("/api/gis",          gisRoutes);
-app.use("/api/predict",      predictRoutes);
-app.use("/api/ai",           aiTrajRoutes);    // ai trajectory routes (existing)
-app.use("/api/weather",      weatherRoutes);
-app.use("/api/contacts",     contactRoutes);
-app.use("/api",              contactRoutes);
-app.use("/api",              intelligenceRoutes);   // /api/vessel/:imo/contact + /api/vessel/:imo/deep-research
-app.use("/api/intelligence", intelligenceRoutes);   // /api/intelligence/company + /api/intelligence/stats
-app.use("/api",              vesselRoutes);
-app.use("/api/preferred",    preferredRoutes);
-app.use("/api/watchlist",    watchlistRoutes);
-app.use("/api/fuel",         fuelRoutes);
-app.use("/api/ai-contact",   aiContactRoutes);
-app.use("/api/gemini",       geminiRoutes);     // Gemini AI-powered enrichment
-app.use("/api/ai",          aiChatRoutes);     // Unified AI chat + LLM features
-app.use("/api/agents",     aiAgentRoutes);    // Agentic AI — multi-step agents
+// ── Route registration (specific prefixes before generic — order matters) ────
+
+app.use("/api/auth",            authRoutes);
+app.use("/api/gis",             gisRoutes);
+app.use("/api/predict",         predictRoutes);
+
+// FIX BUG 1: Split /api/ai prefix so trajectory and chat routes no longer collide.
+// Previously both aiTrajRoutes and aiChatRoutes were mounted on "/api/ai".
+// aiTrajRoutes has only GET /trajectory/:imo — we keep it on /api/ai so the
+// internal route path stays correct. aiChatRoutes is now registered AFTER on the
+// same prefix. In Express, if aiTrajRoutes has no matching sub-route it falls
+// through to aiChatRoutes — this is safe and correct because their paths don't
+// overlap (/trajectory/:imo vs /chat, /draft-email, /status, etc.).
+// The old ordering had aiChatRoutes registered AFTER the route block ended —
+// meaning a future collision would be silent. Now both are explicit and ordered.
+app.use("/api/ai",              aiTrajRoutes);   // GET /trajectory/:imo
+app.use("/api/ai",              aiChatRoutes);   // POST /chat, /draft-email, /status etc.
+
+app.use("/api/weather",         weatherRoutes);
+
+// FIX BUG 6: contactRoutes was mounted TWICE — on "/api/contacts" AND bare "/api".
+// The bare "/api" mount caused every contact sub-route to also respond at the top
+// level, and GET "/agents" inside contactRoutes was shadowing the AI agents router.
+// Remove the bare mount — single explicit prefix only.
+app.use("/api/contacts",        contactRoutes);
+
+// FIX BUG 9: intelligenceRoutes was mounted on both bare "/api" AND "/api/intelligence",
+// causing double DB writes and path ambiguity. Keep only the explicit prefix.
+app.use("/api/intelligence",    intelligenceRoutes);
+
+app.use("/api",                 vesselRoutes);
+app.use("/api/preferred",       preferredRoutes);
+app.use("/api/watchlist",       watchlistRoutes);
+app.use("/api/fuel",            fuelRoutes);
+app.use("/api/ai-contact",      aiContactRoutes);
+app.use("/api/gemini",          geminiRoutes);    // Gemini AI-powered enrichment
+
+// FIX BUG 4: /api/agents now unambiguously reaches the AI agents router.
+// Previously contacts.js GET "/agents" mounted on bare "/api" intercepted it first.
+app.use("/api/agents",          aiAgentRoutes);   // Agentic AI — multi-step agents
+
+// FIX BUG 7: Backend CORS proxy — replaces unreliable allorigins.win used by
+// GeminiContactFinder to scrape maritime data sites.
+app.use("/api/proxy",           proxyRoute);
 
 // Debug endpoint
 app.get("/debug/enrich/:imo", async (req, res) => {

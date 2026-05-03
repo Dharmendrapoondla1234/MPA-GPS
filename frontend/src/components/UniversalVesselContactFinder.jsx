@@ -9,7 +9,9 @@
 import React, { useState, useCallback, useEffect, useRef, memo } from "react";
 import "./UniversalVesselContactFinder.css";
 
-const BASE_URL = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
+// FIX BUG 2: Was "maritime-connect.onrender.com" — that service doesn't exist.
+// Backend is deployed as "vessel-backend" per render.yaml.
+const BASE_URL = process.env.REACT_APP_API_URL || "https://vessel-backend.onrender.com/api";
 const CLIENT_TIMEOUT_MS = 70_000;
 
 function confColor(v) {

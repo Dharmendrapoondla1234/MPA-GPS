@@ -11,7 +11,9 @@ import {
 } from "../services/api";
 import "./WatchlistPanel.css";
 
-const BASE_URL = process.env.REACT_APP_API_URL || "https://maritime-connect.onrender.com/api";
+// FIX BUG 2: Was "maritime-connect.onrender.com" — that service doesn't exist.
+// Backend is deployed as "vessel-backend" per render.yaml.
+const BASE_URL = process.env.REACT_APP_API_URL || "https://vessel-backend.onrender.com/api";
 
 // ── Shared module-level state (one source of truth across all components) ──
 let _watchlist = [];
