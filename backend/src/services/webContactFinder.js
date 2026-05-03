@@ -65,12 +65,24 @@ async function safeFetch(url, opts = {}, timeoutMs = 8000) {
   }
 }
 
+// FIX: Added duckduckgo, google, bing, yahoo, w3, schema, cloudflare and other
+// common non-contact domains that appear in HTML/JS of search result pages.
+// Previously "error-lite@duckduckgo.com" was leaking through as a real contact email.
+const EMAIL_BLOCKLIST = [
+  "example", "yourdomain", "@2x", ".png", ".jpg", ".gif", ".svg",
+  "sentry", "wix", "cdn", "noreply", "no-reply", "unsubscribe",
+  "duckduckgo", "google", "bing", "yahoo", "baidu", "yandex",
+  "w3.org", "schema.org", "cloudflare", "amazonaws", "facebook",
+  "twitter", "linkedin", "instagram", "tiktok", "analytics",
+  "pixel", "track", "beacon", "localhost", "test@", "user@",
+  "admin@admin", "info@info",
+];
+
 function extractEmails(text) {
-  return [...new Set((text || "").match(EMAIL_RE) || [])].filter(e =>
-    !e.includes("example") && !e.includes("yourdomain") &&
-    !e.includes("@2x") && !e.includes(".png") && e.length < 80 &&
-    !e.includes("sentry") && !e.includes("wix") && !e.includes("cdn")
-  );
+  return [...new Set((text || "").match(EMAIL_RE) || [])].filter(e => {
+    const lower = e.toLowerCase();
+    return e.length < 80 && !EMAIL_BLOCKLIST.some(bad => lower.includes(bad));
+  });
 }
 function extractPhones(text) {
   return [...new Set((text || "").match(PHONE_RE) || [])]

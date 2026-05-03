@@ -94,7 +94,12 @@ router.get("/vessels/low-efficiency", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get("/intelligence/company", async (req, res, next) => {
+// FIX: These routes had "/intelligence/company" as their internal path.
+// When mounted at /api/intelligence in server.js, the full path became
+// /api/intelligence/intelligence/company — a DOUBLE prefix bug.
+// Fixed: path prefix is now just "/company" and "/stats" and "/cache/:imo"
+// so they correctly resolve to /api/intelligence/company etc.
+router.get("/company", async (req, res, next) => {
   try {
     const { name, address } = req.query;
     if (!name || name.trim().length < 3) return res.status(400).json({ success:false, error:"?name= required" });
@@ -104,9 +109,9 @@ router.get("/intelligence/company", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get("/intelligence/stats", (_req, res) => { res.json({ success:true, data:db.getStats() }); });
+router.get("/stats", (_req, res) => { res.json({ success:true, data:db.getStats() }); });
 
-router.delete("/intelligence/cache/:imo", (req, res) => {
+router.delete("/cache/:imo", (req, res) => {
   db.clearCachedResult(req.params.imo);
   res.json({ success:true, message:`Cache cleared for IMO ${req.params.imo}` });
 });

@@ -195,7 +195,8 @@ router.get("/status", (_req, res) => {
   res.json({
     gemini: {
       configured: !!gKey,
-      models: ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"],
+      // FIX: gemini-1.5-flash-8b removed from API (returns 404). Updated model list.
+      models: ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"],
       key_preview: gKey ? `${gKey.slice(0, 8)}...` : null,
       free_tier: { rpm: 15, rpd: 1500 },
       setup_url: "https://aistudio.google.com/apikey",

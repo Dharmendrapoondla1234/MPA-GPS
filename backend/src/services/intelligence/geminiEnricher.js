@@ -7,7 +7,8 @@
 const logger = require("../../utils/logger");
 const { HTTP_TIMEOUT_MS } = require("../../config");
 
-const GEMINI_MODEL = "gemini-2.0-flash"; // Fast and cheap
+// FIX: gemini-1.5-flash-8b removed from API. Use gemini-2.0-flash.
+const GEMINI_MODEL = "gemini-2.0-flash";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

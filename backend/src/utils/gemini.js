@@ -5,11 +5,13 @@
 
 const logger = require("./logger");
 
-// Model cascade: try newest first, fall back to stable versions
+// Model cascade: try newest first, fall back to stable versions.
+// FIX: gemini-1.5-flash-8b was removed from the API (returns 404).
+// Using only confirmed-available models as of 2025.
 const GEMINI_MODELS = [
-  "gemini-2.0-flash",        // Latest — fast and capable
-  "gemini-1.5-flash",        // Stable fallback
-  "gemini-1.5-flash-8b",     // Lightweight last resort
+  "gemini-2.0-flash",          // Primary — fast, capable, free tier
+  "gemini-2.0-flash-lite",     // Lighter variant of 2.0
+  "gemini-1.5-flash",          // Stable fallback
 ];
 
 // Simple in-memory rate limiter (per-process)

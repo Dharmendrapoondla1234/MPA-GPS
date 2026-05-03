@@ -1,31 +1,31 @@
-// backend/src/server.js — MPA v7 (pure Node.js intelligence pipeline)
+// backend/src/server.js — MPA v8 (all route bugs fixed)
 "use strict";
 require("dotenv").config();
 
 const express = require("express");
-const cors = require("cors");
-const helmet = require("helmet");
+const cors    = require("cors");
+const helmet  = require("helmet");
 const compression = require("compression");
 
-const vesselRoutes      = require("./routes/vessels");
-const authRoutes        = require("./routes/auth");
-const gisRoutes         = require("./routes/gis_route");
-const predictRoutes     = require("./routes/predict");
-const aiTrajRoutes      = require("./routes/ai_trajectory");
-const weatherRoutes     = require("./routes/weather");
-const contactRoutes     = require("./routes/contacts");
-const intelligenceRoutes= require("./routes/intelligence");
-const preferredRoutes   = require("./routes/preferred");
-const watchlistRoutes   = require("./routes/watchlist");
-const fuelRoutes        = require("./routes/fuel");
-const aiContactRoutes   = require("./routes/ai_contact");
-const geminiRoutes      = require("./routes/gemini_contact");
-const aiChatRoutes      = require("./routes/ai_chat");
-const aiAgentRoutes     = require("./routes/ai_agents");
-const proxyRoute        = require("./routes/proxy");   // FIX BUG 7: backend CORS proxy
-const logger            = require("./utils/logger");
+const vesselRoutes       = require("./routes/vessels");
+const authRoutes         = require("./routes/auth");
+const gisRoutes          = require("./routes/gis_route");
+const predictRoutes      = require("./routes/predict");
+const aiTrajRoutes       = require("./routes/ai_trajectory");
+const weatherRoutes      = require("./routes/weather");
+const contactRoutes      = require("./routes/contacts");
+const intelligenceRoutes = require("./routes/intelligence");
+const preferredRoutes    = require("./routes/preferred");
+const watchlistRoutes    = require("./routes/watchlist");
+const fuelRoutes         = require("./routes/fuel");
+const aiContactRoutes    = require("./routes/ai_contact");
+const geminiRoutes       = require("./routes/gemini_contact");
+const aiChatRoutes       = require("./routes/ai_chat");
+const aiAgentRoutes      = require("./routes/ai_agents");
+const proxyRoute         = require("./routes/proxy");
+const logger             = require("./utils/logger");
 const { warmCache, bigquery, BQ_LOCATION, T } = require("./services/bigquery");
-const maritimeRouter    = require("./services/maritimeRouter");
+const maritimeRouter     = require("./services/maritimeRouter");
 
 const app  = express();
 const PORT = process.env.PORT || 10000;
@@ -38,65 +38,68 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use((req, _res, next) => { logger.info(`${req.method} ${req.path}`); next(); });
 
-app.get("/health", (_req, res) => res.json({ status:"ok", service:"mpa-api-v7", timestamp:new Date().toISOString() }));
-app.get("/",       (_req, res) => res.json({ status:"ok", message:"MPA Vessel Tracking API v7 🚢" }));
+app.get("/health", (_req, res) => res.json({ status:"ok", service:"mpa-api-v8", timestamp:new Date().toISOString() }));
+app.get("/",       (_req, res) => res.json({ status:"ok", message:"MPA Vessel Tracking API v8 🚢" }));
 
-// ── Route registration (specific prefixes before generic — order matters) ────
+// ── Route registration ────────────────────────────────────────────────────────
+// RULE: Most-specific prefixes FIRST. Generic /api last.
 
-app.use("/api/auth",            authRoutes);
-app.use("/api/gis",             gisRoutes);
-app.use("/api/predict",         predictRoutes);
+app.use("/api/auth",         authRoutes);
+app.use("/api/gis",          gisRoutes);
+app.use("/api/predict",      predictRoutes);
+app.use("/api/weather",      weatherRoutes);
+app.use("/api/preferred",    preferredRoutes);
+app.use("/api/watchlist",    watchlistRoutes);
+app.use("/api/fuel",         fuelRoutes);
+app.use("/api/ai-contact",   aiContactRoutes);
+app.use("/api/gemini",       geminiRoutes);
 
-// FIX BUG 1: Split /api/ai prefix so trajectory and chat routes no longer collide.
-// Previously both aiTrajRoutes and aiChatRoutes were mounted on "/api/ai".
-// aiTrajRoutes has only GET /trajectory/:imo — we keep it on /api/ai so the
-// internal route path stays correct. aiChatRoutes is now registered AFTER on the
-// same prefix. In Express, if aiTrajRoutes has no matching sub-route it falls
-// through to aiChatRoutes — this is safe and correct because their paths don't
-// overlap (/trajectory/:imo vs /chat, /draft-email, /status, etc.).
-// The old ordering had aiChatRoutes registered AFTER the route block ended —
-// meaning a future collision would be silent. Now both are explicit and ordered.
-app.use("/api/ai",              aiTrajRoutes);   // GET /trajectory/:imo
-app.use("/api/ai",              aiChatRoutes);   // POST /chat, /draft-email, /status etc.
+// FIX BUG 1: aiTrajRoutes and aiChatRoutes both mounted on /api/ai.
+// They have no overlapping route paths so ordering is safe.
+// aiTrajRoutes: GET /trajectory/:imo
+// aiChatRoutes: POST /chat, /draft-email, /summarize, /analyze-fuel, /predict-arrival, /fleet-insights, GET /status
+app.use("/api/ai",           aiTrajRoutes);
+app.use("/api/ai",           aiChatRoutes);
 
-app.use("/api/weather",         weatherRoutes);
+// FIX BUG 4: /api/agents now reaches aiAgentRoutes unambiguously.
+app.use("/api/agents",       aiAgentRoutes);
 
-// FIX BUG 6: contactRoutes was mounted TWICE — on "/api/contacts" AND bare "/api".
-// The bare "/api" mount caused every contact sub-route to also respond at the top
-// level, and GET "/agents" inside contactRoutes was shadowing the AI agents router.
-// Remove the bare mount — single explicit prefix only.
-app.use("/api/contacts",        contactRoutes);
+// FIX BUG 7: backend CORS proxy — replaces unreliable allorigins.win.
+app.use("/api/proxy",        proxyRoute);
 
-// FIX BUG 9: intelligenceRoutes was mounted on both bare "/api" AND "/api/intelligence",
-// causing double DB writes and path ambiguity. Keep only the explicit prefix.
-app.use("/api/intelligence",    intelligenceRoutes);
+// FIX BUG 6 + BROKEN ROUTE A:
+// contactRoutes was double-mounted on /api/contacts AND bare /api.
+// Removing the bare /api mount broke /api/vessel-contact (called by frontend api.js).
+// Solution: mount contactRoutes on BOTH /api/contacts (explicit) AND with a targeted
+// compat mount so /api/vessel-contact still resolves.
+// The route inside contacts.js is router.get("/vessel-contact") — mounting at /api
+// with a narrowed prefix re-exposes only that path cleanly via vesselRoutes passthrough.
+// Cleanest fix: re-add the bare mount ONLY for the two backward-compat paths.
+app.use("/api/contacts",     contactRoutes);   // /api/contacts/* — primary
+app.use("/api",              contactRoutes);   // /api/vessel-contact (compat) — contactRoutes
+                                               // handles path guards internally;
+                                               // vessel-contact + vessel/:imo are the only
+                                               // non-prefixed paths consumers use.
 
-app.use("/api",                 vesselRoutes);
-app.use("/api/preferred",       preferredRoutes);
-app.use("/api/watchlist",       watchlistRoutes);
-app.use("/api/fuel",            fuelRoutes);
-app.use("/api/ai-contact",      aiContactRoutes);
-app.use("/api/gemini",          geminiRoutes);    // Gemini AI-powered enrichment
+// FIX BUG 9 + BROKEN ROUTE B:
+// intelligenceRoutes was double-mounted. Removing the bare mount broke:
+//   /api/vessel/:imo/contact (intelligence.js: router.get("/vessel/:imo/contact"))
+//   /api/vessel/:imo/deep-research
+// AND intelligence.js has router.get("/intelligence/company") which when mounted at
+// /api/intelligence becomes /api/intelligence/intelligence/company — DOUBLE PATH BUG.
+// Fix: keep bare /api mount for backward-compat vessel/:imo/contact paths,
+// AND add a separate mount for the /intelligence/company and /intelligence/stats
+// sub-routes at the correct depth.
+app.use("/api",              intelligenceRoutes);  // /api/vessel/:imo/contact etc (compat)
+app.use("/api/intelligence", intelligenceRoutes);  // /api/intelligence/company etc
+// NOTE: the double-path for /api/intelligence/intelligence/company is a pre-existing
+// bug in intelligence.js route definitions themselves (router.get("/intelligence/company")
+// should be router.get("/company")). Fixed in intelligence.js separately.
 
-// FIX BUG 4: /api/agents now unambiguously reaches the AI agents router.
-// Previously contacts.js GET "/agents" mounted on bare "/api" intercepted it first.
-app.use("/api/agents",          aiAgentRoutes);   // Agentic AI — multi-step agents
+// vesselRoutes last (has wildcards like /vessels, /arrivals, /stats)
+app.use("/api",              vesselRoutes);
 
-// FIX BUG 7: Backend CORS proxy — replaces unreliable allorigins.win used by
-// GeminiContactFinder to scrape maritime data sites.
-app.use("/api/proxy",           proxyRoute);
-
-// Debug endpoint
-app.get("/debug/enrich/:imo", async (req, res) => {
-  try {
-    const { runPipeline } = require("./services/intelligence/pipeline");
-    const imo = parseInt(req.params.imo, 10);
-    if (!imo) return res.json({ error: "Invalid IMO" });
-    const result = await runPipeline({ imo, forceRefresh: true });
-    res.json({ success: true, data: result });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
+// ── Global error handler ──────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   logger.error("Unhandled error:", err.message);
   res.status(500).json({ success: false, error: err.message });
@@ -105,7 +108,7 @@ app.use((err, _req, res, _next) => {
 maritimeRouter.init(bigquery, BQ_LOCATION, T);
 
 app.listen(PORT, "0.0.0.0", () => {
-  logger.info(`🚢 MPA API v7 → http://localhost:${PORT}`);
+  logger.info(`🚢 MPA API v8 → http://localhost:${PORT}`);
   setTimeout(() => warmCache(), 3000);
 
   const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
