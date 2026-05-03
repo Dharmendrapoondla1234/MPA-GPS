@@ -23,8 +23,12 @@ const { callGeminiWithRetry, parseJSON } = require("../utils/gemini");
 const { bigquery, BQ_LOCATION } = require("../services/bigquery");
 const BQ_CONTACT_TABLE = "`photons-377606.MPA_Vercel.Vessel_contact_details`";
 
-const T_STEP  = 12_000;
-const T_TOTAL = 60_000;
+const T_STEP  = 15_000;   // per-step timeout
+// T_TOTAL raised to 120s: with serial queue a request may wait up to
+// 5s × (queued calls ahead) before getting a Gemini slot. At free tier
+// with 3 concurrent features this can take 15–30s just waiting, then
+// 5–10s for the actual call. 120s gives plenty of headroom.
+const T_TOTAL = 120_000;
 
 // ── Gemini prompt templates (used by stepGeminiEnrich below) ─────────────────
 function promptCompanyEmail(companyName, imo) {

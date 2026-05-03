@@ -18,11 +18,17 @@ function cacheTTL(url) {
 }
 
 // Timeout constants (ms)
-const TIMEOUT_DEFAULT  = 25_000;
-const TIMEOUT_CONTACTS = 90_000; // enrichment pipeline can take up to ~60s
+// Raised to account for serial Gemini queue wait time at free tier.
+// With 3 concurrent features each waiting 5s per slot, a queued request
+// can wait 15–30s before even reaching the API. 140s covers the worst case.
+const TIMEOUT_DEFAULT  = 30_000;
+const TIMEOUT_CONTACTS = 140_000;  // enrichment pipeline: queue wait + API call
+const TIMEOUT_AI       = 140_000;  // draft-email, fleet-insights, chat
 
 function timeoutForPath(path) {
-  if (path.includes("/vessel-contact") || path.includes("/contacts")) return TIMEOUT_CONTACTS;
+  if (path.includes("/vessel-contact") || path.includes("/contacts") ||
+      path.includes("/ai-contact"))      return TIMEOUT_CONTACTS;
+  if (path.includes("/ai/") || path.includes("/gemini/")) return TIMEOUT_AI;
   return TIMEOUT_DEFAULT;
 }
 
@@ -88,7 +94,7 @@ async function call(path, { bustCache = false, method = "GET", body } = {}) {
       return data;
     } catch (err) {
       if (err.name === "AbortError")
-        throw new Error("Request timed out — the enrichment pipeline took too long. Please try again.");
+        throw new Error("Request timed out — the AI is busy, please try again in a moment.");
       if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))
         throw new Error("Connecting to server… will retry automatically");
       throw err;
@@ -193,7 +199,8 @@ export async function fetchVesselContacts(imo, {
 export async function fetchPortAgents(portCode, vesselType = "", bustCache = false) {
   const p = new URLSearchParams({ port: portCode });
   if (vesselType) p.set("vesselType", vesselType);
-  return call(`/contacts/agents?${p}`, { bustCache });
+  // FIX BUG 4: renamed from /contacts/agents → /contacts/port-agents
+  return call(`/contacts/port-agents?${p}`, { bustCache });
 }
 
 /**
