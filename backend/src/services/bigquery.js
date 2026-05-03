@@ -187,10 +187,12 @@ async function getLatestVessels({
   const lim = Math.min(parseInt(limit) || 5000, 10000);
 
   if (dbt) {
-    // Use 30-day window so vessels show even when AIS pipeline hasn't refreshed recently.
-    // Staleness is shown to users via is_stale / minutes_since_last_ping fields.
+    // FIX: Widened from 30 to 90 days. The BQ pipeline may have a lag or
+    // the timestamp column stores SGT (UTC+8) which can shift the effective window.
+    // If the 90-day query also returns 0, a second query with NO time filter
+    // is attempted so at least cached/historical data is shown.
     cond.push(
-      `last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)`,
+      `last_position_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)`,
     );
     const where = `WHERE ${cond.join(" AND ")}`;
     query = `
@@ -235,10 +237,39 @@ async function getLatestVessels({
   }
 
   const t0 = Date.now();
-  const [rows] = await bigquery.query({ query, location: BQ_LOCATION });
+  let [rows] = await bigquery.query({ query, location: BQ_LOCATION });
   logger.info(
     `[BQ] getLatestVessels (${dbt ? "dbt" : "legacy"}) → ${rows.length} rows in ${Date.now() - t0}ms`,
   );
+
+  // FIX: If time-filtered query returns 0 rows, try without time filter.
+  // This handles the case where the AIS pipeline is delayed or timestamps
+  // are stored in a non-UTC timezone causing the window to miss recent data.
+  if (rows.length === 0 && dbt && !isFiltered) {
+    logger.warn("[BQ] 0 rows with time filter — retrying without time constraint");
+    try {
+      const fallbackCond = cond.filter(c => !c.includes("TIMESTAMP_SUB"));
+      const fallbackWhere = fallbackCond.length ? `WHERE ${fallbackCond.join(" AND ")}` : "";
+      const fallbackQuery = `
+        SELECT * EXCEPT (rn)
+        FROM (
+          SELECT *,
+            ROW_NUMBER() OVER (PARTITION BY imo_number ORDER BY last_position_at DESC) AS rn
+          FROM ${T.VESSELS}
+          ${fallbackWhere}
+        )
+        WHERE rn = 1
+        ORDER BY last_position_at DESC
+        LIMIT ${lim}`;
+      const [fallbackRows] = await bigquery.query({ query: fallbackQuery, location: BQ_LOCATION });
+      if (fallbackRows.length > 0) {
+        logger.info(`[BQ] fallback (no time filter) → ${fallbackRows.length} rows`);
+        rows = fallbackRows;
+      }
+    } catch (fe) {
+      logger.warn(`[BQ] fallback query failed: ${fe.message}`);
+    }
+  }
 
   // Diagnostic: if 0 rows, log the most recent timestamp to help debug data pipeline
   if (rows.length === 0) {
@@ -249,9 +280,17 @@ async function getLatestVessels({
         query: `SELECT MAX(${tsCol}) AS max_ts, COUNT(*) AS total_rows FROM ${diagTable}`,
         location: BQ_LOCATION,
       });
+      // FIX: BigQuery returns timestamps as objects with .value (epoch ms string).
+      // Calling toString() or JSON.stringify() gives [object Object] — extract .value.
+      const rawTs = diag?.max_ts;
+      const tsStr = rawTs == null
+        ? "null"
+        : (typeof rawTs === "object" && rawTs.value)
+          ? new Date(parseInt(rawTs.value)).toISOString()
+          : String(rawTs);
       logger.warn(
         `[BQ] 0 vessels — table has ${diag?.total_rows ?? "?"} total rows, ` +
-        `most recent ${tsCol}: ${diag?.max_ts ?? "null"} ` +
+        `most recent ${tsCol}: ${tsStr} ` +
         `(current UTC: ${new Date().toISOString()})`
       );
     } catch (e) {

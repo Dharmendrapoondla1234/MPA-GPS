@@ -17,20 +17,93 @@ const express = require("express");
 const router  = express.Router();
 const logger  = require("../utils/logger");
 const { lookupPortAgents, rankAgents } = require("../services/portAgentDB");
+const { callGeminiWithRetry, parseJSON } = require("../utils/gemini");
+
+// BigQuery client for Vessel_contact_details table
+const { bigquery, BQ_LOCATION } = require("../services/bigquery");
+const BQ_CONTACT_TABLE = "`photons-377606.MPA_Vercel.Vessel_contact_details`";
 
 const T_STEP  = 12_000;
 const T_TOTAL = 60_000;
 
+// ── Gemini prompt templates (used by stepGeminiEnrich below) ─────────────────
+function promptCompanyEmail(companyName, imo) {
+  return `You are a maritime shipping researcher.
+Find the official contact email address for this shipping company.
+
+Company name: ${companyName}
+IMO number: ${imo || "unknown"}
+
+Return ONLY a JSON object — no explanation, no markdown:
+{
+  "email": "info@company.com",
+  "phone": "+1234567890",
+  "website": "www.company.com",
+  "confidence": "high"
+}
+
+Rules:
+- Use only well-known, publicly verified information
+- If not found, return null for that field
+- confidence: "high" = official email confirmed, "medium" = likely correct, "low" = guessed`;
+}
+
+function promptVesselResearch(vesselName, imo) {
+  return `You are a maritime vessel research assistant.
+Research this vessel and return current ownership details.
+
+Vessel name: ${vesselName || "unknown"}
+IMO: ${imo || "unknown"}
+
+Return ONLY a JSON object — no explanation, no markdown:
+{
+  "owner": "Company Name",
+  "manager": "Manager Name",
+  "flag": "Panama",
+  "email": "contact@company.com",
+  "phone": "+1234567890",
+  "website": "www.company.com"
+}
+
+Rules:
+- Return null for any field you are not confident about
+- Only use publicly known maritime registry information`;
+}
+
+function promptDraftEmail(vesselName, imo, ownerName, portName) {
+  return `Write a professional port services email to the vessel operator.
+
+Vessel: ${vesselName || "unknown"}
+IMO: ${imo || "unknown"}
+Owner/Operator: ${ownerName || "unknown"}
+Port: ${portName || "Singapore"}
+
+Write a short, professional 3-paragraph email offering port services.
+Format: Subject line first (prefix with "Subject: "), then blank line, then body.
+Keep it under 150 words. Be specific, professional, and concise.`;
+}
+
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const PHONE_RE = /(?:\+?[\d][\d\s\-()\.\/]{5,18}\d)/g;
 
+// FIX: Comprehensive blocklist — prevents search engine / tracker / CDN emails
+// from leaking into contact results (e.g. error-lite@duckduckgo.com).
+const EMAIL_BLOCKLIST = [
+  "example", "yourdomain", "@2x", ".png", ".jpg", ".gif", ".svg",
+  "sentry", "wix", "cdn", "noreply", "no-reply", "unsubscribe",
+  "duckduckgo", "google", "bing", "yahoo", "baidu", "yandex",
+  "w3.org", "schema.org", "cloudflare", "amazonaws", "facebook",
+  "twitter", "linkedin", "instagram", "tiktok", "analytics",
+  "pixel", "track", "beacon", "localhost", "test@", "user@",
+  "admin@admin", "info@info", "webmaster@", "postmaster@",
+  "marinetraffic", "wikipedia", "vessel", "equasis",
+];
+
 function extractEmails(text) {
-  return [...new Set((text || "").match(EMAIL_RE) || [])].filter(e =>
-    !e.includes("example") && !e.includes("yourdomain") &&
-    !e.includes("@2x") && !e.includes(".png") && !e.includes("sentry") &&
-    !e.includes("wix") && !e.includes("cdn") && !e.includes("noreply") &&
-    e.length < 80
-  );
+  return [...new Set((text || "").match(EMAIL_RE) || [])].filter(e => {
+    const lower = e.toLowerCase();
+    return e.length < 80 && !EMAIL_BLOCKLIST.some(bad => lower.includes(bad));
+  });
 }
 function extractPhones(text) {
   return [...new Set((text || "").match(PHONE_RE) || [])]
@@ -120,6 +193,89 @@ async function safeFetch(url, opts, ms) {
       ...(opts || {}),
     });
   } finally { clearTimeout(t); }
+}
+
+// ── STEP 0: BigQuery Vessel_contact_details (fastest, most accurate) ─────────
+// Queries the SCD Type 3 contact table — returns current_* fields only.
+// This is checked FIRST before any web scraping to avoid unnecessary API calls.
+async function stepBigQueryContacts(imo) {
+  if (!imo) return null;
+  try {
+    const query = `
+      SELECT
+        current_vessel_name        AS vessel_name,
+        current_flag               AS flag,
+        current_registered_owner   AS owner_name,
+        current_operator_comm_mgr  AS manager_name,
+        current_ship_manager_ism   AS ship_manager,
+        current_owner_email        AS email,
+        current_owner_phone        AS phone,
+        current_owner_website      AS website,
+        current_manager_email      AS manager_email,
+        current_manager_phone      AS manager_phone,
+        current_manager_website    AS manager_website
+      FROM ${BQ_CONTACT_TABLE}
+      WHERE imo_no = @imo
+      LIMIT 1`;
+
+    const [rows] = await bigquery.query({
+      query,
+      location: BQ_LOCATION,
+      params: { imo: String(imo) },
+    });
+
+    if (!rows || rows.length === 0) return null;
+    const row = rows[0];
+
+    // Only return if we actually have meaningful data
+    if (!row.owner_name && !row.vessel_name) return null;
+
+    logger.info(`[step/bq-contacts] IMO ${imo}: owner="${row.owner_name || "—"}" email="${row.email || "—"}"`);
+
+    return {
+      vessel_name:  row.vessel_name  || null,
+      flag:         row.flag         || null,
+      owner_name:   row.owner_name   || null,
+      manager_name: row.manager_name || null,
+      ship_manager: row.ship_manager || null,
+      email:        row.email        || null,
+      phone:        row.phone        || null,
+      website:      row.website      || null,
+      manager_email:   row.manager_email   || null,
+      manager_phone:   row.manager_phone   || null,
+      manager_website: row.manager_website || null,
+      confidence: (row.email && row.owner_name) ? 0.95 : (row.owner_name ? 0.75 : 0.50),
+      source: "bigquery_contacts",
+    };
+  } catch (err) {
+    // Don't crash the whole pipeline if BQ is unavailable
+    logger.warn(`[step/bq-contacts] ${err.message && err.message.slice(0, 100)}`);
+    return null;
+  }
+}
+
+// ── STEP 9b: Gemini AI enrichment (called when web steps find name but no email) ──
+async function stepGeminiEnrich(companyName, imo) {
+  if (!companyName) return null;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const prompt = promptCompanyEmail(companyName, imo);
+    const raw    = await callGeminiWithRetry(null, prompt, 400, { maxRetries: 2, baseDelayMs: 2000 });
+    const data   = parseJSON(raw);
+    if (!data || !data.email) return null;
+    logger.info(`[step/gemini] "${companyName}": email=${data.email}`);
+    return {
+      email:   data.email   || null,
+      phone:   data.phone   || null,
+      website: data.website || null,
+      confidence: 0.65,
+      source: "gemini_ai",
+    };
+  } catch (err) {
+    logger.warn(`[step/gemini] ${err.message && err.message.slice(0, 80)}`);
+    return null;
+  }
 }
 
 // STEP 1: Equasis enricher (flattened correctly)
@@ -390,21 +546,39 @@ async function runEnrichment(params) {
     r.source        = addSrc(r.source, src.source);
   }
 
-  // Phase 1: Identity (parallel)
-  const [eq, mt, vf] = await Promise.all([
-    imoInt ? safe("equasis",      function() { return stepEquasis(imoInt, name, curPort, nextPort, vtype); }) : null,
-    imoInt ? safe("marinetraffic",function() { return stepMarineTraffic(imoInt); }) : null,
-    imoInt ? safe("vesselfinder", function() { return stepVesselFinder(imoInt); })  : null,
-  ]);
-  [eq, mt, vf].forEach(merge);
-
-  if (!r.owner_name && imoInt) {
-    merge(await safe("fleetmon", function() { return stepFleetMon(imoInt); }));
+  // ── Phase 0: BigQuery contact table (fastest — checked first) ──────────────
+  // If BQ has current owner + email, we can skip most web scraping entirely.
+  const bqResult = await safe("bq-contacts", function() { return stepBigQueryContacts(imoInt); });
+  if (bqResult) {
+    merge(bqResult);
+    // Also store manager contacts separately for the response
+    if (bqResult.manager_email) r.manager_email = bqResult.manager_email;
+    if (bqResult.manager_phone) r.manager_phone = bqResult.manager_phone;
+    if (bqResult.manager_website) r.manager_website = bqResult.manager_website;
   }
 
-  // Phase 2: Contact discovery
+  // If BQ gave us both owner name AND email, skip all web scraping
+  const bqComplete = !!(r.owner_name && r.email);
+
+  // ── Phase 1: Identity (parallel) — skip if BQ already complete ─────────────
+  let eq = null;
+  if (!bqComplete) {
+    const [eqR, mt, vf] = await Promise.all([
+      imoInt ? safe("equasis",       function() { return stepEquasis(imoInt, name, curPort, nextPort, vtype); }) : null,
+      imoInt ? safe("marinetraffic", function() { return stepMarineTraffic(imoInt); }) : null,
+      imoInt ? safe("vesselfinder",  function() { return stepVesselFinder(imoInt); })  : null,
+    ]);
+    eq = eqR;
+    [eq, mt, vf].forEach(merge);
+
+    if (!r.owner_name && imoInt) {
+      merge(await safe("fleetmon", function() { return stepFleetMon(imoInt); }));
+    }
+  }
+
+  // ── Phase 2: Contact discovery — only if BQ didn't already provide email ────
   const company = r.owner_name || r.manager_name || name;
-  if (company && (!r.email || !r.website)) {
+  if (!bqComplete && company && (!r.email || !r.website)) {
     // Known domain lookup
     const knownDomain = lookupKnownDomain(company);
     if (knownDomain && !r.website) {
@@ -439,16 +613,13 @@ async function runEnrichment(params) {
       merge(await safe("bing-search", function() { return stepBingSearch(company); }));
     }
 
-    // Domain guess + scrape as last resort
-    if (!r.email && !r.website) {
-      const guessed = buildDomainGuess(company);
-      if (guessed) {
-        merge(await safe("scrape-guessed", function() { return stepWebsiteScrape(guessed); }));
-      }
+    // Gemini AI as final fallback — only if we have company name but no email
+    if (!r.email) {
+      merge(await safe("gemini-enrich", function() { return stepGeminiEnrich(company, imoInt); }));
     }
-  }
+  } // ← closes: if (!bqComplete && company && (!r.email || !r.website))
 
-  // Phase 3: Port agents
+  // ── Phase 3: Port agents ──────────────────────────────────────────────────
   const portAgents = await stepPortAgents(curPort, nextPort, vtype, r.owner_name);
   // Merge port agents from equasis result
   if (eq && eq.port_agents && eq.port_agents.length) {

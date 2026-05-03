@@ -55,11 +55,23 @@ function cacheSet(map, k, d) { map.set(k, { data: d, ts: Date.now() }); return d
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const PHONE_RE = /(?:\+?[\d\s\-().]{7,20})/g;
 
+// FIX: Comprehensive blocklist prevents search engine / tracker emails
+// (e.g. error-lite@duckduckgo.com) from leaking into contact results.
+const EMAIL_BLOCKLIST = [
+  "example", "yourdomain", "@2x", ".png", ".jpg", ".gif", ".svg",
+  "sentry", "wix", "cdn", "noreply", "no-reply", "unsubscribe",
+  "duckduckgo", "google", "bing", "yahoo", "baidu", "yandex",
+  "w3.org", "schema.org", "cloudflare", "amazonaws", "facebook",
+  "twitter", "linkedin", "instagram", "tiktok", "analytics",
+  "pixel", "track", "beacon", "localhost", "test@", "user@",
+  "admin@admin", "info@info", "webmaster@", "postmaster@",
+];
+
 function extractEmails(text) {
-  return [...new Set((text || "").match(EMAIL_RE) || [])].filter(e =>
-    !e.includes("example") && !e.includes("yourdomain") &&
-    !e.includes("@2x") && !e.includes(".png") && e.length < 80
-  );
+  return [...new Set((text || "").match(EMAIL_RE) || [])].filter(e => {
+    const lower = e.toLowerCase();
+    return e.length < 80 && !EMAIL_BLOCKLIST.some(bad => lower.includes(bad));
+  });
 }
 function extractPhones(text) {
   return [...new Set((text || "").match(PHONE_RE) || [])]
