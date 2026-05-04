@@ -24,7 +24,7 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stats, vessels: vessels.slice(0, 50) }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(140_000),  // 140s — accounts for queue wait time
       });
       const data = await res.json();
       if (data.insights) {
@@ -50,7 +50,7 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ vesselData: topVessel }),
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(140_000),
       });
       const data = await res.json();
       if (data.analysis) {
@@ -63,12 +63,21 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
     setLoadingFuel(false);
   }, [vessels]);
 
+  // FIX: Previously both loadFleetInsights() and loadFuelAnalysis() fired
+  // simultaneously the moment the panel opened, consuming 2 quota slots at once.
+  // Combined with any other Gemini call (draft-email, chat) this immediately
+  // exhausted the 15 RPM free-tier limit.
+  //
+  // Fix: only load AI insights when the panel opens (one call).
+  // Fuel analysis is now LAZY — only fetches when the user clicks the Fuel tab.
   useEffect(() => {
     if (isOpen && vessels?.length) {
-      loadFleetInsights();
-      loadFuelAnalysis();
+      // Small delay so panel animation completes and any in-flight request
+      // from the previous action (e.g. draft-email) has time to clear the queue.
+      const t = setTimeout(() => loadFleetInsights(), 1500);
+      return () => clearTimeout(t);
     }
-  }, [isOpen, vessels?.length, loadFleetInsights, loadFuelAnalysis]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen, vessels?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Compute local analytics
   const analytics = computeAnalytics(vessels || []);
@@ -91,7 +100,13 @@ export default function AIFleetIntelligence({ vessels, stats, isOpen, onClose })
         <div className="fi-tabs">
           {["insights", "analytics", "fuel", "ml"].map(s => (
             <button key={s} className={`fi-tab ${activeSection === s ? "active" : ""}`}
-              onClick={() => setActiveSection(s)}>
+              onClick={() => {
+                setActiveSection(s);
+                // Lazy load fuel analysis only when Fuel tab is first clicked
+                if (s === "fuel" && !fuelAnalysis && !loadingFuel) {
+                  loadFuelAnalysis();
+                }
+              }}>
               {s === "insights" ? "🧠 AI Insights" : s === "analytics" ? "📊 Analytics" : s === "fuel" ? "⛽ Fuel" : "🤖 ML Predict"}
             </button>
           ))}

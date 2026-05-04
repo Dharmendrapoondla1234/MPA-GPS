@@ -195,12 +195,10 @@ router.get("/status", (_req, res) => {
   res.json({
     gemini: {
       configured: !!gKey,
-      // Only confirmed-working free-tier models (gemini-1.5-* return 404 on free keys)
-      models: [
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-2.5-flash-preview-04-17",
-      ],
+      // Single confirmed-working free-tier model.
+      // gemini-2.0-flash-lite / gemini-2.5-preview / gemini-1.5-* all
+      // return 404 or share the same quota pool — using primary only.
+      model: "gemini-2.0-flash",
       key_preview: gKey ? `${gKey.slice(0, 8)}...` : null,
       free_tier: { rpm: 15, rpd: 1500 },
       setup_url: "https://aistudio.google.com/apikey",
