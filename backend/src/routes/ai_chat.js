@@ -81,6 +81,95 @@ router.post("/chat", async (req, res) => {
   }
 });
 
+// ── Local email template engine ───────────────────────────────────────────────
+// Generates a professional maritime email without any API call.
+// Used as: (1) instant fallback when Gemini is rate-limited,
+//          (2) immediate response while Gemini result is being cached.
+function buildLocalEmail(purpose, vesselName, imoNumber, companyName, portName, tone, details) {
+  const vessel  = vesselName  || "your vessel";
+  const company = companyName || "your organisation";
+  const port    = portName    || "Singapore";
+  const imo     = imoNumber   ? ` (IMO ${imoNumber})` : "";
+
+  const toneOpener = {
+    urgent:       "We are writing with urgency regarding",
+    executive:    "We wish to bring to your attention",
+    friendly:     "We hope this message finds you well. We are reaching out regarding",
+    technical:    "Please refer to the following technical correspondence regarding",
+    direct:       "This email concerns",
+    consultative: "Following our assessment, we would like to discuss",
+  }[tone] || "We are writing regarding";
+
+  // Purpose-specific templates
+  const templates = {
+    port_services: {
+      subject: `Port Services Offer — ${vessel}${imo} | ${port}`,
+      body: `${toneOpener} port services for ${vessel}${imo} at ${port}.
+
+Our team at Kaizentric Technologies provides comprehensive port agency services including berthing arrangements, customs clearance, crew changes, bunker coordination, and 24/7 port operations support.
+
+For ${vessel}'s upcoming call at ${port}, we can ensure efficient turnaround, competitive tariffs, and dedicated support from arrival to departure. Our local expertise and established relationships with MPA and port authorities guarantee smooth operations.
+
+We would welcome the opportunity to serve as your preferred port agent. Please reply to this email or contact us directly to discuss your requirements.${details ? `\n\nAdditional context: ${details}` : ""}`,
+    },
+    bunker_inquiry: {
+      subject: `Bunker Supply Enquiry — ${vessel}${imo} | ${port}`,
+      body: `${toneOpener} bunker supply requirements for ${vessel}${imo} during its upcoming port call at ${port}.
+
+We request your competitive quotation for the following grades: VLSFO, MGO, and HSFO (if applicable). Please provide your best all-in rates, quantity flexibility, and earliest delivery window.
+
+${vessel} is managed by ${company}. All relevant vessel certificates and compliance documents are available upon request. We require full MARPOL compliance and valid BDN documentation.
+
+Kindly revert with your offer at your earliest convenience so we may confirm arrangements ahead of the vessel's ETA.${details ? `\n\nAdditional notes: ${details}` : ""}`,
+    },
+    charter_inquiry: {
+      subject: `Charter Enquiry — ${vessel}${imo}`,
+      body: `${toneOpener} the potential charter of ${vessel}${imo} operated by ${company}.
+
+We are interested in discussing charter arrangements for this vessel. Could you please provide the vessel's current availability, charter rate indications, and last cargo details? We are also interested in the vessel's trading history and any upcoming survey dates.
+
+Our requirements include full vessel details, P&I club information, and class certificates. Subject to satisfactory inspection and documentation, we are prepared to move forward expeditiously.
+
+We look forward to your prompt response.${details ? `\n\nSpecific requirements: ${details}` : ""}`,
+    },
+    crewing: {
+      subject: `Crew Change Coordination — ${vessel}${imo} | ${port}`,
+      body: `${toneOpener} crew change arrangements for ${vessel}${imo} at ${port}.
+
+We require coordination support for an upcoming crew change. Please advise on current port authority requirements, quarantine protocols if applicable, and your agency fees for handling crew logistics.
+
+We will need assistance with immigration formalities, transport arrangements between the vessel and airport, hotel accommodation if required, and any medical certificates or documentation.
+
+Please confirm your availability to handle this crew change and provide a proforma disbursement account.${details ? `\n\nDetails: ${details}` : ""}`,
+    },
+    default: {
+      subject: `Maritime Correspondence — ${vessel}${imo} | ${company}`,
+      body: `${toneOpener} ${purpose.toLowerCase()} in connection with ${vessel}${imo}, managed by ${company}.
+
+We would appreciate your prompt attention to this matter. Our team is available to discuss requirements, provide additional documentation, or arrange a call at your convenience.
+
+Please do not hesitate to contact us should you require any further information or clarification.${details ? `\n\nAdditional context: ${details}` : ""}`,
+    },
+  };
+
+  // Match purpose to template
+  const purposeLower = purpose.toLowerCase();
+  let tmpl = templates.default;
+  if (purposeLower.includes("port") || purposeLower.includes("agent") || purposeLower.includes("service"))
+    tmpl = templates.port_services;
+  else if (purposeLower.includes("bunker") || purposeLower.includes("fuel"))
+    tmpl = templates.bunker_inquiry;
+  else if (purposeLower.includes("charter") || purposeLower.includes("hire"))
+    tmpl = templates.charter_inquiry;
+  else if (purposeLower.includes("crew") || purposeLower.includes("manning"))
+    tmpl = templates.crewing;
+
+  return {
+    subject: tmpl.subject,
+    body: tmpl.body.trim(),
+  };
+}
+
 // ── POST /api/ai/draft-email ──────────────────────────────────────────────────
 // Cache TTL: 10 min — same vessel + company + purpose = same email
 router.post("/draft-email", async (req, res) => {
@@ -127,26 +216,46 @@ router.post("/draft-email", async (req, res) => {
         'Return ONLY this JSON (no other text): {"subject":"...","body":"..."}',
       ].filter(Boolean).join("\n");
 
-      const { text, provider } = await callLLM(systemPrompt, userPrompt, 700);
+      try {
+        // Try Gemini first
+        const { text, provider } = await callLLM(systemPrompt, userPrompt, 700);
+        let email = parseJSON(text);
+        if (!email || !email.subject || !email.body) {
+          const subMatch  = /subject[:\s"]+([^\n"]{5,100})/i.exec(text);
+          const bodyMatch = /body[:\s"]+([^"]{20,})/i.exec(text) || /\n\n([\s\S]{20,})/s.exec(text);
+          email = {
+            subject: subMatch?.[1]?.trim()  || `Re: ${companyName || vesselName || "Maritime Business"}`,
+            body:    bodyMatch?.[1]?.trim() || text,
+          };
+        }
+        return { success: true, email, provider, raw: text };
 
-      let email = parseJSON(text);
-      if (!email || !email.subject || !email.body) {
-        const subMatch  = /subject[:\s"]+([^\n"]{5,100})/i.exec(text);
-        const bodyMatch = /body[:\s"]+([^"]{20,})/i.exec(text) || /\n\n([\s\S]{20,})/s.exec(text);
-        email = {
-          subject: subMatch?.[1]?.trim()  || `Re: ${companyName || vesselName || "Maritime Business"}`,
-          body:    bodyMatch?.[1]?.trim() || text,
+      } catch (geminiErr) {
+        // Gemini rate-limited or unavailable — use local template instantly
+        // This ensures the user ALWAYS gets a usable email draft, never an error
+        logger.warn(`[ai-email] Gemini unavailable (${geminiErr.message.slice(0, 60)}), using local template`);
+        const email = buildLocalEmail(purpose, vesselName, imoNumber, companyName, portName, tone, details);
+        return {
+          success:  true,
+          email,
+          provider: "local_template",
+          note:     "Generated from local template — Gemini quota temporarily exhausted. This is a professional draft ready to use.",
         };
       }
-
-      return { success: true, email, provider, raw: text };
     });
 
     toCache(key, result, 10 * 60 * 1000); // 10 min TTL
     return res.json(result);
   } catch (err) {
     logger.error("[ai-email]", err.message);
-    return res.status(500).json({ success: false, error: err.message });
+    // Last resort — never show a bare error, always return a template
+    const email = buildLocalEmail(
+      req.body?.purpose || "port services",
+      req.body?.vesselName, req.body?.imoNumber,
+      req.body?.companyName, req.body?.portName,
+      req.body?.tone || "professional", req.body?.details
+    );
+    return res.json({ success: true, email, provider: "local_template", error: err.message });
   }
 });
 
